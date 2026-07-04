@@ -147,9 +147,25 @@ int main(int argc, char **argv) {
 
     buf[received]='\0';
     
-    printf("---- response ----\n");
-    printf("%s\n", buf);
-    printf("---- end response ----\n");
+    char *status_end = strstr(buf,"\r\n"); //find statusline
+
+    if (status_end==NULL){
+        fprintf(stderr,"invalid response: no status line\n");
+        close(sockfd);
+        return 1;
+    }
+
+    *status_end = '\0'; // HTTP/1.0 200 OK\r\n -> HTTP/1.0 200 OK\0
+    
+    printf("status line = %s\n",buf);
+
+    char *version = strtok(buf," ");
+    char *status = strtok(NULL," ");
+    char *explanation = strtok(NULL,"");
+
+    printf("version     = %s\n", version);
+    printf("status      = %s\n", status);
+    printf("explanation = %s\n", explanation);
 
 
     close(sockfd);
