@@ -155,17 +155,20 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    *status_end = '\0'; // HTTP/1.0 200 OK\r\n -> HTTP/1.0 200 OK\0
     
-    printf("status line = %s\n",buf);
+    char *body = strstr(buf,"\r\n\r\n");
+    if (body==NULL) {
+        fprintf(stderr,"invalid response: no header/body separator\n");
+        close(sockfd);
+        return 1;
+    }
 
-    char *version = strtok(buf," ");
-    char *status = strtok(NULL," ");
-    char *explanation = strtok(NULL,"");
+    body += 4;
+printf("---- body ----\n");
+printf("%s\n", body);
 
-    printf("version     = %s\n", version);
-    printf("status      = %s\n", status);
-    printf("explanation = %s\n", explanation);
+
+
 
 
     close(sockfd);
