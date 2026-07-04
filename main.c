@@ -133,7 +133,24 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    printf("send %zd bytes\n",sent);
+    // printf("send %zd bytes\n",sent);
+
+    char buf[4096];
+    
+    ssize_t received = recv(sockfd,buf,sizeof(buf)-1,0);
+
+    if (received == -1){
+        perror("recv");
+        close(sockfd);
+        return 1;
+    }
+
+    buf[received]='\0';
+    
+    printf("---- response ----\n");
+    printf("%s\n", buf);
+    printf("---- end response ----\n");
+
 
     close(sockfd);
 
