@@ -125,9 +125,15 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    printf("---- request ----\n");
-    printf("%s", request);
-    printf("---- end request ----\n");
+    ssize_t sent=send(sockfd,request,strlen(request),0);
+
+    if (sent==-1){
+        perror("send");
+        close(sockfd);
+        return 1;
+    }
+
+    printf("send %zd bytes\n",sent);
 
     close(sockfd);
 
