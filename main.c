@@ -107,6 +107,28 @@ int main(int argc, char **argv) {
 
     printf("connect to %s:80\n",url.host);
 
+    char request[2048];
+    
+    int n=snprintf(
+        request,
+        sizeof(request),
+        "GET %s HTTP/1.0\r\n"
+        "Host: %s\r\n"
+        "\r\n",
+        url.path,
+        url.host
+    );
+
+    if (n<0 || n>=(int)sizeof(request)) {
+        fprintf(stderr,"request too long\n");
+        close(sockfd);
+        return 1;
+    }
+
+    printf("---- request ----\n");
+    printf("%s", request);
+    printf("---- end request ----\n");
+
     close(sockfd);
 
     return 0;
