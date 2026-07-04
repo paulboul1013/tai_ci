@@ -83,6 +83,28 @@ int connect_to_host(const char *host) {
     return -1;
 }
 
+int send_all(int sockfd,const char *data,size_t len) {
+    size_t sent_total=0;
+
+    while (sent_total < len) {
+        ssize_t sent = send(sockfd,data+sent_total,len-sent_total,0);
+
+        if (sent==-1) {
+            perror("sending error");
+            return -1;
+        }
+
+        if (sent==0){
+            fprintf(stderr,"send returned 0\n");
+            return -1;
+        }
+
+        sent_total += (size_t)sent;
+    }
+
+    return 0;
+}
+
 int main(int argc, char **argv) {
 
     if (argc !=2 ){
@@ -125,15 +147,12 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    ssize_t sent=send(sockfd,request,strlen(request),0);
-
-    if (sent==-1){
-        perror("send");
+    if (send_all(sockfd,request,strlen(request))!=0){
         close(sockfd);
         return 1;
     }
 
-    // printf("send %zd bytes\n",sent);
+    printf("send %zd bytes\n",strlen(request));
 
     char buf[4096];
     
@@ -164,8 +183,8 @@ int main(int argc, char **argv) {
     }
 
     body += 4;
-printf("---- body ----\n");
-printf("%s\n", body);
+    printf("---- body ----\n");
+    printf("%s\n", body);
 
 
 
