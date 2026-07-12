@@ -254,12 +254,12 @@ void parse_headers(char *response) {
     printf("---- end headers ----\n");
 }
 
-void copy_body(const char *response) {
+char* copy_body(const char *response) {
     const char *body = strstr(response,"\r\n\r\n");
     
     if (body==NULL){
         fprintf(stderr,"invalid response: no body\n");
-        return;
+        return NULL;
     }
 
     body += 4; //skip \r\n\r\n
@@ -279,13 +279,13 @@ void copy_body(const char *response) {
 }
 
 char *request(URL *url){
-    int sockfd = connect_to_host(url.host);
+    int sockfd = connect_to_host(url->host);
     if (sockfd==-1){
         fprintf(stderr,"connect failed\n");
-        return 1;
+        return NULL;
     }
 
-    printf("connect to %s:80\n",url.host);
+    printf("connect to %s:80\n",url->host);
 
     char request[2048];
     
@@ -295,14 +295,14 @@ char *request(URL *url){
         "GET %s HTTP/1.0\r\n"
         "Host: %s\r\n"
         "\r\n",
-        url.path,
-        url.host
+        url->path,
+        url->host
     );
 
     if (n<0 || n>=(int)sizeof(request)) {
         fprintf(stderr,"request too long\n");
         close(sockfd);
-        return 1;
+        return NULL;
     }
 
     printf("---- request ----\n");
@@ -312,7 +312,7 @@ char *request(URL *url){
 
     if (send_all(sockfd,request,strlen(request))!=0){
         close(sockfd);
-        return 1;
+        return NULL;
     }
 
     size_t response_len=0;
@@ -322,7 +322,7 @@ char *request(URL *url){
     close(sockfd);
 
     if (response==NULL){
-        return 1;
+        return NULL;
     }
 
     printf("received %zu bytes\n",response_len);
