@@ -338,6 +338,22 @@ char *request(URL *url){
     return content;
 }
 
+void show(const char *body){
+    int in_tag=0;
+
+    for(size_t i=0;body[i]!='\0';i++){
+        char c=body[i];
+
+        if (c=='<'){
+            in_tag=1;
+        } else if (c=='>'){
+            in_tag=0;
+        }else if (!in_tag){
+            putchar(c);
+        }
+    }
+}
+
 int main(int argc, char **argv) {
 
     if (argc !=2 ){
