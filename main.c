@@ -151,6 +151,27 @@ char *read_response(int sockfd,size_t *out_len) {
     return response;
 }
 
+void parse_status_line(char *response) {
+    char *line_end = strstr(response,"\r\n");
+
+    if (line_end==NULL){
+        fprintf(stderr,"invalid response: no status line\n");
+        return;
+    }
+
+    *line_end = '\0'; //HTTP/1.1 200 OK\r\n to HTTP/1.1 200 OK \0\n for split by " "
+    
+    char *version = strtok(response," ");
+    char *status = strtok(NULL," ");
+    char *explanation = strtok(NULL," ");
+    
+    printf("version     = %s\n", version ? version : "");
+    printf("status      = %s\n", status ? status : "");
+    printf("explanation = %s\n", explanation ? explanation : "");
+
+    *line_end = '\r'; //recover \0\n to \r\n
+}
+
 int main(int argc, char **argv) {
 
     if (argc !=2 ){
