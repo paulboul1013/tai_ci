@@ -254,8 +254,8 @@ void parse_headers(char *response) {
     printf("---- end headers ----\n");
 }
 
-void print_body(char *response) {
-    char *body = strstr(response,"\r\n\r\n");
+void copy_body(const char *response) {
+    const char *body = strstr(response,"\r\n\r\n");
     
     if (body==NULL){
         fprintf(stderr,"invalid response: no body\n");
@@ -264,9 +264,18 @@ void print_body(char *response) {
 
     body += 4; //skip \r\n\r\n
 
-    printf("---- body ----\n");
-    printf("%s\n",body);
-    printf("---- end body ----\n");
+    size_t body_len = strlen(body);
+
+    char *content = malloc(body_len+1);
+    if (content==NULL){
+        perror("malloc error");
+        return NULL;
+    }
+
+    memcpy(content,body,body_len);
+    content[body_len] = '\0';
+
+    return content;
 }
 
 int main(int argc, char **argv) {
