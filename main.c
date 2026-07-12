@@ -278,22 +278,7 @@ void copy_body(const char *response) {
     return content;
 }
 
-int main(int argc, char **argv) {
-
-    if (argc !=2 ){
-        fprintf(stderr,"usage: %s http://example.org/path\n",argv[0]);
-        return 1;
-    }
-
-    URL url;
-    if (parse_url(&url,argv[1]) !=0){
-        return 1;
-    }
-
-    printf("scheme = %s\n",url.scheme);
-    printf("host   = %s\n", url.host);
-    printf("path   = %s\n", url.path);
-
+char *request(URL *url){
     int sockfd = connect_to_host(url.host);
     if (sockfd==-1){
         fprintf(stderr,"connect failed\n");
@@ -314,15 +299,16 @@ int main(int argc, char **argv) {
         url.host
     );
 
-    printf("---- request ----\n");
-    printf("%s\n",request);
-    printf("---- end request ----\n");
-
     if (n<0 || n>=(int)sizeof(request)) {
         fprintf(stderr,"request too long\n");
         close(sockfd);
         return 1;
     }
+
+    printf("---- request ----\n");
+    printf("%s\n",request);
+    printf("---- end request ----\n");
+
 
     if (send_all(sockfd,request,strlen(request))!=0){
         close(sockfd);
@@ -344,9 +330,34 @@ int main(int argc, char **argv) {
 
     parse_status_line(response);
     parse_headers(response);
-    print_body(response);
+    
+    char *content = copy_body(response);
 
     free(response);
+
+    return content;
+}
+
+int main(int argc, char **argv) {
+
+    if (argc !=2 ){
+        fprintf(stderr,"usage: %s http://example.org/path\n",argv[0]);
+        return 1;
+    }
+
+    URL url;
+    if (parse_url(&url,argv[1]) !=0){
+        return 1;
+    }
+
+    printf("scheme = %s\n",url.scheme);
+    printf("host   = %s\n", url.host);
+    printf("path   = %s\n", url.path);
+
+    
+
+
+   
 
     return 0;
 }
