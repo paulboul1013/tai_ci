@@ -354,6 +354,20 @@ void show(const char *body){
     }
 }
 
+int load(URL *url) {
+    char *body = request(url);
+
+    if (body==NULL) {
+        return -1;
+    }
+
+    show(body);
+
+    free(body);
+
+    return 0;
+}
+
 int main(int argc, char **argv) {
 
     if (argc !=2 ){
@@ -371,19 +385,10 @@ int main(int argc, char **argv) {
     printf("path   = %s\n", url.path);
 
     
-    char *content = request(&url);
-
-    if (content==NULL){
+    if (load(&url)!=0) {
         return 1;
     }
 
-    printf("---- body ----\n");
-    printf("%s\n",content);
-    printf("---- end body ----\n");
-
-    free(content);
-
-   
 
     return 0;
 }
