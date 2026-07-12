@@ -227,6 +227,21 @@ void parse_headers(char *response) {
     printf("---- end headers ----\n");
 }
 
+void print_body(char *response) {
+    char *body = strstr(response,"\r\n\r\n");
+    
+    if (body==NULL){
+        fprintf(stderr,"invalid response: no body\n");
+        return;
+    }
+
+    body += 4; //skip \r\n\r\n
+
+    printf("---- body ----\n");
+    printf("%s\n",body);
+    printf("---- end body ----\n");
+}
+
 int main(int argc, char **argv) {
 
     if (argc !=2 ){
