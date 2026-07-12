@@ -105,6 +105,52 @@ int send_all(int sockfd,const char *data,size_t len) {
     return 0;
 }
 
+char *read_response(int sockfd,size_t *out_len) {
+    size_t cap = 4096;
+    size_t len = 0;
+
+    char *response = malloc(cap+1);
+    if (response==NULL){
+        perror("malloc error");
+        return NULL;
+    }
+
+    while(1) {
+        if (len==cap){
+            size_t new_cap = cap * 2;
+            
+            char *new_response = realloc(response,new_cap+1);
+            if (new_response==NULL) {
+                perror("realloc wrong");
+                free(response);
+                return NULL;
+            }
+
+            response = new_response;
+            cap = new_cap;
+        }
+
+        ssize_t n = recv(sockfd,response+len,cap-len,0);
+        
+        if (n==-1){
+            perror("recv wrong");
+            free(response);
+            return NULL;
+        }
+
+        if (n==0){
+            break;
+        }
+
+        len+=(size_t)n;
+    }
+
+    response[len]='\0';
+    *out_len = len;
+
+    return response;
+}
+
 int main(int argc, char **argv) {
 
     if (argc !=2 ){
