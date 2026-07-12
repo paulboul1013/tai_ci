@@ -172,7 +172,7 @@ void parse_status_line(char *response) {
     memcpy(line,response,line_len);
     line[line_len] = '\0';
 
-    char *version = line;
+    // char *version = line;
     
     char *space1 = strchr(line,' ');
     if (space1==NULL){
@@ -192,11 +192,11 @@ void parse_status_line(char *response) {
 
     *space2='\0';
 
-    char *explanation = space2+1;
+    // char *explanation = space2+1;
 
-    printf("version     = %s\n", version);
-    printf("status      = %s\n", status);
-    printf("explanation = %s\n", explanation);
+    // fprintf(stderr, "version     = %s\n", version);
+    // fprintf(stderr, "status      = %s\n", status);
+    // fprintf(stderr, "explanation = %s\n", explanation);
 
 }
 
@@ -211,7 +211,7 @@ void parse_headers(char *response) {
 
     char *line = status_end + 2; //skip \r\n
     
-    printf("---- headers ----\n");
+    // fprintf(stderr,"---- headers ----\n");
 
     while (line < headers_end) {
         char *line_end = strstr(line,"\r\n");
@@ -234,7 +234,7 @@ void parse_headers(char *response) {
                 value++;
             }
 
-            printf("%s = %s\n",header,value);
+            // fprintf(stderr,"%s = %s\n",header,value);
 
             if (strcasecmp(header,"Transfer-Encoding")==0){
                 fprintf(stderr,"error: Transfer-Encoding is not supported\n");
@@ -251,7 +251,6 @@ void parse_headers(char *response) {
         line = line_end+2;
     }
 
-    printf("---- end headers ----\n");
 }
 
 char* copy_body(const char *response) {
@@ -285,7 +284,7 @@ char *request(URL *url){
         return NULL;
     }
 
-    printf("connect to %s:80\n",url->host);
+    // fprintf(stderr,"connect to %s:80\n",url->host);
 
     char request[2048];
     
@@ -305,9 +304,9 @@ char *request(URL *url){
         return NULL;
     }
 
-    printf("---- request ----\n");
-    printf("%s\n",request);
-    printf("---- end request ----\n");
+    // fprintf(stderr,"---- request ----\n");
+    // fprintf(stderr,"%s\n",request);
+    // fprintf(stderr,"---- end request ----\n");
 
 
     if (send_all(sockfd,request,strlen(request))!=0){
@@ -316,7 +315,7 @@ char *request(URL *url){
     }
 
     size_t response_len=0;
-    printf("request sent: %zu bytes\n",strlen(request));
+    // fprintf(stderr,"request sent: %zu bytes\n",strlen(request));
     char *response = read_response(sockfd,&response_len);
 
     close(sockfd);
@@ -325,10 +324,10 @@ char *request(URL *url){
         return NULL;
     }
 
-    printf("received %zu bytes\n",response_len);
+    // fprintf(stderr,"received %zu bytes\n",response_len);
 
 
-    parse_status_line(response);
+    // parse_status_line(response);
     parse_headers(response);
     
     char *content = copy_body(response);
@@ -380,9 +379,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    printf("scheme = %s\n",url.scheme);
-    printf("host   = %s\n", url.host);
-    printf("path   = %s\n", url.path);
+    // fprintf(stderr,"scheme = %s\n",url.scheme);
+    // fprintf(stderr,"host   = %s\n", url.host);
+    // fprintf(stderr,"path   = %s\n", url.path);
 
     
     if (load(&url)!=0) {
