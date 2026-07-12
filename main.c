@@ -160,17 +160,44 @@ void parse_status_line(char *response) {
         return;
     }
 
-    *line_end = '\0'; //HTTP/1.1 200 OK\r\n to HTTP/1.1 200 OK \0\n for split by " "
-    
-    char *version = strtok(response," ");
-    char *status = strtok(NULL," ");
-    char *explanation = strtok(NULL," ");
-    
-    printf("version     = %s\n", version ? version : "");
-    printf("status      = %s\n", status ? status : "");
-    printf("explanation = %s\n", explanation ? explanation : "");
+    size_t line_len=(size_t)(line_end-response);
 
-    *line_end = '\r'; //recover \0\n to \r\n
+    char line[512];
+    
+    if (line_len>=sizeof(line)){
+        fprintf(stderr,"status line too long\n");
+        return;
+    }
+
+    memcpy(line,response,line_len);
+    line[line_len] = '\0';
+
+    char *version = line;
+    
+    char *space1 = strchr(line,' ');
+    if (space1==NULL){
+        fprintf(stderr,"invalid status line\n");
+        return;
+    }
+
+    *space1 = '\0';
+
+    char *status = space1+1;
+    
+    char *space2 = strchr(status,' ');
+    if (space2==NULL) {
+        fprintf(stderr,"invalid status line\n");
+        return;
+    }
+
+    *space2='\0';
+
+    char *explanation = space2+1;
+
+    printf("version     = %s\n", version);
+    printf("status      = %s\n", status);
+    printf("explanation = %s\n", explanation);
+
 }
 
 void parse_headers(char *response) {
@@ -195,7 +222,7 @@ void parse_headers(char *response) {
 
         *line_end = '\0';
 
-        char *colon = strchr(line,":");
+        char *colon = strchr(line,':');
 
         if (colon!=NULL){
             *colon='\0';
@@ -278,6 +305,10 @@ int main(int argc, char **argv) {
         url.host
     );
 
+    printf("---- request ----\n");
+    printf("%s\n",request);
+    printf("---- end request ----\n");
+
     if (n<0 || n>=(int)sizeof(request)) {
         fprintf(stderr,"request too long\n");
         close(sockfd);
@@ -289,45 +320,24 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    printf("send %zd bytes\n",strlen(request));
-
-    char buf[4096];
-    
-    ssize_t received = recv(sockfd,buf,sizeof(buf)-1,0);
-
-    if (received == -1){
-        perror("recv");
-        close(sockfd);
-        return 1;
-    }
-
-    buf[received]='\0';
-    
-    char *status_end = strstr(buf,"\r\n"); //find statusline
-
-    if (status_end==NULL){
-        fprintf(stderr,"invalid response: no status line\n");
-        close(sockfd);
-        return 1;
-    }
-
-    
-    char *body = strstr(buf,"\r\n\r\n");
-    if (body==NULL) {
-        fprintf(stderr,"invalid response: no header/body separator\n");
-        close(sockfd);
-        return 1;
-    }
-
-    body += 4;
-    printf("---- body ----\n");
-    printf("%s\n", body);
-
-
-
-
+    size_t response_len=0;
+    printf("request sent: %zu bytes\n",strlen(request));
+    char *response = read_response(sockfd,&response_len);
 
     close(sockfd);
+
+    if (response==NULL){
+        return 1;
+    }
+
+    printf("received %zu bytes\n",response_len);
+
+
+    parse_status_line(response);
+    parse_headers(response);
+    print_body(response);
+
+    free(response);
 
     return 0;
 }
