@@ -355,7 +355,17 @@ int main(int argc, char **argv) {
     printf("path   = %s\n", url.path);
 
     
+    char *content = request(&url);
 
+    if (content==NULL){
+        return 1;
+    }
+
+    printf("---- body ----\n");
+    printf("%s\n",content);
+    printf("---- end body ----\n");
+
+    free(content);
 
    
 
