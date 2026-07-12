@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <strings.h>
 #include <netdb.h>
 #include <unistd.h>
 
@@ -170,6 +171,60 @@ void parse_status_line(char *response) {
     printf("explanation = %s\n", explanation ? explanation : "");
 
     *line_end = '\r'; //recover \0\n to \r\n
+}
+
+void parse_headers(char *response) {
+    char *status_end = strstr(response,"\r\n");
+    char *headers_end = strstr(response,"\r\n\r\n");
+
+    if (status_end == NULL || headers_end == NULL) {
+        fprintf(stderr,"invalid response headers\n");
+        return;
+    }
+
+    char *line = status_end + 2; //skip \r\n
+    
+    printf("---- headers ----\n");
+
+    while (line < headers_end) {
+        char *line_end = strstr(line,"\r\n");
+        
+        if (line_end == NULL || line_end > headers_end){
+            break;
+        }
+
+        *line_end = '\0';
+
+        char *colon = strchr(line,":");
+
+        if (colon!=NULL){
+            *colon='\0';
+            
+            char *header = line;
+            char *value = colon+1;
+            
+            while (*value == ' ' || *value=='\t'){
+                value++;
+            }
+
+            printf("%s = %s\n",header,value);
+
+            if (strcasecmp(header,"Transfer-Encoding")==0){
+                fprintf(stderr,"error: Transfer-Encoding is not supported\n");
+            }
+
+            if (strcasecmp(header,"Content-Encoding")==0){
+                fprintf(stderr,"error: Content-Encoding is not supported\n");
+            }
+
+            *colon=':';
+        }
+
+        *line_end='\r';
+        line = line_end+2;
+    }
+
+    printf("---- end headers ----\n");
 }
 
 int main(int argc, char **argv) {
