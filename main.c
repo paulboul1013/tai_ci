@@ -7,6 +7,9 @@
 #include <strings.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 
 #define PORT "80"
 
