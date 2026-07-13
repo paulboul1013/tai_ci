@@ -248,8 +248,59 @@ int send_all_ssl(SSL *ssl,const char *data,size_t len) {
         sent_total +=(size_t)sent;
 
     }
-    
+
     return 0;
+}
+
+char *read_response_ssl(SSL *ssl,size_t *out_len) {
+    size_t cap = 4096;
+    size_t len = 0;
+
+    char *response = malloc(cap+1);
+    if (response==NULL){
+        perror("malloc error");
+        return NULL;
+    }
+
+    while (1){
+        if (len==cap) {
+            size_t new_cap=cap*2;
+
+            char *new_response = realloc(response,new_cap+1);
+            if (new_response==NULL) {
+                perror("realloc error");
+                free(response);
+                return NULL;
+            }
+
+            response=new_response;
+            cap = new_cap;
+        }
+
+        int n=SSL_read(ssl,response+len,(int)(cap-len));
+        
+        if (n>0) {
+            len+=(size_t)n;
+            continue;
+        }
+
+        //If SSL read fail
+        int err=SSL_get_error(ssl,n);
+
+        if (err==SSL_ERROR_ZERO_RETURN || err == SSL_ERROR_SYSCALL && n == 0) {
+            break;
+        }
+
+        fprintf(stderr,"SSL_read failed\n");
+        ERR_print_errors_fp(stderr);
+        free(response);
+        return NULL;
+    }
+
+    response[len]='\0';
+    *out_len=len;
+
+    return response;
 }
 
 void parse_status_line(char *response) {
