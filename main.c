@@ -287,7 +287,11 @@ char *read_response_ssl(SSL *ssl,size_t *out_len) {
         //If SSL read fail
         int err=SSL_get_error(ssl,n);
 
-        if (err==SSL_ERROR_ZERO_RETURN || err == SSL_ERROR_SYSCALL && n == 0) {
+        if (err==SSL_ERROR_ZERO_RETURN) {
+            break;
+        }
+
+        if ( err == SSL_ERROR_SYSCALL && n == 0) {
             break;
         }
 
