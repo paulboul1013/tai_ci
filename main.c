@@ -429,7 +429,7 @@ char* copy_body(const char *response) {
 }
 
 char *request(URL *url){
-    int sockfd = connect_to_host(url->host);
+    int sockfd = connect_to_host(url->host,url->port);
     if (sockfd==-1){
         fprintf(stderr,"connect failed\n");
         return NULL;
@@ -453,16 +453,50 @@ char *request(URL *url){
         return NULL;
     }
 
+    char *response=NULL;
+    size_t response_len = 0;
+    
+    if (strcmp(url->scheme,"https")==0){
+        SSL_CTX *ctx = create_ssl_context();
 
-    if (send_all(sockfd,request,strlen(request))!=0){
+        if (ctx==NULL){
+            close(sockfd);
+            return NULL;
+        }
+
+        SSL *ssl = connect_tls(sockfd,ctx,url->host);
+
+        if (ssl==NULL){
+            SSL_CTX_free(ctx);
+            close(sockfd);
+            return NULL;
+        }
+
+        if (send_all_ssl(ssl,request,strlen(request))!=0) {
+            SSL_shutdown(ssl);
+            SSL_free(ssl);
+            SSL_CTX_free(ctx);
+            close(sockfd);
+            return NULL;
+        }
+
+        response = read_response_ssl(ssl,&response_len);
+        
+        SSL_shutdown(ssl);
+        SSL_free(ssl);
+        SSL_CTX_free(ctx);
         close(sockfd);
-        return NULL;
+    } else{
+        if (send_all(sockfd,request,strlen(request))!=0){
+            close(sockfd);
+            return NULL;
+        }
+
+        response = read_response(sockfd,&response_len);
+
+        close(sockfd);
     }
 
-    size_t response_len=0;
-    char *response = read_response(sockfd,&response_len);
-
-    close(sockfd);
 
     if (response==NULL){
         return NULL;
