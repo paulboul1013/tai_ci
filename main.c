@@ -31,7 +31,13 @@ int parse_url(URL *u,const char *url){
     memcpy(u->scheme,url,scheme_len);
     u->scheme[scheme_len] = '\0';
 
-    assert(strcmp(u->scheme,"http")==0);
+    assert(strcmp(u->scheme,"http")==0 || strcmp(u->scheme,"https")==0);
+
+    if (strcmp(u->scheme,"http")==0){
+        u->port = 80;
+    } else{
+        u->port = 443;
+    }
 
     const char *rest=scheme_end+3; //skip ://
     const char *slash = strchr(rest,'/'); // have /path
@@ -45,6 +51,18 @@ int parse_url(URL *u,const char *url){
         u->host[host_len] ='\0';
 
         strcpy(u->path,slash);
+    }
+
+    //support custom port
+    char *colon = strchr(u->host,":");
+    if (colon!=NULL){
+        *colon = '\0';
+        u->port = atoi(colon+1);
+        
+        if (u->port <=0 || u->port > 65535) {
+            fprintf(stderr,"invalid port\n");
+            return -1;
+        }
     }
 
     return 0;
