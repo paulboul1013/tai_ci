@@ -52,7 +52,7 @@ int parse_url(URL *u,const char *url){
     }
 
     //support custom port
-    char *colon = strchr(u->host,":");
+    char *colon = strchr(u->host,':');
     if (colon!=NULL){
         *colon = '\0';
         u->port = atoi(colon+1);
