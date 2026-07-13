@@ -176,6 +176,63 @@ char *read_response(int sockfd,size_t *out_len) {
     return response;
 }
 
+SSL_CTX *create_ssl_context(void) {
+    SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+
+    if (ctx==NULL) {
+        ERR_print_errors_fp(stderr);
+        return NULL;
+    }
+
+    if (SSL_CTX_set_default_verify_paths(ctx)!=1) {
+        ERR_print_errors_fp(stderr);
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+
+    return ctx;
+}
+
+SSL *connect_tls(int sockfd,SSL_CTX *ctx,const char *host){
+    SSL *ssl = SSL_new(ctx);
+
+    if (ssl==NULL){
+        ERR_print_errors_fp(stderr);
+        return NULL;
+    }
+
+    //SNI: tell server which hostname want to connect
+    //many https server one IP have many website，if no SNI maybe take wrong certificate
+    if (SSL_set_tlsext_host_name(ssl,host)!=1){
+        ERR_print_errors_fp(stderr);
+        SSL_free(ssl);
+        return NULL;
+    }
+
+    // hostname verification: check certificate is really belong this host
+    if (SSL_set1_host(ssl,host)!=1){
+        ERR_print_errors_fp(stderr);
+        SSL_free(ssl);
+        return NULL;
+    }
+
+    SSL_set_verify(ssl,SSL_VERIFY_PEER,NULL);
+
+    if (SSL_set_fd(ssl,sockfd)!=1){
+        ERR_print_errors_fp(stderr);
+        SSL_free(ssl);
+        return NULL;
+    }
+
+    if (SSL_connect(ssl)!=1){
+        ERR_print_errors_fp(stderr);
+        SSL_free(ssl);
+        return NULL;
+    }
+
+    return ssl;
+}
+
 void parse_status_line(char *response) {
     char *line_end = strstr(response,"\r\n");
 
