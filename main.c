@@ -233,6 +233,25 @@ SSL *connect_tls(int sockfd,SSL_CTX *ctx,const char *host){
     return ssl;
 }
 
+//for https send data
+int send_all_ssl(SSL *ssl,const char *data,size_t len) {
+    size_t sent_total = 0;
+
+    while (sent_total < len) {
+        int sent = SSL_write(ssl,data+sent_total,(int)(len-sent_total));
+        
+        if (sent <= 0) {
+            ERR_print_errors_fp(stderr);
+            return -1;
+        }
+
+        sent_total +=(size_t)sent;
+
+    }
+    
+    return 0;
+}
+
 void parse_status_line(char *response) {
     char *line_end = strstr(response,"\r\n");
 
