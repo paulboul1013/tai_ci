@@ -11,8 +11,6 @@
 #include <openssl/err.h>
 
 
-#define PORT "80"
-
 typedef struct {
     char scheme[16];
     char host[256];
@@ -69,11 +67,15 @@ int parse_url(URL *u,const char *url){
 }
 
 
-int connect_to_host(const char *host) {
+int connect_to_host(const char *host,int port) {
     struct addrinfo hints; //for one domain name for multiple IP address
     struct addrinfo *result;
     struct addrinfo *rp;
     int sockfd = -1;
+
+    char port_str[16];
+    snprintf(port_str,sizeof(port_str),"%d",port);
+
 
     memset(&hints,0,sizeof(hints));
 
@@ -81,7 +83,7 @@ int connect_to_host(const char *host) {
     hints.ai_socktype = SOCK_STREAM; // TCP stream
     hints.ai_protocol = IPPROTO_TCP; // TCP
 
-    int err = getaddrinfo(host,PORT,&hints,&result);
+    int err = getaddrinfo(host,port_str,&hints,&result);
     if (err!=0) {
         fprintf(stderr,"getaddrinfo: %s\n",gai_strerror(err));
         return -1;
