@@ -17,6 +17,7 @@ typedef struct {
     char scheme[16];
     char host[256];
     char path[1024];
+    int port;
 } URL;
 
 int parse_url(URL *u,const char *url){
