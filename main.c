@@ -435,8 +435,6 @@ char *request(URL *url){
         return NULL;
     }
 
-    // fprintf(stderr,"connect to %s:80\n",url->host);
-
     char request[2048];
     
     int n=snprintf(
@@ -455,10 +453,6 @@ char *request(URL *url){
         return NULL;
     }
 
-    // fprintf(stderr,"---- request ----\n");
-    // fprintf(stderr,"%s\n",request);
-    // fprintf(stderr,"---- end request ----\n");
-
 
     if (send_all(sockfd,request,strlen(request))!=0){
         close(sockfd);
@@ -466,7 +460,6 @@ char *request(URL *url){
     }
 
     size_t response_len=0;
-    // fprintf(stderr,"request sent: %zu bytes\n",strlen(request));
     char *response = read_response(sockfd,&response_len);
 
     close(sockfd);
@@ -475,10 +468,7 @@ char *request(URL *url){
         return NULL;
     }
 
-    // fprintf(stderr,"received %zu bytes\n",response_len);
 
-
-    // parse_status_line(response);
     parse_headers(response);
     
     char *content = copy_body(response);
