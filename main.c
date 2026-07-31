@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-
+#include <stdarg.h>
 
 typedef struct {
     char scheme[16];
@@ -432,6 +432,59 @@ char* copy_body(const char *response) {
     return content;
 }
 
+int append_request_part(char *buf,size_t cap,size_t *len ,const char *fmt,...) {
+    if (*len>=cap){
+        return -1;
+    }
+
+    va_list args;
+    va_start(args,fmt);
+    int n=vsnprintf(buf+*len,cap-*len,fmt,args);
+    va_end(args);
+
+    if (n<0 || (size_t)n>=cap-*len){
+        return -1;
+    }
+
+    *len+=(size_t)n;
+    return 0;
+}
+
+int add_header(char *buf,size_t cap,size_t *len,const char *name,const char *value) {
+    return append_request_part(buf,cap,len,"%s: %s\r\n",name,value);
+}
+
+int finish_headers(char *buf,size_t cap,size_t *len) {
+    return append_request_part(buf,cap,len,"\r\n");
+}
+
+int build_http_request(URL *url,char *buf,size_t cap,size_t *out_len) {
+    size_t len=0;
+
+    if (append_request_part(buf,cap,&len,"GET %s HTTP/1.1\r\n",url->path)!=0){
+        return -1;
+    }
+
+    if (add_header(buf,cap,&len,"Host",url->host)!=0) {
+        return -1;
+    }
+
+    if (add_header(buf,cap,&len,"Connection","close")!=0){
+        return -1;
+    }
+
+    if (add_header(buf,cap,&len,"User-Agent","Tai-CI/1.0")!=0) {
+        return -1;
+    }
+
+    if (finish_headers(buf,cap,&len)!=0) {
+        return -1;
+    }
+
+    *out_len=len;
+    return 0;
+}
+
 char *request(URL *url){
     int sockfd = connect_to_host(url->host,url->port);
     if (sockfd==-1){
@@ -439,23 +492,15 @@ char *request(URL *url){
         return NULL;
     }
 
-    char request[2048];
-    
-    int n=snprintf(
-        request,
-        sizeof(request),
-        "GET %s HTTP/1.0\r\n"
-        "Host: %s\r\n"
-        "\r\n",
-        url->path,
-        url->host
-    );
+    char request_buf[2048];
+    size_t request_len=0;
 
-    if (n<0 || n>=(int)sizeof(request)) {
+    if (build_http_request(url,request_buf,sizeof(request_buf),&request_len)!=0) {
         fprintf(stderr,"request too long\n");
         close(sockfd);
         return NULL;
     }
+
 
     char *response=NULL;
     size_t response_len = 0;
@@ -476,7 +521,7 @@ char *request(URL *url){
             return NULL;
         }
 
-        if (send_all_ssl(ssl,request,strlen(request))!=0) {
+        if (send_all_ssl(ssl,request_buf,request_len)!=0) {
             SSL_shutdown(ssl);
             SSL_free(ssl);
             SSL_CTX_free(ctx);
@@ -491,7 +536,7 @@ char *request(URL *url){
         SSL_CTX_free(ctx);
         close(sockfd);
     } else{
-        if (send_all(sockfd,request,strlen(request))!=0){
+        if (send_all(sockfd,request_buf,request_len)!=0){
             close(sockfd);
             return NULL;
         }
