@@ -164,6 +164,51 @@ int send_all(int sockfd,const char *data,size_t len) {
     return 0;
 }
 
+char *read_file(const char *path) {
+    FILE *fp=fopen(path,"rb");
+
+    if (fp==NULL){
+        perror(path);
+        return NULL;
+    }
+
+    if (fseek(fp,0,SEEK_END)!=0){
+        perror("fseek error");
+        fclose(fp);
+        return NULL;
+    }
+
+    long file_size=ftell(fp);
+
+    if (file_size<0){
+        perror("ftell error");
+        fclose(fp);
+        return NULL;
+    }
+
+    char *content = malloc((size_t)file_size+1);
+
+    if (content==NULL){
+        perror("malloc failed");
+        fclose(fp);
+        return NULL;
+    }
+
+    size_t bytes_reads=fread(content,1,(size_t)file_size,fp);
+
+    if (bytes_reads!=(size_t)file_size){
+        fprintf(stderr,"could not read complete file\n");
+        free(content);
+        fclose(fp);
+        return NULL;
+    }
+
+    content[file_size] = '\0';
+    fclose(fp);
+
+    return content;
+}
+
 char *read_response(int sockfd,size_t *out_len) {
     size_t cap = 4096;
     size_t len = 0;
