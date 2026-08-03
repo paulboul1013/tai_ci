@@ -20,6 +20,20 @@ typedef struct {
     int port;
 } URL;
 
+char *copy_string(const char *s) {
+    size_t len = strlen(s);
+
+    char *copy=malloc(len+1);
+    if (copy==NULL){
+        perror("malloc failed");
+        return NULL;
+    }
+
+    memcpy(copy,s,len);
+    copy[len] = '\0';
+    return copy;
+}
+
 int parse_url(URL *u,const char *url){
 
     //data scheme
@@ -32,7 +46,7 @@ int parse_url(URL *u,const char *url){
             return -1;
         }
 
-        strcpy(u->scheme,"data"):
+        strcpy(u->scheme,"data");
         u->host[0]='\0';
         u->port=0;
 
