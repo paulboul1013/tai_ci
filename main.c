@@ -21,6 +21,32 @@ typedef struct {
 } URL;
 
 int parse_url(URL *u,const char *url){
+
+    //data scheme
+    //data:text/html,<h1>hello</h1>
+    if (strncmp(url,"data:",5)==0){
+        const char *comma = strchr(url,',');
+
+        if (comma==NULL){
+            fprintf(stderr,"data URL must contain a comma\n");
+            return -1;
+        }
+
+        strcpy(u->scheme,"data"):
+        u->host[0]='\0';
+        u->port=0;
+
+        const char *content=comma+1; //skip comma for html content
+
+        if (strlen(content)>=sizeof(u->path)) {
+            fprintf(stderr, "data URL content too long\n");
+            return -1;
+        }
+
+        strcpy(u->path,content);
+        return 0;
+    }
+
     const char *scheme_end = strstr(url,"://");
 
     if (scheme_end == NULL) {
