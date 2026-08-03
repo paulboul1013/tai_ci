@@ -697,8 +697,23 @@ char *request(URL *url){
 void show(const char *body){
     int in_tag=0;
 
-    for(size_t i=0;body[i]!='\0';i++){
+    for(size_t i=0;body[i]!='\0';){
+        
+        //url have &lt; and &gt;  render as < and > for text not html label
+        if (!in_tag && strncmp(body+i,"&lt;",4)==0) {
+            putchar('<');
+            i+=4;
+            continue;
+        }
+
+        if (!in_tag && strncmp(body+i,"&gt;",4)==0){
+            putchar('>');
+            i+=4;
+            continue;
+        }
+
         char c=body[i];
+        i++;
 
         if (c=='<'){
             in_tag=1;
