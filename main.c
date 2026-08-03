@@ -608,6 +608,11 @@ int build_http_request(URL *url,char *buf,size_t cap,size_t *out_len) {
 
 char *request(URL *url){
 
+    //data scheme: return simple html content
+    if (strcmp(url->scheme,"data")==0){
+        return copy_string(url->path);
+    }
+
     //file scheme: read url path
     if (strcmp(url->scheme,"file")==0){
         return read_file(url->path);
