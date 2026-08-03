@@ -565,6 +565,13 @@ int build_http_request(URL *url,char *buf,size_t cap,size_t *out_len) {
 }
 
 char *request(URL *url){
+
+    //file scheme: read url path
+    if (strcmp(url->scheme,"file")==0){
+        return read_file(url->path);
+    }
+
+    // http and https scheme: connect to server host
     int sockfd = connect_to_host(url->host,url->port);
     if (sockfd==-1){
         fprintf(stderr,"connect failed\n");
