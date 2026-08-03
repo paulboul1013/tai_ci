@@ -205,7 +205,7 @@ char *read_file(const char *path) {
         return NULL;
     }
 
-    content[file_size] = '\0';
+    content[bytes_reads] = '\0';
     fclose(fp);
 
     return content;
