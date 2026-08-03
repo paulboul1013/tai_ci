@@ -186,6 +186,8 @@ char *read_file(const char *path) {
         return NULL;
     }
 
+    rewind(fp);
+
     char *content = malloc((size_t)file_size+1);
 
     if (content==NULL){
@@ -679,13 +681,20 @@ int load(URL *url) {
 
 int main(int argc, char **argv) {
 
-    if (argc !=2 ){
-        fprintf(stderr,"usage: %s http://example.org/path\n",argv[0]);
+
+    const char *input_url=NULL;
+
+    if (argc==1){
+        input_url=DEFAULT_URL;
+    } else if (argc==2) {
+        input_url=argv[1];
+    } else {
+        fprintf(stderr,"usage: %s [url]\n",argv[0]);
         return 1;
     }
 
     URL url;
-    if (parse_url(&url,argv[1]) !=0){
+    if (parse_url(&url,input_url) !=0){
         return 1;
     }
 
