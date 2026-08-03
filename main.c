@@ -11,6 +11,8 @@
 #include <openssl/err.h>
 #include <stdarg.h>
 
+#define DEFAULT_URL "file:///tmp/browser_test.html"
+
 typedef struct {
     char scheme[16];
     char host[256];
@@ -20,24 +22,56 @@ typedef struct {
 
 int parse_url(URL *u,const char *url){
     const char *scheme_end = strstr(url,"://");
+
     if (scheme_end == NULL) {
         fprintf(stderr,"URL must contain ://\n");
         return -1;
     }
 
-    size_t scheme_len = scheme_end - url;
+    size_t scheme_len = (size_t)(scheme_end - url);
+
+    if (scheme_len>=sizeof(u->scheme)) {
+        fprintf(stderr,"scheme too long\n");
+        return -1;    
+    }
+
     memcpy(u->scheme,url,scheme_len);
     u->scheme[scheme_len] = '\0';
 
-    assert(strcmp(u->scheme,"http")==0 || strcmp(u->scheme,"https")==0);
+    const char *rest = scheme_end + 3; //skip ://
+
+    /*
+        file:///path/to/index.html
+        rest = "/path/to/index.html"
+    */
+
+    if (strcmp(u->scheme,"file")==0){
+        if (rest[0]!='/') {
+            fprintf(stderr,"file URL must use an absolute path\n");
+            return -1;
+        }
+
+        u->host[0]='\0';
+        u->port=0;
+
+        if (strlen(rest)>=sizeof(u->path)) {
+            fprintf(stderr,"path too long\n");
+            return -1;
+        }
+
+        strcpy(u->path,rest);
+        return 0;
+    }
+
 
     if (strcmp(u->scheme,"http")==0){
         u->port = 80;
-    } else{
+    } else if (strcmp(u->scheme,"https")==0){
         u->port = 443;
+    }else{
+        u->port=0;
     }
 
-    const char *rest=scheme_end+3; //skip ://
     const char *slash = strchr(rest,'/'); // have /path
     
     if (slash == NULL) { //no /path
