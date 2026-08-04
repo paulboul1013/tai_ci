@@ -59,6 +59,46 @@ char *copy_string(const char *s) {
     return copy;
 }
 
+Connection *get_connection(URL *url){
+    if (same_server(url)) {
+        return &cached_connection;
+    }
+
+    close_cached_connection();
+
+    int sockfd = connect_to_host(url->host,url->port);
+
+    if (sockfd==-1){
+        fprintf(stderr,"connect failed\n");
+        return NULL;
+    }
+
+    cached_connection.sockfd = sockfd;
+    cached_connection.port = url->port;
+
+    strcpy(cached_connection.scheme,url->scheme);
+    strcpy(cached_connection.hsot,url->host);
+
+    //https reconnect needs use new ssl
+    if (strcmp(url->scheme,"https")==0) {
+        cached_connection.ctx = create_ssl_context();
+        
+        if (cached_connection.ctx==NULL) {
+            close_cached_connection();
+            return NULL;
+        }
+
+        cached_connection.ssl=connect_tls(sockfd,cached_connection.ctx,url->host);
+
+        if (cached_connection.ssl==NULL) {
+            close_cached_connection();
+            return NULL;
+        }
+    }
+
+    return &cached_connection;
+}
+
 int parse_url(URL *u,const char *url){
 
     u->view_source = 0; //default not view html source code
