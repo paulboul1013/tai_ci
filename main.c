@@ -37,6 +37,9 @@ static Connection cached_connection = {
     .ssl=NULL
 };
 
+//prototype
+int connect_to_host(const char *host, int port);
+
 //check url's scheme,host,port whether same as input url
 int same_server(const URL *url) {
     return cached_connection.sockfd!=-1 &&
@@ -57,6 +60,28 @@ char *copy_string(const char *s) {
     memcpy(copy,s,len);
     copy[len] = '\0';
     return copy;
+}
+
+void close_cached_connection(void) {
+    if (cached_connection.ssl != NULL) {
+        SSL_shutdown(cached_connection.ssl);
+        SSL_free(cached_connection.ssl);
+        cached_connection.ssl = NULL;
+    }
+
+    if (cached_connection.ctx != NULL) {
+        SSL_CTX_free(cached_connection.ctx);
+        cached_connection.ctx = NULL;
+    }
+
+    if (cached_connection.sockfd != -1) {
+        close(cached_connection.sockfd);
+        cached_connection.sockfd = -1;
+    }
+
+    cached_connection.scheme[0] = '\0';
+    cached_connection.host[0] = '\0';
+    cached_connection.port = 0;
 }
 
 Connection *get_connection(URL *url){
