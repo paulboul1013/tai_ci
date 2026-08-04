@@ -863,10 +863,9 @@ char *request(URL *url){
         return read_file(url->path);
     }
 
-    // http and https scheme: connect to server host
-    int sockfd = connect_to_host(url->host,url->port);
-    if (sockfd==-1){
-        fprintf(stderr,"connect failed\n");
+    //http and https scheme: connect to server host
+    Connection *conn = get_connection(url);
+    if (conn==NULL) {
         return NULL;
     }
 
@@ -875,68 +874,21 @@ char *request(URL *url){
 
     if (build_http_request(url,request_buf,sizeof(request_buf),&request_len)!=0) {
         fprintf(stderr,"request too long\n");
-        close(sockfd);
         return NULL;
     }
 
-
-    char *response=NULL;
-    size_t response_len = 0;
-    
-    if (strcmp(url->scheme,"https")==0){
-        SSL_CTX *ctx = create_ssl_context();
-
-        if (ctx==NULL){
-            close(sockfd);
-            return NULL;
-        }
-
-        SSL *ssl = connect_tls(sockfd,ctx,url->host);
-
-        if (ssl==NULL){
-            SSL_CTX_free(ctx);
-            close(sockfd);
-            return NULL;
-        }
-
-        if (send_all_ssl(ssl,request_buf,request_len)!=0) {
-            SSL_shutdown(ssl);
-            SSL_free(ssl);
-            SSL_CTX_free(ctx);
-            close(sockfd);
-            return NULL;
-        }
-
-        response = read_response_ssl(ssl,&response_len);
-        
-        SSL_shutdown(ssl);
-        SSL_free(ssl);
-        SSL_CTX_free(ctx);
-        close(sockfd);
-    } else{
-        if (send_all(sockfd,request_buf,request_len)!=0){
-            close(sockfd);
-            return NULL;
-        }
-
-        response = read_response(sockfd,&response_len);
-
-        close(sockfd);
-    }
-
-
-    if (response==NULL){
+    //http -> send()
+    //https -> SSL_write()
+    if (connection_send(conn,request_buf,request_len)!=0) {
+        fprintf(stderr, "request send failed\n");
+        close_cached_connection();
         return NULL;
     }
 
-
-    parse_headers(response);
-    
-    char *content = copy_body(response);
-
-    free(response);
-
-    return content;
+    //read headers，get content-length
+    //read body
+    //don't close socket
+    return read_keep_alive_response(conn);
 }
 
 void show(const char *body){
