@@ -39,6 +39,10 @@ static Connection cached_connection = {
 
 //prototype
 int connect_to_host(const char *host, int port);
+int send_all(int sockfd, const char *data, size_t len);
+SSL_CTX *create_ssl_context(void);
+SSL *connect_tls(int sockfd, SSL_CTX *ctx, const char *host);
+int send_all_ssl(SSL *ssl, const char *data, size_t len);
 
 //check url's scheme,host,port whether same as input url
 int same_server(const URL *url) {
