@@ -740,7 +740,11 @@ int load(URL *url) {
         return -1;
     }
 
-    show(body);
+    if (url->view_source) { //show html source code
+        fputs(body,stdout);
+    } else{ //show rendered html
+        show(body);
+    }
 
     free(body);
 
