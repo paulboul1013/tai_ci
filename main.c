@@ -77,7 +77,7 @@ Connection *get_connection(URL *url){
     cached_connection.port = url->port;
 
     strcpy(cached_connection.scheme,url->scheme);
-    strcpy(cached_connection.hsot,url->host);
+    strcpy(cached_connection.host,url->host);
 
     //https reconnect needs use new ssl
     if (strcmp(url->scheme,"https")==0) {
@@ -97,6 +97,25 @@ Connection *get_connection(URL *url){
     }
 
     return &cached_connection;
+}
+
+int connection_send(Connection *conn,const char *data,size_t len) {
+    if (conn->ssl != NULL) {
+        return send_all_ssl(conn->ssl,data,len);
+    }
+
+    return send_all(conn->sockfd,data,len);
+}
+
+int connection_read(Connection *conn,char *buf,size_t len) {
+    if (conn->ssl != NULL) {
+        int n=SSL_read(conn->ssl,buf,(int)len);
+        return n > 0 ? n : -1;
+    }
+
+    ssize_t n=recv(conn->sockfd,buf,len,0);
+    return n > 0 ? (int)n : -1;
+
 }
 
 int parse_url(URL *u,const char *url){
