@@ -18,6 +18,7 @@ typedef struct {
     char host[256];
     char path[1024];
     int port;
+    int view_source; // 0 for hide HTML tag, 1 for show full html source code
 } URL;
 
 char *copy_string(const char *s) {
