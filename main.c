@@ -598,7 +598,7 @@ int build_http_request(URL *url,char *buf,size_t cap,size_t *out_len) {
         return -1;
     }
 
-    if (add_header(buf,cap,&len,"Connection","close")!=0){
+    if (add_header(buf,cap,&len,"Connection","keep-alive")!=0){
         return -1;
     }
 
