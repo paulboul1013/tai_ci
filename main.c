@@ -118,6 +118,56 @@ int connection_read(Connection *conn,char *buf,size_t len) {
 
 }
 
+long get_content_length(const char *headers) {
+    //get first header line，like HTTP/1.1 200 OK
+    const char *line = strstr(headers,"\r\n"); 
+    
+
+    if (line==NULL){
+        return -1;
+    }
+
+    line+=2; //skip \r\n
+
+    while (*line !='\0') {
+        //get next end of header line,it's Content-Length line
+        const char *line_end = strstr(line,"\r\n"); 
+
+        if (line_end == NULL || line_end==line){
+            break;
+        }
+
+        const char *colon = memchr(line,':',(size_t)(line_end-line));
+
+        if (colon!=NULL) {
+            size_t name_len= (size_t)(colon-line);
+
+            //check this header line is Content-Length
+            if (name_len==strlen("Content-length") && strncasecmp(line,"Content-Length",name_len)==0) {
+                const char *value = colon+1; //skip ':' to get length value
+
+                // if have space or tab,skip it
+                while(*value==' ' || *value=='\t') {
+                    value++;
+                }
+
+                char *end;
+                long length = strtol(value,&end,10);
+
+                if (end==value || length < 0) { //get length value failed
+                    return -1;
+                }
+
+                return length;
+            }
+        }
+
+        line = line_end+2; //skip \r\n
+    }
+
+    return -1; //not found Content-Length
+}
+
 int parse_url(URL *u,const char *url){
 
     u->view_source = 0; //default not view html source code
