@@ -21,6 +21,22 @@ typedef struct {
     int view_source; // 0 for hide HTML tag, 1 for show full html source code
 } URL;
 
+typedef struct {
+    int sockfd;
+    char scheme[16];
+    char host[256];
+    int port;
+
+    SSL_CTX *ctx;
+    SSL *ssl;
+} Connection;
+
+static Connection cached_connection = {
+    .sockfd=-1,
+    .ctx=NULL,
+    .ssl=NULL
+};
+
 char *copy_string(const char *s) {
     size_t len = strlen(s);
 
