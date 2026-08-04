@@ -699,6 +699,81 @@ void parse_headers(char *response) {
 
 }
 
+char *read_keep_alive_response(Connection *conn) {
+    char headers[16384];
+    size_t header_len = 0;
+
+    //first read response headers
+    //HTTP header end with \r\n\r\n
+
+    while(header_len + 1 <sizeof(headers)) {
+        int n=connection_read(conn,headers+header_len,1);
+
+        if (n<=0) {
+            fprintf(stderr,"connection closed while reading headers\n");
+
+            close_cached_connection();
+            return NULL;
+        }
+
+        header_len+=(size_t)n;
+        headers[header_len]='\0';
+
+        if (header_len >= 4 && memcmp(headers+header_len-4,"\r\n\r\n",4)==0) {
+            break;
+        }
+        
+    }
+
+    //buffer full，but still can't find \r\n\r\n
+    if (header_len+1>=sizeof(headers)) {
+        fprintf(stderr, "response headers too large\n");
+        close_cached_connection();
+        return NULL;
+    }
+
+    
+    parse_headers(headers);
+
+    long content_length = get_content_length(headers);
+
+    if (content_length < 0) {
+        fprintf(stderr,"response has no valid Content-Length\n");
+
+        close_cached_connection();
+        return NULL;
+    }
+
+    char *body=malloc((size_t)content_length+1);
+
+    if (body==NULL) {
+        perror("malloc body failed");
+        close_cached_connection();
+        return NULL;
+    }
+
+    size_t total = 0;
+
+    //only read content-length bytes
+    while (total < (size_t)content_length) {
+        int n=connection_read(conn,body+total,(size_t)content_length-total);
+
+        if (n<=0) {
+            fprintf(stderr,"connection closed before body completed\n");
+
+            free(body);
+            close_cached_connection();
+            return NULL;
+        }
+
+        total+=(size_t)n;
+    }
+
+    body[total] = '\0';
+
+    return body;
+}
+
 char* copy_body(const char *response) {
     const char *body = strstr(response,"\r\n\r\n");
     
