@@ -37,6 +37,13 @@ char *copy_string(const char *s) {
 
 int parse_url(URL *u,const char *url){
 
+    u->view_source = 0; //default not view html source code
+
+    if (strncmp(url,"view-source:",12)==0){
+        u->view_source = 1;
+        url += 12; //skip "view-source:" parse left url
+    }
+
     //data scheme
     //data:text/html,<h1>hello</h1>
     if (strncmp(url,"data:",5)==0){
