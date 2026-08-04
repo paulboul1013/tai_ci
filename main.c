@@ -37,6 +37,14 @@ static Connection cached_connection = {
     .ssl=NULL
 };
 
+//check url's scheme,host,port whether same as input url
+int same_server(const URL *url) {
+    return cached_connection.sockfd!=-1 &&
+        strcmp(cached_connection.scheme,url->scheme)==0 &&
+        strcmp(cached_connection.host,url->host)==0 &&
+        cached_connection.port==url->port;
+}
+
 char *copy_string(const char *s) {
     size_t len = strlen(s);
 
