@@ -1,0 +1,121 @@
+html {
+    display: block;
+}
+
+body {
+    display: block;
+}
+
+p {
+    display: block;
+}
+
+div {
+    display: block;
+}
+
+ul {
+    display: block;
+}
+
+ol {
+    display: block;
+}
+
+li {
+    display: block;
+}
+
+/* 其他 block tag 也照上面補 */
+
+a {
+    color: blue;
+}
+
+a:visited {
+    color: purple;
+}
+
+i {
+    font-style: italic;
+}
+
+b {
+    font-weight: bold;
+}
+
+small {
+    font-size: 90%;
+}
+
+big {
+    font-size: 110%;
+}
+
+code {
+    font-family: Courier;
+}
+
+/* p {
+    color: black;
+} */
+
+.main {
+    color: red;
+}
+
+.keyword {
+    color: blue;
+}
+
+.warning {
+    font-weight: bold;
+}
+
+.box {
+    background-color: lightblue;
+    width: 300px;
+}
+
+.code-test {
+    font: italic bold 150% Courier;
+}
+
+.normal-test {
+    font: normal 150% Courier;
+}
+
+h1 {
+    display: block;
+}
+
+.title {
+    text-align: center;
+}
+
+pre {
+    display: block;
+    font-family: Courier New;
+}
+
+nav {
+    display: block;
+}
+
+input {
+    font-size: 16px;
+    font-weight: normal;
+    font-style: normal;
+    background-color: lightblue;
+}
+
+button {
+    font-size: 16px;
+    font-weight: normal;
+    font-style: normal;
+    background-color: orange;
+}
+
+section {
+    display: block;
+}

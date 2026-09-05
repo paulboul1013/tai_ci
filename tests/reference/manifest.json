@@ -1,0 +1,13 @@
+{
+  "source": "/home/paulboul/tai_gar",
+  "git_head": "7d536e0497730f7b81d36c4a5595388d625411a3",
+  "basis": "working-tree; browser.py has uncommitted changes",
+  "files": {
+    "browser.py": "1d3c42f2310880cb8c0667f9925dbbeccb16a4db4a676e2151a5a507710156a8",
+    "runtime.js": "dea5925a81fda9347600d47acbbffa9ac88c9258e62ae9c6ca30213a893b4609",
+    "browser.css": "50ce6bd34f0891f7d6e80d969a230020e3562d113b3d0bd40041fc4e67cbab81",
+    "web_server.py": "e77cb6f507f280682ced5b8fa5b905cf9b47fd08c4c3f74cbb7ceb15acd5346c",
+    "README.md": "868bcc7ab3ded0943a1b72cf3be76fa5b0e7ee16050c066457144028761871d3",
+    "test.md": "5bf350395f4001ef9f7803056714f2dca2c278a40a7fa156d1059f725939c80e"
+  }
+}
