@@ -31,26 +31,28 @@ def load_reference():
 
 
 def selector_value(selector):
-    out = {'kind': type(selector).__name__}
-    for key, value in vars(selector).items():
-        if key == 'selectors':
-            out[key] = [selector_value(item) for item in value]
-        elif key == 'selector':
-            out[key] = selector_value(value)
-        else:
-            out[key] = value
+    kinds = {'TagSelector': 'tag', 'ClassSelector': 'class', 'IdSelector': 'id',
+             'VisitedSelector': 'visited', 'HasSelector': 'has',
+             'SelectorSequence': 'sequence', 'DescendantSelector': 'descendant'}
+    out = {'kind': kinds[type(selector).__name__], 'priority': selector.priority}
+    for key in ('tag', 'class_name', 'id_name'):
+        if hasattr(selector, key):
+            out['name'] = getattr(selector, key)
+    if hasattr(selector, 'selectors'):
+        out['children'] = [selector_value(item) for item in selector.selectors]
+    elif hasattr(selector, 'selector'):
+        out['children'] = [selector_value(selector.selector)]
     return out
 
 
 def dom_value(node, styled=False):
-    out = {'kind': type(node).__name__}
     if hasattr(node, 'text'):
-        out['text'] = node.text
+        out = {'text': node.text}
     else:
-        out.update(tag=node.tag, attributes=node.attributes)
+        out = {'tag': node.tag, 'attributes': node.attributes,
+               'children': [dom_value(child, styled) for child in node.children]}
     if styled:
         out['style'] = node.style
-    out['children'] = [dom_value(child, styled) for child in node.children]
     return out
 
 
@@ -83,7 +85,7 @@ def layout_value(layout, paths):
     out = {'kind': type(layout).__name__, 'node': target_path(getattr(layout, 'node', None), paths)}
     for key in ('x', 'y', 'width', 'height', 'content_height', 'scroll', 'word',
                 'ascent', 'descent', 'space_after', 'is_sup', 'is_small_caps'):
-        if hasattr(layout, key):
+        if hasattr(layout, key) and not callable(getattr(layout, key)):
             out[key] = getattr(layout, key)
     if getattr(layout, 'font', None) is not None:
         out['font'] = font_value(layout.font)
@@ -121,7 +123,7 @@ def run(browser, args, source):
             url = url.resolve(args.resolve)
         return dict(vars(url), serialized=str(url), origin=url.origin())
     if args.command == 'css':
-        return [{'selector': selector_value(selector), 'body': body}
+        return [{'selector': selector_value(selector), 'declarations': body}
                 for selector, body in browser.CSSParser(source).parse()]
     nodes = browser.HTMLParser(source).parse()
     if args.command == 'dom':
@@ -164,8 +166,7 @@ def main():
             result = run(load_reference(), args, source)
     finally:
         os.chdir(previous)
-    json.dump(result, sys.stdout, ensure_ascii=False, sort_keys=True, allow_nan=False)
-    sys.stdout.write('\n')
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True, allow_nan=False))
 
 
 if __name__ == '__main__':
