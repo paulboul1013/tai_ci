@@ -20,11 +20,12 @@
 overflow scroll clip/translation、display-list hit query 與 Cairo PNG 輸出；structural differential
 比較 Python/C 的支援 leaves、透明 hit region 和 Scroll nesting，hit differential 比較 paint
 order、半開邊界、clip、非零與巢狀 scroll，`tests/test_render.c` 驗證非零 scroll key regions 及 display
-list 在來源 DOM/layout 釋放後仍可 raster，
-`tests/test_cli.c` 驗證 `TaiPage`→display list→800px document-height PNG 的成功、尺寸、
+list 在來源 DOM/layout 釋放後仍可 raster；page-scroll differential 另驗證 clamp 與單次
+viewport→document hit conversion，並以 nested element scroll 交叉檢查 raster/hit。
+`tests/test_cli.c` 驗證 `TaiPage`→display list→800×532 page viewport PNG 的成功、尺寸、
 opaque background、anchor pixel 與 CLI 失敗路徑。這不
-勾選上述完整 paint/raster acceptance，因 rounded clip、其餘 effects、互動與 viewport scroll、
-image、rounded shape hit、viewport/input/event dispatch、SDL presentation 與完整 Python
+勾選上述完整 paint/raster acceptance，因 rounded clip、其餘 effects、互動 scroll input、
+image、rounded shape hit、input/event dispatch、SDL presentation 與完整 Python
 display/raster differential 尚未移植。
 
 不以外網網站可用性作 deterministic acceptance；人工 test.md scenarios 改為本地 fixtures。

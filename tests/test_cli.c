@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
   cairo_surface_t *surface = cairo_image_surface_create_from_png(output);
   assert(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
   assert(cairo_image_surface_get_width(surface) == 800);
-  assert(cairo_image_surface_get_height(surface) == 96);
+  assert(cairo_image_surface_get_height(surface) == 532);
   assert(pixel(surface, 0, 0) == 0xffffffffU);
   assert(pixel(surface, 100, 30) == 0xff0000ffU);
   cairo_surface_destroy(surface);

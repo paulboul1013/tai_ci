@@ -52,31 +52,36 @@ rounded mask 尚不在可比較集合。
 
 座標契約如下：layout leaves 和 clip rect 都儲存 document coordinates；scroll child 不先改寫
 為 local coordinates。Cairo 遇到 push 時先在當前 document transform 下套用 border-box clip，
-再 `translate(0, -scroll_y)`，直到配對 pop restore。viewport/page scroll 尚未接入，因此目前
-screenshot surface 的原點就是 document origin。`tai_display_list_hit_test` 接受 document-space
+再 `translate(0, -scroll_y)`，直到配對 pop restore。`tai_display_list_hit_test` 接受 document-space
 座標，從最前景 leaf 反向搜尋；scroll 子樹先拒絕 clip 外點，再將 y 加上 `scroll_y` 後遞迴，
 巢狀 transform 依序合成。矩形使用 Skia `Rect.contains` 的半開邊界：包含 left/top，不包含
 right/bottom。每個可命中 leaf 複製 stable node ID；透明 scroll container 在其 Scroll 之前
 加入 hit-only leaf，使可見 child 未覆蓋時仍可命中。raw display query 不解析 DOM；`TaiPage`
-才在其 document 存活時將 ID 解析成 live `TaiNode`。
+才在其 document 存活時將 ID 解析成 live `TaiNode`。page scroll 由 `TaiPage` 擁有並 clamp 至
+`[0, max(document_height + 2 * VSTEP - viewport_height, 0)]`；
+`tai_page_viewport_hit_test` 唯一一次把 viewport `(x,y)` 轉成 document
+`(x,y + scroll_y)`。viewport PNG 使用相同 state，以 `-scroll_y` translation raster，沒有
+改寫或污染 immutable display list。
 
 `tests/hit_differential.py` 以 frozen `hit_test_paint_commands` 比較最上層 paint leaf、clip
 內外、非零與巢狀 scroll、透明 scroll container 和矩形邊界。`tests/test_render.c` 另以同一個
-雙層非零 scroll fixture 交叉檢查 Cairo key pixel 與 hit target。
+雙層非零 scroll fixture 交叉檢查 Cairo key pixel 與 hit target，並在其外疊加 page scroll。
+`tests/page_scroll_differential.py` 比較 frozen Python 的 page clamp、viewport conversion、零與
+非零 scroll 及半開邊界。
 
 這個切片刻意沒有宣稱完整等價於 Python `paint_tree`：尚缺 rounded `overflow: clip`、
-opacity/blend、blur、image、rounded shape hit 與 viewport/page scroll。`tests/test_render.c` 用非零 scroll
+opacity/blend、blur、image 與 rounded shape hit。`tests/test_render.c` 用非零 scroll
 驗證 command order、clip/translation raster key regions，並在釋放 source DOM/layout 後再次
 raster，作為自包含 display-list ownership contract 的測試證據。
 
 ## Headless screenshot contract
 
 `tai-browser --screenshot PATH URL` 使用同一個 `TaiPage` display list，同步輸出不透明白底
-PNG 且不輸出 JSON。寬度固定為 800px；高度為
-`max(1, ceil(layout_height + 2 * VSTEP))`，目前 `VSTEP=18`。未指定 screenshot 時維持
-原本 JSON contract。
+PNG 且不輸出 JSON。headless page viewport 固定為 800×532px；高度由 frozen Python 實際
+render 後的 `Chrome.bottom`（約 68.34px）計算 `ceil(600 - Chrome.bottom)`。輸出只含目前
+page viewport，並套用相同 page scroll。未指定 screenshot 時維持原本 JSON contract。
 
-`tests/test_cli.c` 透過 subprocess 執行 CLI，驗證成功輸出、800×96 fixture 尺寸、白底與
+`tests/test_cli.c` 透過 subprocess 執行 CLI，驗證成功輸出、800×532 viewport 尺寸、白底與
 紅色區塊 anchor pixels、無法寫檔、缺少參數、option-as-value 與 unknown option。這是
 `TaiPage → display list → Cairo PNG` 的間接 E2E，不代表 SDL presentation 或完整 Python
 paint-tree 等價。

@@ -10,10 +10,10 @@ tai_ci 原有 main.c/Makefile 刪除狀態保持不變。
 | CSS / style | CSSParser/selectors/style | src/css.c | DOM/core | VALIDATING | parser/selector/cascade/style unit 與 differential tests | 僅支援目前 property/selector subset；完整 CSS/CSSOM 與 rendering effects 尚未完成；非標準語意見 `docs/architecture/compatibility-semantics.md` |
 | URL / HTTP | URL/cookie/referrer helpers | src/url.c / src/network.c | core/libcurl multi | VALIDATING | URL differential；local HTTP、cookie/cache/redirect/referrer/cancellation integration tests | TLS/compression capability 由目前 libcurl build 提供，並非直接 CMake OpenSSL/zlib integration；CORS response validation、XHR/fetch、browser-level Referrer-Policy、header limits、TLS/error paths 與 in-flight cancellation 尚未完整驗證；cookie/redirect 不委由 curl 自動決策 |
 | Fonts / layout | Document/Block/Line/Text/controls | src/layout.c | DOM/CSS/FreeType/fontconfig/utf8proc | VALIDATING | layout CLI smoke test；geometry-tree differential 與 browser DOM/layout differential；固定高度 overflow content/scroll clamp unit integration | HarfBuzz/FriBidi、controls、互動 scroll、完整 shaping/BiDi 尚未完成；現行 RTL 語意見 compatibility contract |
-| Paint / raster | Draw*/Blend/Blur/Scroll/Raster* | src/render.c / include/tai/render.h | Cairo/layout | VALIDATING | Python/C DrawRect/DrawText/DrawHitTest structural differential；Scroll push/pop structural differential；paint-order、半開邊界、clip、非零與巢狀 scroll hit differential；巢狀 scroll Cairo/hit key-region cross-check；self-contained node-ID ownership/unit tests；PNG CLI integration | 尚缺 rounded `overflow: clip`/shape hit、opacity/blend、blur、image、viewport/page scroll 與 SDL presentation；完整 scope 與座標契約見 `docs/reference-render-contract.md` |
+| Paint / raster | Draw*/Blend/Blur/Scroll/Raster* | src/render.c / include/tai/render.h | Cairo/layout | VALIDATING | Python/C DrawRect/DrawText/DrawHitTest structural differential；Scroll push/pop structural differential；paint-order、半開邊界、clip、非零與巢狀 scroll hit differential；page-scroll clamp/viewport-hit differential；page+element scroll Cairo/hit cross-check；self-contained node-ID ownership/unit tests；viewport PNG CLI integration | 尚缺 rounded `overflow: clip`/shape hit、opacity/blend、blur、image 與 SDL presentation；完整 scope 與座標契約見 `docs/reference-render-contract.md` |
 | JS / events | JSContext/runtime.js | src/js.c | QuickJS-NG/DOM/CSS/network | VALIDATING | attribute/query bridge、單節點 event cancellation 與 exception handling tests | event bubbling 與 execution-limit test coverage 尚未完成；bridge/limit mechanism 已存在，但廣泛 DOM mutation APIs、`innerHTML`/`outerHTML`、cookie、XHR/fetch、RAF/timers、完整 differential 與 scheduler/browser integration 尚未完成 |
 | Scheduling | TaskRunner/NetworkTaskRunner/frame clocks | src/scheduler.c | threads/network | VALIDATING | priority/FIFO/aging、frame guard、generation cancellation unit tests | 目前仍為獨立 scheduler unit；缺 Browser/Network/frame-clock integration、concurrent lifecycle/close protocol 與 stale browser snapshot 驗證 |
-| Browser / window | BrowserApp/BrowserWindow/Tab/Chrome | src/browser.c / src/main.c | 已接入 subsystem；目標另需 SDL3 | VALIDATING | synchronous headless navigation、browser DOM/layout differential、inline script ordering、單一 external script smoke、page document-coordinate hit adapter 與 `--screenshot` PNG E2E | CLI 仍為 headless-only；完整 mixed inline/external resource-order differential、SDL3 window/input/event dispatch、viewport scroll、history、forms 與 tabs 尚未完成 |
+| Browser / window | BrowserApp/BrowserWindow/Tab/Chrome | src/browser.c / src/main.c | 已接入 subsystem；目標另需 SDL3 | VALIDATING | synchronous headless navigation、browser DOM/layout differential、inline script ordering、單一 external script smoke、page document/viewport hit adapters、clamped page scroll 與 `--screenshot` viewport PNG E2E | CLI 仍為 headless-only；完整 mixed inline/external resource-order differential、SDL3 window/input/event dispatch、interactive scroll input、history、forms 與 tabs 尚未完成 |
 
 ## 目標執行順序與驗證關卡
 
@@ -41,3 +41,10 @@ document-space clip、先 clip 後 translate 的 push/pop 命令表示。Debug C
 ASan/UBSan（`detect_leaks=0`）同一套測試通過，其中 localhost network fixture 因 sandbox
 socket policy 在允許 loopback 的環境重跑。這不是 LeakSanitizer 證據，也不改變 Paint/raster
 與 Browser/window 的 `VALIDATING` 狀態。
+
+後續 page-scroll slice 將 viewport dimensions 與 clamped `scroll_y` 收進 `TaiPage`，保留 raw
+display-list document-coordinate contract；viewport hit 與 Cairo raster 共用一次
+viewport→document conversion。Python/C differential 覆蓋 zero/non-zero/clamp/boundary，另以雙層
+element scroll fixture 驗證 page scroll 疊加後 raster/hit 一致。headless screenshot 現為
+frozen Python rendered Chrome geometry 推導的 800×532 page viewport，且 differential 直接
+比較 PNG IHDR 高度；SDL presentation 與 input/event dispatch 仍未開始。

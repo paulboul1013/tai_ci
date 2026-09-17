@@ -1,7 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tai/browser.h"
-#include <limits.h>
-#include <math.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -13,7 +11,8 @@
 #endif
 
 enum { TAI_SCREENSHOT_WIDTH = 800 };
-static const double TAI_VERTICAL_STEP = 18.0;
+/* Frozen Python rounds 600 - its rendered Chrome.bottom to 532 pixels. */
+enum { TAI_SCREENSHOT_HEIGHT = 532 };
 
 static void usage(const char *program) {
     fprintf(stderr,
@@ -89,23 +88,13 @@ int main(int argc, char **argv) {
     TaiNetwork *network = tai_network_create();
     char *error = NULL;
     TaiPage *page = css && url && network
-        ? tai_page_load(network, url, css, TAI_SCREENSHOT_WIDTH, rtl, &error)
+        ? tai_page_load(network, url, css, TAI_SCREENSHOT_WIDTH,
+                        TAI_SCREENSHOT_HEIGHT, rtl, &error)
         : NULL;
     bool success = page != NULL;
     if (!page) fprintf(stderr, "load failed: %s\n", error ? error : "allocation failed");
     else if (screenshot_path) {
-        double height = ceil(tai_layout_height(tai_page_layout(page)) +
-                             2.0 * TAI_VERTICAL_STEP);
-        if (!isfinite(height) || height > INT_MAX) {
-            free(error);
-            error = tai_strdup("invalid document height");
-            success = false;
-        } else {
-            int pixels = height < 1.0 ? 1 : (int)height;
-            success = tai_display_list_write_png(
-                tai_page_display_list(page), screenshot_path,
-                TAI_SCREENSHOT_WIDTH, pixels, &error);
-        }
+        success = tai_page_write_viewport_png(page, screenshot_path, &error);
         if (!success)
             fprintf(stderr, "screenshot failed: %s\n",
                     error ? error : "PNG output failed");

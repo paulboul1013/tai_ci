@@ -409,13 +409,16 @@ static void cairo_color(uint32_t rgba, double *r, double *g, double *b,
   *a = (double)(rgba & 255) / 255.0;
 }
 
-bool tai_display_list_write_png(const TaiDisplayList *list, const char *path,
-                                int width, int height, char **error) {
+bool tai_display_list_write_png_region(const TaiDisplayList *list,
+                                       const char *path, int width, int height,
+                                       double document_x, double document_y,
+                                       char **error) {
   if (error) {
     free(*error);
     *error = NULL;
   }
-  if (!list || !path || width <= 0 || height <= 0) {
+  if (!list || !path || width <= 0 || height <= 0 ||
+      !isfinite(document_x) || !isfinite(document_y)) {
     set_error(error, "invalid PNG output input");
     return false;
   }
@@ -424,6 +427,7 @@ bool tai_display_list_write_png(const TaiDisplayList *list, const char *path,
   cairo_t *context = cairo_create(surface);
   cairo_set_source_rgb(context, 1, 1, 1);
   cairo_paint(context);
+  cairo_translate(context, -document_x, -document_y);
   for (size_t i = 0; i < list->count; i++) {
     const TaiDisplayCommand *command = &list->items[i];
     double r, g, b, a;
@@ -463,4 +467,10 @@ bool tai_display_list_write_png(const TaiDisplayList *list, const char *path,
     return false;
   }
   return true;
+}
+
+bool tai_display_list_write_png(const TaiDisplayList *list, const char *path,
+                                int width, int height, char **error) {
+  return tai_display_list_write_png_region(list, path, width, height, 0.0, 0.0,
+                                           error);
 }

@@ -106,6 +106,13 @@ if(BUILD_TESTING)
   target_link_libraries(test_browser PRIVATE tai_core)
   target_compile_options(test_browser PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME browser_headless COMMAND test_browser)
+  add_executable(page_scroll_probe tests/page_scroll_probe.c)
+  target_link_libraries(page_scroll_probe PRIVATE tai_core)
+  target_compile_options(page_scroll_probe PRIVATE
+    -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME page_scroll_differential COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/page_scroll_differential.py"
+    $<TARGET_FILE:page_scroll_probe> $<TARGET_FILE:tai-browser>)
   add_test(NAME browser_differential COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/browser_differential.py" $<TARGET_FILE:tai-browser>)
   add_test(NAME display_differential COMMAND "${Python3_EXECUTABLE}"

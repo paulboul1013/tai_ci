@@ -2,11 +2,14 @@
 #include "tai/browser.h"
 #include "tai/css.h"
 
+#include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 
 typedef enum { RESOURCE_STYLE, RESOURCE_SCRIPT } ResourceKind;
+static const double TAI_PAGE_VERTICAL_STEP = 18.0;
 typedef struct {
     ResourceKind kind;
     TaiUrl *url;
@@ -21,6 +24,9 @@ struct TaiPage {
     TaiJsContext *javascript;
     TaiLayout *layout;
     TaiDisplayList *display;
+    double viewport_width;
+    double viewport_height;
+    double scroll_y;
     bool secure;
     bool dirty;
 };
@@ -149,10 +155,13 @@ static void invalidated(void *opaque) {
 }
 
 TaiPage *tai_page_load(TaiNetwork *network, const TaiUrl *url,
-                       const char *default_css, double viewport_width, bool rtl,
-                       char **error) {
+                       const char *default_css, double viewport_width,
+                       double viewport_height, bool rtl, char **error) {
     if (error) { free(*error); *error = NULL; }
-    if (!network || !url || !default_css || viewport_width <= 0.0) {
+    if (!network || !url || !default_css || !isfinite(viewport_width) ||
+        !isfinite(viewport_height) || viewport_width <= 0.0 ||
+        viewport_height <= 0.0 || viewport_width > INT_MAX ||
+        viewport_height > INT_MAX) {
         diagnostic(error, "invalid page load input");
         return NULL;
     }
@@ -162,6 +171,8 @@ TaiPage *tai_page_load(TaiNetwork *network, const TaiUrl *url,
     Resource *resources = NULL;
     size_t resource_count = 0;
     if (!page) goto oom;
+    page->viewport_width = viewport_width;
+    page->viewport_height = viewport_height;
     page->url = tai_url_parse(tai_url_string(url));
     if (!page->url) goto oom;
     response = tai_network_request(network, url, NULL, NULL, NULL, NULL);
@@ -262,6 +273,41 @@ TaiNode *tai_page_hit_test(const TaiPage *page, double x, double y,
     if (!node) return NULL;
     if (hit) *hit = found;
     return node;
+}
+double tai_page_scroll_y(const TaiPage *page) {
+    return page ? page->scroll_y : 0.0;
+}
+double tai_page_max_scroll_y(const TaiPage *page) {
+    if (!page || !page->layout) return 0.0;
+    double document_height = tai_layout_height(page->layout) +
+                             2.0 * TAI_PAGE_VERTICAL_STEP;
+    return fmax(0.0, document_height - page->viewport_height);
+}
+bool tai_page_set_scroll_y(TaiPage *page, double scroll_y) {
+    if (!page || !isfinite(scroll_y)) return false;
+    page->scroll_y = fmax(0.0, fmin(scroll_y, tai_page_max_scroll_y(page)));
+    return true;
+}
+TaiNode *tai_page_viewport_hit_test(const TaiPage *page, double x, double y,
+                                    TaiDisplayHit *hit) {
+    if (!page || !isfinite(y)) {
+        if (hit) *hit = (TaiDisplayHit){0};
+        return NULL;
+    }
+    return tai_page_hit_test(page, x, y + page->scroll_y, hit);
+}
+bool tai_page_write_viewport_png(const TaiPage *page, const char *path,
+                                 char **error) {
+    if (!page) {
+        if (error) {
+            free(*error);
+            *error = tai_strdup("invalid page PNG output input");
+        }
+        return false;
+    }
+    return tai_display_list_write_png_region(
+        page->display, path, (int)ceil(page->viewport_width),
+        (int)ceil(page->viewport_height), 0.0, page->scroll_y, error);
 }
 const TaiUrl *tai_page_url(const TaiPage *page) { return page ? page->url : NULL; }
 void tai_page_json(FILE *out, const TaiPage *page) {

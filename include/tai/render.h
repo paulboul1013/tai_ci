@@ -48,5 +48,11 @@ void tai_display_list_json(FILE *out, const TaiDisplayList *list);
  * white; width and height are pixel dimensions and must be positive. */
 bool tai_display_list_write_png(const TaiDisplayList *list, const char *path,
                                 int width, int height, char **error);
+/* Renders a viewport whose top-left corner is document_x/document_y. The
+ * display list remains in document coordinates and is not mutated. */
+bool tai_display_list_write_png_region(const TaiDisplayList *list,
+                                       const char *path, int width, int height,
+                                       double document_x, double document_y,
+                                       char **error);
 
 #endif

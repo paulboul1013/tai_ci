@@ -140,6 +140,22 @@ static void test_nested_scroll_raster_and_hit_agree(void) {
                          20 * cairo_image_surface_get_stride(surface) + 150 * 4;
   assert(pixel[0] == 255 && pixel[1] == 0 && pixel[2] == 0 && pixel[3] == 255);
   cairo_surface_destroy(surface);
+
+  /* A page adapter converts viewport y=10 to document y=20 once. The same
+   * document origin passed to raster must expose the same nested-scroll leaf. */
+  assert(tai_display_list_hit_test(list, 150, 10 + 10, &hit));
+  assert(hit.node_id == blue->id);
+  assert(tai_display_list_write_png_region(
+      list, "/tmp/tai-ci-page-and-element-scroll.png", 200, 40, 0, 10,
+      &error));
+  surface = cairo_image_surface_create_from_png(
+      "/tmp/tai-ci-page-and-element-scroll.png");
+  assert(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+  pixel = cairo_image_surface_get_data(surface) +
+          10 * cairo_image_surface_get_stride(surface) + 150 * 4;
+  assert(pixel[0] == 255 && pixel[1] == 0 && pixel[2] == 0 &&
+         pixel[3] == 255);
+  cairo_surface_destroy(surface);
   tai_display_list_destroy(list);
   tai_layout_destroy(layout);
   tai_css_destroy(sheet);
