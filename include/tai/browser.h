@@ -18,6 +18,9 @@ void tai_page_destroy(TaiPage *page);
 TaiNode *tai_page_root(const TaiPage *page);
 const TaiLayout *tai_page_layout(const TaiPage *page);
 const TaiDisplayList *tai_page_display_list(const TaiPage *page);
+/* Resolves a document-space display hit while the page owns its document. */
+TaiNode *tai_page_hit_test(const TaiPage *page, double x, double y,
+                           TaiDisplayHit *hit);
 const TaiUrl *tai_page_url(const TaiPage *page);
 void tai_page_json(FILE *out, const TaiPage *page);
 

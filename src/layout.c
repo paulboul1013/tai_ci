@@ -14,7 +14,8 @@ struct Box {
   Box **children;
   size_t count;
   double x, y, width, height, ascent, descent, space, font_size;
-  bool bold, italic;
+  double content_height, scroll_y;
+  bool bold, italic, scrollable;
   char *word;
 };
 struct TaiLayout {
@@ -71,6 +72,15 @@ static double px(const char *s, double fallback) {
   return end != s && isfinite(x) && !strcmp(end, "px") && floor(x) == x
              ? x
              : fallback;
+}
+static bool fixed_px(const char *s, double *value) {
+  char *end;
+  double parsed = strtod(s, &end);
+  if (end == s || !isfinite(parsed) || strcmp(end, "px") ||
+      floor(parsed) != parsed)
+    return false;
+  *value = parsed;
+  return true;
 }
 static FT_Face face(TaiLayout *l, TaiNode *node, bool pre, double *size) {
   *size = fmax(1, nearbyint(strtod(property(node, "font-size", "16px"), NULL)));
@@ -399,7 +409,18 @@ static Box *layout_block(TaiLayout *l, TaiNode **nodes, size_t count, double x,
     }
     b->height = cy - y;
   }
-  b->height = px(property(nodes[0], "height", "auto"), b->height);
+  b->content_height = b->height;
+  double fixed_height;
+  if (fixed_px(property(nodes[0], "height", "auto"), &fixed_height))
+    b->height = fixed_height;
+  if (nodes[0]->kind == TAI_ELEMENT &&
+      !strcmp(property(nodes[0], "overflow", "visible"), "scroll") &&
+      fixed_px(property(nodes[0], "height", "auto"), &fixed_height)) {
+    b->scrollable = true;
+    double max_scroll = fmax(0, b->content_height - b->height);
+    b->scroll_y = fmax(0, fmin(nodes[0]->scroll_y, max_scroll));
+    nodes[0]->scroll_y = b->scroll_y;
+  }
   return b;
 }
 TaiLayout *tai_layout_create(TaiNode *root, double width, bool rtl,
@@ -475,13 +496,29 @@ static bool visit_box(const Box *b, TaiLayoutVisitor visitor, void *opaque) {
       .descent = b->descent,
       .space = b->space,
       .font_size = b->font_size,
-      .bold = b->bold,
-      .italic = b->italic,
+      .content_height = b->content_height,
+      .scroll_y = b->scroll_y,
+      .bold = b->bold, .italic = b->italic, .scrollable = b->scrollable,
   };
   if (!visitor(&item, opaque)) return false;
   for (size_t i = 0; i < b->count; i++)
     if (!visit_box(b->children[i], visitor, opaque)) return false;
   return true;
+}
+static bool walk_box(const Box *b, TaiLayoutTreeVisitor visitor,
+                     void *opaque) {
+  TaiLayoutItem item = {
+      .kind = item_kind(b), .node = b->node, .word = b->word,
+      .x = b->x, .y = b->y, .width = b->width, .height = b->height,
+      .ascent = b->ascent, .descent = b->descent, .space = b->space,
+      .font_size = b->font_size, .content_height = b->content_height,
+      .scroll_y = b->scroll_y, .bold = b->bold, .italic = b->italic,
+      .scrollable = b->scrollable,
+  };
+  if (!visitor(&item, TAI_LAYOUT_ENTER, opaque)) return false;
+  for (size_t i = 0; i < b->count; i++)
+    if (!walk_box(b->children[i], visitor, opaque)) return false;
+  return visitor(&item, TAI_LAYOUT_LEAVE, opaque);
 }
 bool tai_layout_visit(const TaiLayout *l, TaiLayoutVisitor visitor,
                       void *opaque, char **error) {
@@ -495,6 +532,22 @@ bool tai_layout_visit(const TaiLayout *l, TaiLayoutVisitor visitor,
   }
   if (!visit_box(l->root, visitor, opaque)) {
     if (error) *error = tai_strdup("layout visitor aborted");
+    return false;
+  }
+  return true;
+}
+bool tai_layout_walk(const TaiLayout *l, TaiLayoutTreeVisitor visitor,
+                     void *opaque, char **error) {
+  if (error) {
+    free(*error);
+    *error = NULL;
+  }
+  if (!l || !l->root || !visitor) {
+    if (error) *error = tai_strdup("invalid layout tree visitor input");
+    return false;
+  }
+  if (!walk_box(l->root, visitor, opaque)) {
+    if (error) *error = tai_strdup("layout tree visitor aborted");
     return false;
   }
   return true;

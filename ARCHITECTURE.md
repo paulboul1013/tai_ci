@@ -1,86 +1,133 @@
-# Browser C17 架構
+# tai_ci Repository Architecture
 
-## 來源與分析邊界
+本文件是 repository 結構與 subsystem 邊界的入口。先用目錄與 dependency map 定位工作，
+再依「Architecture references」的關鍵字只讀取匹配文件；不要預載全部 architecture 文件。
 
-Python oracle 是 `/home/paulboul/tai_gar` 的目前工作樹，不是 tai_ci 的舊 C CLI。
-`tests/reference/manifest.json` 記錄來源 commit 與實際檔案 SHA-256；工作樹的 browser.py 有未提交修改，故 commit 本身不足以識別規格。
-入口為 browser.py（9,862 行）、runtime.js、browser.css；web_server.py 提供測試網站。
-server.py 是另一份較舊 Browser，不能取代目前入口。test.md 是人工測試清單，並非自動測試套件。
+## Repository map
 
-## 實際 Python dependency graph
+```text
+tai_ci/
+├── AGENTS.md                  # agent 規約 router
+├── ARCHITECTURE.md            # 本文件：repo 與 subsystem map
+├── PORTING_PLAN.md            # subsystem migration 狀態與差異
+├── ACCEPTANCE.md              # whole-project 驗收條件
+├── CMakeLists.txt             # C17 build、dependencies、CTest targets
+├── assets/                    # runtime 靜態資源
+├── include/tai/               # public C subsystem interfaces
+├── src/                       # native C17 implementation
+├── tests/                     # C tests、Python differential、oracle snapshot
+├── docs/                      # 分析、contract 與漸進式 reference
+│   ├── python-{core,render,runtime}.md
+│   ├── reference-render-contract.md
+│   ├── agents/                # AGENTS.md 按關鍵字披露的工程規約
+│   └── architecture/          # 本文件按 architecture 分支披露的細節
+├── deps/                      # ignored/local-only third-party source/sysroot
+├── build/                     # ignored/generated normal CMake/Ninja output
+└── build-asan/                # ignored/generated ASan/UBSan output
+```
+
+`.agents/` 與 `.codex/` 是目前為空的 repository-local agent 設定預留目錄；空目錄不由 Git 保存。
+
+## Directory responsibilities
+
+| Path | Responsibility | Contents |
+|---|---|---|
+| `assets/` | Browser runtime assets | 預設 user-agent `browser.css`；安裝至 share directory |
+| `include/tai/` | Public subsystem contracts | opaque handles、public types、ownership comments、error-return APIs |
+| `src/` | Native implementation | 每個 subsystem 的 `.c`、CLI entry point、generated HTML entity table |
+| `tests/` | Executable evidence | C unit/integration tests、Python differential drivers、fixtures、reference snapshot |
+| `tests/reference/` | Frozen Python oracle | `browser.py`、`runtime.js`、CSS、manifest、reference server 與人工 scenarios |
+| `docs/` | On-demand project knowledge | Python analysis、render contract、agent rules、architecture details |
+| `deps/quickjs/` | JavaScript dependency | QuickJS-NG source integrated by CMake |
+| `deps/SDL/` | Future window/input source | vendored SDL3 checkout；CMake 尚未編譯或連結 |
+| `deps/sysroot/` | Local dependency prefix | development headers and libraries such as utf8proc/cmocka |
+| `build*/` | Generated artifacts | Ninja files、CTest metadata、libraries、executables；不屬於 source of truth |
+
+## Source layout
+
+Public headers and implementations use the same subsystem name:
+
+| Interface / implementation | Boundary |
+|---|---|
+| `core.h` / `core.c` | strings、map、file、JSON primitives |
+| `dom.h` / `dom.c` | HTML parsing、document、DOM nodes、view-source |
+| `css.h` / `css.c` | CSS parsing、selectors、cascade、computed style |
+| `url.h` / `url.c` | URL parsing、resolution、origin and identity |
+| `network.h` / `network.c` | libcurl multi requests、responses、cache/cookies |
+| `js.h` / `js.c` | QuickJS-NG context、DOM bridge、event dispatch |
+| `layout.h` / `layout.c` | block/line/text geometry and font measurement |
+| `render.h` / `render.c` | self-contained display list and Cairo PNG raster |
+| `scheduler.h` / `scheduler.c` | priority tasks、generation cancellation、frame deadlines |
+| `browser.h` / `browser.c` | `TaiPage` navigation and subsystem orchestration |
+| `main.c` | `tai-browser` JSON/screenshot CLI |
+| `html_entities.inc` | generated named-entity lookup included by `dom.c` |
+
+Public header index: `browser.h`, `core.h`, `css.h`, `dom.h`, `js.h`,
+`layout.h`, `network.h`, `render.h`, `scheduler.h`, and `url.h` under
+`include/tai/`.
+
+## Native subsystem map
 
 ```mermaid
 graph TD
-  App[BrowserApp / SDL event loop] --> Window[BrowserWindow / Chrome]
-  App --> Network[NetworkTaskRunner]
-  App --> Raster[RasterAndDrawRunner]
-  Window --> Tab[Tab / TaskRunner]
-  Tab --> URL[URL / HTTP / cookies / cache]
-  Network --> URL
-  Tab --> DOM[HTMLParser / Element / Text]
-  Tab --> CSS[CSSParser / selectors / style]
+  CLI[tai-browser CLI] --> Page[TaiPage orchestration]
+  Page --> Network[Network]
+  Page --> DOM[HTML / DOM]
+  Page --> CSS[CSS / style]
+  Page --> JS[QuickJS bridge]
+  Page --> Layout[Layout]
+  Page --> Display[Display list]
+  Network --> URL[URL]
   CSS --> DOM
-  Tab --> JS[JSContext / runtime.js / dukpy]
   JS --> DOM
-  JS --> CSS
-  JS --> URL
-  Tab --> Layout[Document / Block / Line / Text / controls]
   Layout --> DOM
-  Layout --> Font[Skia fonts / local emoji]
-  Layout --> Display[display commands / visual effects / hit testing]
-  Display --> Raster
-  Tab --> Commit[CommitData snapshots]
-  Commit --> Window
-  Raster --> Window
+  Display --> Layout
+  Display --> Cairo[Cairo PNG]
+  Scheduler[Scheduler] -. future browser/window integration .-> Page
 ```
 
-## 狀態、資料與事件
+`tai_core` compiles these native subsystems into one library. `tai-browser` is
+the current synchronous headless consumer; SDL window/input/presentation remains
+a future consumer rather than an implemented edge in this graph.
 
-BrowserApp 共享 visited URLs、bookmarks、network/raster runners 與 windows。每個 Window 擁有 tabs、active tab、Chrome、frame clock、committed snapshots 與 scene epoch。
-每個 Tab 擁有 URL/history、navigation generation、DOM、CSS rules、JS context、layout、display list、focus、document/element scroll 與 frame estimator。
+## Test layout
 
-Navigation 先增加 generation，網路結果排回 Tab task queue；過期 generation 不可改寫頁面。
-HTML parse 後按 DOM 順序收集 external scripts、stylesheets、inline styles；可並行取得資源，但按原始順序處理。
-Inline 與 external script 依 DOM traversal source order 收集，載入後以同一 JS context 依序執行；
-runtime.js 未提供 Python 所有 timer hooks，實際 bridge 必須逐項驗證。
-Style → layout → paint tree → immutable commit → raster → window present。點擊使用 paint order 與 clip/scroll 座標 hit test，再執行 JS event 與預設 navigation/form/focus 行為。
+- `test_*.c` mirrors native subsystem boundaries.
+- `test_browser.c`, `test_cli.c`, `test_core.c`, `test_css.c`, `test_dom.c`,
+  `test_js.c`, `test_layout.c`, `test_network.c`, `test_render.c`,
+  `test_scheduler.c`, and `test_url.c` are the native test executables.
+- `browser_differential.py`, `css_differential.py`, `dom_differential.py`,
+  `layout_differential.py`, and `url_differential.py` compare C with the Python
+  oracle; `network_integration.py` is registered as the network differential.
+- `oracle.py` normalizes Python outputs for comparison.
+- `network_fixture.py` and `network_integration.py` provide deterministic localhost HTTP cases.
+- `url_probe.c` exposes the native URL result to its Python differential driver.
+- `fixtures/basic.html` is the current minimal layout input.
+- `reference/` stores `browser.py`, `runtime.js`, `browser.css`, `web_server.py`,
+  `manifest.json`, `test.md`, and its provenance `README.md`.
+- `test_cli.c` runs the screenshot CLI as a subprocess and indirectly covers
+  `TaiPage → display list → Cairo PNG` end to end.
 
-## Thread model
+## Documentation index
 
-SDL browser thread 負責 native window/input/presentation；每個 Tab 有序列化 Main Thread。
-Networking Thread 派發 I/O workers，完成後僅傳送結果，不直接修改 DOM/JS。
-CPU raster thread 擁有 raster surfaces；GPU 路徑因 GL context 綁定而由 browser thread raster。
-Window lock 保護跨執行緒狀態，generation/scene epoch 拒收 stale results；frame scheduling 使用 monotonic deadlines。
+- `python-core.md`, `python-render.md`, and `python-runtime.md` preserve focused
+  analysis of the reference implementation.
+- `reference-render-contract.md` owns observable layout, font, display-list, and
+  screenshot contracts.
+- `agents/` contains `oracle-and-porting.md`, `native-stack.md`,
+  `architecture-and-ownership.md`, `validation-and-completion.md`,
+  `execution-workflow.md`, and `project-records.md`.
+- `architecture/` contains `python-reference.md`, `native-runtime.md`, and
+  `compatibility-semantics.md`.
 
-## C 邊界與 ownership 決策
+## Architecture references
 
-依序建立 core、DOM、CSS、transport、layout/display/raster、JS、scheduler、browser/window。
-Document 擁有所有 nodes，node parent 與 layout/JS 對 node 的引用皆 borrowed。Document 銷毀前必須先結束 JS/layout 與 callback 使用；DOM mutation 不可讓 JS handles 懸空。
-CSS stylesheet 擁有 selectors/declarations；computed style 擁有字串副本。
-Network response 擁有 headers/body；跨 queue 移交時移轉 ownership。取消仍須銷毀 payload。
-Display snapshot 必須自足且不可在 raster 執行時修改；不得讓 worker 讀取可變 DOM。
-Opaque subsystem handles 隔離內部狀態；內部 DOM model 用共用 header 明訂欄位，以免 subsystem 自行發明結構。
+Match the current task and concepts encountered. Read every matching document in
+full, and leave unmatched branches out of context:
 
-目前 native paint slice 將 layout 與 raster 分成兩個邊界：`tai_layout_visit` 只在 owner thread
-同步提供 borrowed 幾何；`TaiDisplayList` 複製每個 command 的文字、字型名稱、顏色與幾何，
-不保留 DOM/layout pointer。`tai_display_list_write_png` 只讀 immutable list，Cairo surface 與
-context 均在呼叫內建立並確定性銷毀。這使後續 raster worker 可以接收 list ownership，而不會
-因 layout/DOM 先釋放而產生 UAF；目前尚未加入 Python 的 effect tree、clip/scroll isolation
-或 SDL present。
-
-Headless screenshot 是目前第一條完整 raster integration：`tai-browser --screenshot PATH URL`
-載入 `TaiPage` 後借用其 immutable display list，同步寫出 800px 寬 PNG；輸出高度為
-`max(1, ceil(layout_height + 36))`，對應 reference 的 `document.height + 2 * VSTEP`。
-surface 為 opaque white，寫檔完成或失敗後都由 raster API 銷毀 Cairo context/surface；
-`TaiPage` 仍由 CLI 在共同 cleanup path 銷毀。未指定 screenshot 時維持原有 JSON contract。
-
-Default CSS 是 install-time resource，不屬於 browser page ownership；`tai-browser` 依序從
-executable-relative install path、build-tree fallback 或最後的 cwd fallback 讀取，避免把
-checkout 絕對路徑寫入 binary。
-
-## 必須保留的非標準語意
-
-一般 HTML end-tag 僅 pop 一層；attributes 不解 entities；`<br/>` 是 br/ element。
-CSS comments 並未正確支援，會影響後續 rule；同 declaration block 後項覆蓋先項，即使先項 important。
-一般 img 無 layout；emoji 僅單字元對應本地 PNG。`--rtl` 是右對齊，並非完整 BiDi。
-不能用標準 library 的預設行為默默覆寫這些規格。Memory corruption 不屬於可保留行為；C 以錯誤回傳處理無效輸入，差異記錄於 PORTING_PLAN.md。
+- **Python oracle / BrowserApp / BrowserWindow / Tab / state flow / data flow / event flow / network event / thread model / CommitData / reference graph** → [`docs/architecture/python-reference.md`](docs/architecture/python-reference.md)
+- **Native ownership / lifetime / memory safety / use-after-free / dependency direction / TaiDocument / TaiResponse / TaiLayout / TaiDisplayList / Cairo lifecycle / scheduler / task queue / frame clock / runtime CSS** → [`docs/architecture/native-runtime.md`](docs/architecture/native-runtime.md)
+- **Compatibility / invalid input / HTML entity / br/ / CSS comment / important / image limitation / emoji / RTL behavior** → [`docs/architecture/compatibility-semantics.md`](docs/architecture/compatibility-semantics.md)
+- **Rendering geometry / font metrics / text measurement / rounding / baseline / display command / raster / PNG / screenshot contract** → [`docs/reference-render-contract.md`](docs/reference-render-contract.md)
+- **Migration state / known discrepancy / next subsystem** → [`PORTING_PLAN.md`](PORTING_PLAN.md)
+- **Whole-project completion claim** → [`ACCEPTANCE.md`](ACCEPTANCE.md)

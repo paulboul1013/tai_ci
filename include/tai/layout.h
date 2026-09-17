@@ -13,11 +13,16 @@ typedef struct {
   const TaiNode *node;
   const char *word;
   double x, y, width, height, ascent, descent, space, font_size;
-  bool bold, italic;
+  double content_height, scroll_y;
+  bool bold, italic, scrollable;
 } TaiLayoutItem;
 typedef bool (*TaiLayoutVisitor)(const TaiLayoutItem *item, void *opaque);
+typedef enum { TAI_LAYOUT_ENTER, TAI_LAYOUT_LEAVE } TaiLayoutVisitEvent;
+typedef bool (*TaiLayoutTreeVisitor)(const TaiLayoutItem *item,
+                                    TaiLayoutVisitEvent event, void *opaque);
 /* Layout owns its tree/fonts/words; DOM is borrowed and must outlive layout.
- * Construction never mutates DOM. One owner thread; no concurrent font access.
+ * Construction only clamps fixed overflow:scroll nodes' scroll_y state to the
+ * computed range. One owner thread; no concurrent DOM or font access.
  */
 TaiLayout *tai_layout_create(TaiNode *root, double viewport_width, bool rtl,
                              char **error);
@@ -29,4 +34,8 @@ double tai_layout_height(const TaiLayout *layout);
  * or mutate the DOM. */
 bool tai_layout_visit(const TaiLayout *layout, TaiLayoutVisitor visitor,
                       void *opaque, char **error);
+/* Walks the layout tree in paint nesting order. ENTER geometry is in document
+ * coordinates; LEAVE closes any state opened for that same item. */
+bool tai_layout_walk(const TaiLayout *layout, TaiLayoutTreeVisitor visitor,
+                     void *opaque, char **error);
 #endif

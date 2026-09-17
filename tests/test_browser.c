@@ -28,6 +28,11 @@ int main(void) {
     assert(tai_layout_height(tai_page_layout(page)) > 0.0);
     assert(tai_page_display_list(page));
     assert(tai_display_list_count(tai_page_display_list(page)) == 2);
+    TaiDisplayHit hit = {0};
+    TaiNode *hit_node = tai_page_hit_test(page, 14.0, 21.0, &hit);
+    assert(hit_node && hit_node->kind == TAI_TEXT);
+    assert(hit_node->id == hit.node_id);
+    assert(!tai_page_hit_test(page, 799.0, 21.0, &hit));
 
     TaiUrl *inline_url = tai_url_parse(
         "data:text/html,%3Cscript%3Edocument.querySelectorAll(%27p%27)%5B0%5D.setAttribute(%27data-state%27,%27first%27)%3B%3C%2Fscript%3E%3Cp%3EInline%3C%2Fp%3E%3Cscript%3Evar%20p%3Ddocument.querySelectorAll(%27p%27)%5B0%5D%3Bp.setAttribute(%27data-state%27%2Cp.getAttribute(%27data-state%27)%2B%27-second%27)%3B%3C%2Fscript%3E");

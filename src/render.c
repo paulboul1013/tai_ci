@@ -9,6 +9,8 @@
 typedef struct {
   TaiDisplayCommand *items;
   size_t count, capacity;
+  size_t *scroll_starts;
+  size_t scroll_count, scroll_capacity;
   bool failed;
 } Build;
 
@@ -46,6 +48,27 @@ static bool append(Build *build, TaiDisplayCommand command) {
   return true;
 }
 
+static bool remember_scroll(Build *build, size_t index) {
+  if (build->scroll_count == build->scroll_capacity) {
+    size_t capacity = build->scroll_capacity ? build->scroll_capacity * 2 : 4;
+    if (capacity < build->scroll_count + 1 ||
+        capacity > SIZE_MAX / sizeof(*build->scroll_starts)) {
+      build->failed = true;
+      return false;
+    }
+    size_t *next = realloc(build->scroll_starts,
+                           capacity * sizeof(*build->scroll_starts));
+    if (!next) {
+      build->failed = true;
+      return false;
+    }
+    build->scroll_starts = next;
+    build->scroll_capacity = capacity;
+  }
+  build->scroll_starts[build->scroll_count++] = index;
+  return true;
+}
+
 static uint8_t hex(char c) {
   if (c >= '0' && c <= '9') return (uint8_t)(c - '0');
   if (c >= 'a' && c <= 'f') return (uint8_t)(c - 'a' + 10);
@@ -74,9 +97,13 @@ static uint32_t color(const char *value, bool *transparent) {
     return rgb(128, 128, 128, 255);
   if (!strcmp(value, "lightgray") || !strcmp(value, "lightgrey"))
     return rgb(211, 211, 211, 255);
+  if (!strcmp(value, "lightblue")) return rgb(173, 216, 230, 255);
+  if (!strcmp(value, "lightgreen")) return rgb(144, 238, 144, 255);
+  if (!strcmp(value, "orange")) return rgb(255, 165, 0, 255);
+  if (!strcmp(value, "orangered")) return rgb(255, 69, 0, 255);
   if (value[0] == '#') {
     size_t length = strlen(value + 1);
-    if (length == 3 || length == 4 || length == 6 || length == 8) {
+    if (length == 3 || length == 6 || length == 8) {
       uint8_t digits[8];
       bool valid = true;
       for (size_t i = 0; i < length; i++) {
@@ -85,11 +112,10 @@ static uint32_t color(const char *value, bool *transparent) {
       }
       if (valid) {
         uint8_t r, g, b, a = 255;
-        if (length <= 4) {
+        if (length == 3) {
           r = (uint8_t)(digits[0] * 17);
           g = (uint8_t)(digits[1] * 17);
           b = (uint8_t)(digits[2] * 17);
-          if (length == 4) a = (uint8_t)(digits[3] * 17);
         } else {
           r = (uint8_t)(digits[0] * 16 + digits[1]);
           g = (uint8_t)(digits[2] * 16 + digits[3]);
@@ -149,6 +175,7 @@ static bool make_fill(Build *build, const TaiLayoutItem *item) {
       .width = item->width,
       .height = item->height,
       .rgba = rgba,
+      .node_id = item->node->id,
   };
   return append(build, command);
 }
@@ -168,6 +195,7 @@ static bool make_text(Build *build, const TaiLayoutItem *item) {
       .ascent = item->ascent,
       .bold = item->bold,
       .italic = item->italic,
+      .node_id = item->node->id,
   };
   if (!command.text || !command.font_family) {
     free((char *)command.text);
@@ -183,10 +211,46 @@ static bool make_text(Build *build, const TaiLayoutItem *item) {
   return true;
 }
 
-static bool collect(const TaiLayoutItem *item, void *opaque) {
+static bool is_scroll_container(const TaiLayoutItem *item) {
+  return item->kind == TAI_LAYOUT_BLOCK && item->scrollable;
+}
+
+static bool collect(const TaiLayoutItem *item, TaiLayoutVisitEvent event,
+                    void *opaque) {
   Build *build = opaque;
-  if (item->kind == TAI_LAYOUT_BLOCK &&
-      !make_fill(build, item)) return false;
+  if (event == TAI_LAYOUT_LEAVE) {
+    if (is_scroll_container(item)) {
+      if (!build->scroll_count) {
+        build->failed = true;
+        return false;
+      }
+      size_t start = build->scroll_starts[--build->scroll_count];
+      if (build->count == start + 1) {
+        build->count--;
+        return true;
+      }
+      return append(build, (TaiDisplayCommand){.kind = TAI_POP_CLIP_SCROLL});
+    }
+    return true;
+  }
+  if (item->kind == TAI_LAYOUT_BLOCK && !make_fill(build, item)) return false;
+  if (is_scroll_container(item)) {
+    if (!append(build, (TaiDisplayCommand){
+                         .kind = TAI_DRAW_HIT_TEST,
+                         .x = item->x, .y = item->y,
+                         .width = item->width, .height = item->height,
+                         .node_id = item->node->id,
+                     }))
+      return false;
+    size_t start = build->count;
+    if (!append(build, (TaiDisplayCommand){
+                         .kind = TAI_PUSH_CLIP_SCROLL,
+                         .x = item->x, .y = item->y,
+                         .width = item->width, .height = item->height,
+                         .scroll_y = item->scroll_y,
+                     }) || !remember_scroll(build, start))
+      return false;
+  }
   if (item->kind == TAI_LAYOUT_TEXT && !make_text(build, item)) return false;
   return !build->failed;
 }
@@ -201,16 +265,18 @@ TaiDisplayList *tai_display_list_create(const TaiLayout *layout, char **error) {
     return NULL;
   }
   Build build = {0};
-  if (!tai_layout_visit(layout, collect, &build, error) || build.failed) {
+  if (!tai_layout_walk(layout, collect, &build, error) || build.failed) {
     for (size_t i = 0; i < build.count; i++) {
       free((char *)build.items[i].text);
       free((char *)build.items[i].font_family);
     }
     free(build.items);
+    free(build.scroll_starts);
     if (error && !*error) *error = tai_strdup("display list allocation failed");
     return NULL;
   }
   TaiDisplayList *list = calloc(1, sizeof(*list));
+  free(build.scroll_starts);
   if (!list) {
     for (size_t i = 0; i < build.count; i++) {
       free((char *)build.items[i].text);
@@ -244,17 +310,81 @@ const TaiDisplayCommand *tai_display_list_command(const TaiDisplayList *list,
   return list && index < list->count ? &list->items[index] : NULL;
 }
 
+static bool contains(const TaiDisplayCommand *command, double x, double y) {
+  double left = (float)command->x;
+  double top = (float)command->y;
+  double right = (float)(command->x + command->width);
+  double bottom = (float)(command->y + command->height);
+  return x >= left && y >= top && x < right && y < bottom;
+}
+
+static bool hit_range(const TaiDisplayList *list, size_t begin, size_t end,
+                      double x, double y, TaiDisplayHit *hit) {
+  size_t index = end;
+  while (index > begin) {
+    const TaiDisplayCommand *command = &list->items[--index];
+    if (command->kind == TAI_POP_CLIP_SCROLL) {
+      size_t depth = 1;
+      size_t push = index;
+      while (push > begin && depth) {
+        const TaiDisplayCommand *candidate = &list->items[--push];
+        if (candidate->kind == TAI_POP_CLIP_SCROLL)
+          depth++;
+        else if (candidate->kind == TAI_PUSH_CLIP_SCROLL)
+          depth--;
+      }
+      if (depth) return false;
+      const TaiDisplayCommand *clip = &list->items[push];
+      if (contains(clip, x, y) &&
+          hit_range(list, push + 1, index, x, y + clip->scroll_y, hit))
+        return true;
+      index = push;
+      continue;
+    }
+    if (command->kind == TAI_PUSH_CLIP_SCROLL) return false;
+    if ((command->kind == TAI_DRAW_FILL_RECT ||
+         command->kind == TAI_DRAW_TEXT ||
+         command->kind == TAI_DRAW_HIT_TEST) && contains(command, x, y)) {
+      *hit = (TaiDisplayHit){
+          .node_id = command->node_id, .kind = command->kind,
+          .x = command->x, .y = command->y,
+          .width = command->width, .height = command->height,
+      };
+      return true;
+    }
+  }
+  return false;
+}
+
+bool tai_display_list_hit_test(const TaiDisplayList *list, double x, double y,
+                               TaiDisplayHit *hit) {
+  if (hit) *hit = (TaiDisplayHit){0};
+  if (!list || !hit || !isfinite(x) || !isfinite(y)) return false;
+  return hit_range(list, 0, list->count, x, y, hit);
+}
+
 void tai_display_list_json(FILE *out, const TaiDisplayList *list) {
   fputc('[', out);
   if (list) {
     for (size_t i = 0; i < list->count; i++) {
       const TaiDisplayCommand *command = &list->items[i];
       if (i) fputc(',', out);
-      fprintf(out, "{\"kind\":\"%s\",\"x\":%.17g,\"y\":%.17g"
+      const char *kind = command->kind == TAI_DRAW_TEXT ? "text" :
+                         command->kind == TAI_DRAW_FILL_RECT ? "fill_rect" :
+                         command->kind == TAI_DRAW_HIT_TEST ? "hit_test" :
+                         command->kind == TAI_PUSH_CLIP_SCROLL ?
+                             "push_clip_scroll" : "pop_clip_scroll";
+      fprintf(out, "{\"kind\":\"%s\"", kind);
+      if (command->kind == TAI_POP_CLIP_SCROLL) {
+        fputc('}', out);
+        continue;
+      }
+      fprintf(out, ",\"x\":%.17g,\"y\":%.17g"
                    ",\"width\":%.17g,\"height\":%.17g,\"rgba\":%u",
-              command->kind == TAI_DRAW_TEXT ? "text" : "fill_rect",
               command->x, command->y, command->width, command->height,
               command->rgba);
+      if (command->kind == TAI_PUSH_CLIP_SCROLL)
+        fprintf(out, ",\"scroll_y\":%.17g", command->scroll_y);
       if (command->text) {
         fputs(",\"text\":", out);
         tai_json_string(out, command->text);
@@ -299,7 +429,17 @@ bool tai_display_list_write_png(const TaiDisplayList *list, const char *path,
     double r, g, b, a;
     cairo_color(command->rgba, &r, &g, &b, &a);
     cairo_set_source_rgba(context, r, g, b, a);
-    if (command->kind == TAI_DRAW_FILL_RECT) {
+    if (command->kind == TAI_PUSH_CLIP_SCROLL) {
+      cairo_save(context);
+      cairo_rectangle(context, command->x, command->y, command->width,
+                      command->height);
+      cairo_clip(context);
+      cairo_translate(context, 0, -command->scroll_y);
+    } else if (command->kind == TAI_POP_CLIP_SCROLL) {
+      cairo_restore(context);
+    } else if (command->kind == TAI_DRAW_HIT_TEST) {
+      continue;
+    } else if (command->kind == TAI_DRAW_FILL_RECT) {
       cairo_rectangle(context, command->x, command->y, command->width,
                       command->height);
       cairo_fill(context);

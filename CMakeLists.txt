@@ -89,6 +89,11 @@ if(BUILD_TESTING)
   target_link_libraries(test_render PRIVATE tai_core)
   target_compile_options(test_render PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME render COMMAND test_render)
+  add_executable(hit_probe tests/hit_probe.c)
+  target_link_libraries(hit_probe PRIVATE tai_core)
+  target_compile_options(hit_probe PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME hit_differential COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/hit_differential.py" $<TARGET_FILE:hit_probe>)
   add_test(NAME layout_differential COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/layout_differential.py" $<TARGET_FILE:test_layout>)
   add_executable(test_network tests/test_network.c)
@@ -103,6 +108,8 @@ if(BUILD_TESTING)
   add_test(NAME browser_headless COMMAND test_browser)
   add_test(NAME browser_differential COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/browser_differential.py" $<TARGET_FILE:tai-browser>)
+  add_test(NAME display_differential COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/display_differential.py" $<TARGET_FILE:tai-browser>)
   add_executable(test_cli tests/test_cli.c)
   target_link_libraries(test_cli PRIVATE PkgConfig::CAIRO)
   target_compile_options(test_cli PRIVATE -Wall -Wextra -Wpedantic -Werror)

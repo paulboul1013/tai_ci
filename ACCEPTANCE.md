@@ -16,12 +16,16 @@
 - [ ] 獨立 verifier 已 review subsystem contracts、ownership、lifetime 與 integration，可追蹤 findings 均已解決或明確記錄。
 - [ ] ARCHITECTURE.md 與 PORTING_PLAN.md 反映實際完成狀態，所有 intentional differences 明列。
 
-目前已增加一個未完成但可驗證的 paint slice：block background/text display commands 與 Cairo
-PNG 輸出；`tests/test_render.c` 驗證 display list 在來源 DOM/layout 釋放後仍可 raster，
+目前已增加一個未完成但可驗證的 paint slice：block background/text display commands、單軸
+overflow scroll clip/translation、display-list hit query 與 Cairo PNG 輸出；structural differential
+比較 Python/C 的支援 leaves、透明 hit region 和 Scroll nesting，hit differential 比較 paint
+order、半開邊界、clip、非零與巢狀 scroll，`tests/test_render.c` 驗證非零 scroll key regions 及 display
+list 在來源 DOM/layout 釋放後仍可 raster，
 `tests/test_cli.c` 驗證 `TaiPage`→display list→800px document-height PNG 的成功、尺寸、
 opaque background、anchor pixel 與 CLI 失敗路徑。這不
-勾選上述完整 paint/raster acceptance，因 effects、clip、scroll、image、hit testing、SDL
-presentation 與完整 Python display/raster differential 尚未移植。
+勾選上述完整 paint/raster acceptance，因 rounded clip、其餘 effects、互動與 viewport scroll、
+image、rounded shape hit、viewport/input/event dispatch、SDL presentation 與完整 Python
+display/raster differential 尚未移植。
 
 不以外網網站可用性作 deterministic acceptance；人工 test.md scenarios 改為本地 fixtures。
 Pixel-perfect 只在字型、版本、backend 與環境固定時使用；優先比較 DOM/layout/display 結構。

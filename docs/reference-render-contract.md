@@ -34,15 +34,49 @@ TextLayout width 為整段 word 的 `measureText`，height 為 ascent+descent；
 
 `python3 tests/oracle.py` 的 dom、style、css、url、layout 均成功產生可經 `json.loads` 讀取的完整 JSON。layout 用 `<p>Hello world</p>`，CSS 用 `p.x:has(a) {color: red !important}`，DOM 包含 entity decode。這只證明 oracle 可執行，不構成 native migration 完成證據。
 
-## Native C 初始 display-list contract
+## Native C display-list contract
 
-`tai_layout_visit` 的 callback 參數是 borrowed view，只在 callback 期間有效；它不能被存入
-display list 或跨執行緒傳遞。`TaiDisplayList` 僅保留自有 command array，以及複製的文字和
-字型名稱，故其 source layout、DOM、stylesheet 可在 list 建立後釋放。初始 Cairo backend
-按 paint traversal 順序支援 `fill_rect` 與 `text`，以 opaque white ARGB32 image surface
-輸出 PNG；Cairo 的 premultiplied/native-endian 像素格式尚未接 SDL3 的 RGBA conversion。
+Display-list ownership 與 borrowed lifetime 的權威定義在
+[`docs/architecture/native-runtime.md`](architecture/native-runtime.md)。初始 Cairo backend
+按 paint traversal 順序支援 `fill_rect`、`text`、不 raster 的 `hit_test`，以及成對的
+`push_clip_scroll`/`pop_clip_scroll`，以 opaque white ARGB32 image surface 輸出 PNG；Cairo
+的 premultiplied/native-endian 像素格式尚未接 SDL3 的 RGBA conversion。
 
-這個切片刻意沒有宣稱等價於 Python `paint_tree`：尚缺 rounded clip、scroll transform、
-opacity/blend、blur、image、hit-test 與完整 display differential。`tests/test_render.c`
-用紅色 block、藍色文字、PNG 像素錨點，並在釋放 DOM/layout 後再次 raster，驗證目前的
-ownership contract。
+`tests/display_differential.py` 遞迴穿過 Python `Blend.children`，將可比較的 `DrawRect`、
+`DrawText` 正規化為 native RGBA 與 x/y/width/height，以 `0.0001` 絕對誤差比較順序、種類、
+文字、顏色及幾何；案例包含多 block、換行和巢狀 styled element。字型 family 與 glyph
+pixel 不在此 gate。overflow scroll 案例另將 Python `DrawHitTest`/`Scroll` 正規化為 native
+hit-only leaf 與 push/pop，
+驗證 empty-container elision 與 nested subtree ordering；Python clip 所用的 destination-in
+rounded mask 尚不在可比較集合。
+
+座標契約如下：layout leaves 和 clip rect 都儲存 document coordinates；scroll child 不先改寫
+為 local coordinates。Cairo 遇到 push 時先在當前 document transform 下套用 border-box clip，
+再 `translate(0, -scroll_y)`，直到配對 pop restore。viewport/page scroll 尚未接入，因此目前
+screenshot surface 的原點就是 document origin。`tai_display_list_hit_test` 接受 document-space
+座標，從最前景 leaf 反向搜尋；scroll 子樹先拒絕 clip 外點，再將 y 加上 `scroll_y` 後遞迴，
+巢狀 transform 依序合成。矩形使用 Skia `Rect.contains` 的半開邊界：包含 left/top，不包含
+right/bottom。每個可命中 leaf 複製 stable node ID；透明 scroll container 在其 Scroll 之前
+加入 hit-only leaf，使可見 child 未覆蓋時仍可命中。raw display query 不解析 DOM；`TaiPage`
+才在其 document 存活時將 ID 解析成 live `TaiNode`。
+
+`tests/hit_differential.py` 以 frozen `hit_test_paint_commands` 比較最上層 paint leaf、clip
+內外、非零與巢狀 scroll、透明 scroll container 和矩形邊界。`tests/test_render.c` 另以同一個
+雙層非零 scroll fixture 交叉檢查 Cairo key pixel 與 hit target。
+
+這個切片刻意沒有宣稱完整等價於 Python `paint_tree`：尚缺 rounded `overflow: clip`、
+opacity/blend、blur、image、rounded shape hit 與 viewport/page scroll。`tests/test_render.c` 用非零 scroll
+驗證 command order、clip/translation raster key regions，並在釋放 source DOM/layout 後再次
+raster，作為自包含 display-list ownership contract 的測試證據。
+
+## Headless screenshot contract
+
+`tai-browser --screenshot PATH URL` 使用同一個 `TaiPage` display list，同步輸出不透明白底
+PNG 且不輸出 JSON。寬度固定為 800px；高度為
+`max(1, ceil(layout_height + 2 * VSTEP))`，目前 `VSTEP=18`。未指定 screenshot 時維持
+原本 JSON contract。
+
+`tests/test_cli.c` 透過 subprocess 執行 CLI，驗證成功輸出、800×96 fixture 尺寸、白底與
+紅色區塊 anchor pixels、無法寫檔、缺少參數、option-as-value 與 unknown option。這是
+`TaiPage → display list → Cairo PNG` 的間接 E2E，不代表 SDL presentation 或完整 Python
+paint-tree 等價。

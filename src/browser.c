@@ -251,6 +251,18 @@ const TaiLayout *tai_page_layout(const TaiPage *page) { return page ? page->layo
 const TaiDisplayList *tai_page_display_list(const TaiPage *page) {
     return page ? page->display : NULL;
 }
+TaiNode *tai_page_hit_test(const TaiPage *page, double x, double y,
+                           TaiDisplayHit *hit) {
+    TaiDisplayHit found = {0};
+    if (hit) *hit = found;
+    if (!page || !page->document ||
+        !tai_display_list_hit_test(page->display, x, y, &found))
+        return NULL;
+    TaiNode *node = tai_document_node(page->document, found.node_id);
+    if (!node) return NULL;
+    if (hit) *hit = found;
+    return node;
+}
 const TaiUrl *tai_page_url(const TaiPage *page) { return page ? page->url : NULL; }
 void tai_page_json(FILE *out, const TaiPage *page) {
     fputs("{\"url\":", out);
