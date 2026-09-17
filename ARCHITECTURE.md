@@ -41,7 +41,8 @@ BrowserApp 共享 visited URLs、bookmarks、network/raster runners 與 windows�
 
 Navigation 先增加 generation，網路結果排回 Tab task queue；過期 generation 不可改寫頁面。
 HTML parse 後按 DOM 順序收集 external scripts、stylesheets、inline styles；可並行取得資源，但按原始順序處理。
-目前不收集 inline script。runtime.js 未提供 Python 所有 timer hooks，實際 bridge 必須逐項驗證。
+Inline 與 external script 依 DOM traversal source order 收集，載入後以同一 JS context 依序執行；
+runtime.js 未提供 Python 所有 timer hooks，實際 bridge 必須逐項驗證。
 Style → layout → paint tree → immutable commit → raster → window present。點擊使用 paint order 與 clip/scroll 座標 hit test，再執行 JS event 與預設 navigation/form/focus 行為。
 
 ## Thread model
@@ -59,6 +60,23 @@ CSS stylesheet 擁有 selectors/declarations；computed style 擁有字串副本
 Network response 擁有 headers/body；跨 queue 移交時移轉 ownership。取消仍須銷毀 payload。
 Display snapshot 必須自足且不可在 raster 執行時修改；不得讓 worker 讀取可變 DOM。
 Opaque subsystem handles 隔離內部狀態；內部 DOM model 用共用 header 明訂欄位，以免 subsystem 自行發明結構。
+
+目前 native paint slice 將 layout 與 raster 分成兩個邊界：`tai_layout_visit` 只在 owner thread
+同步提供 borrowed 幾何；`TaiDisplayList` 複製每個 command 的文字、字型名稱、顏色與幾何，
+不保留 DOM/layout pointer。`tai_display_list_write_png` 只讀 immutable list，Cairo surface 與
+context 均在呼叫內建立並確定性銷毀。這使後續 raster worker 可以接收 list ownership，而不會
+因 layout/DOM 先釋放而產生 UAF；目前尚未加入 Python 的 effect tree、clip/scroll isolation
+或 SDL present。
+
+Headless screenshot 是目前第一條完整 raster integration：`tai-browser --screenshot PATH URL`
+載入 `TaiPage` 後借用其 immutable display list，同步寫出 800px 寬 PNG；輸出高度為
+`max(1, ceil(layout_height + 36))`，對應 reference 的 `document.height + 2 * VSTEP`。
+surface 為 opaque white，寫檔完成或失敗後都由 raster API 銷毀 Cairo context/surface；
+`TaiPage` 仍由 CLI 在共同 cleanup path 銷毀。未指定 screenshot 時維持原有 JSON contract。
+
+Default CSS 是 install-time resource，不屬於 browser page ownership；`tai-browser` 依序從
+executable-relative install path、build-tree fallback 或最後的 cwd fallback 讀取，避免把
+checkout 絕對路徑寫入 binary。
 
 ## 必須保留的非標準語意
 
