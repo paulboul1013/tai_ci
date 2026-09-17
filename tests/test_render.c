@@ -17,6 +17,15 @@ static TaiNode *find_tag(TaiNode *node, const char *tag) {
   return NULL;
 }
 
+static uint32_t pixel(cairo_surface_t *surface, int x, int y) {
+  cairo_surface_flush(surface);
+  unsigned char *data = cairo_image_surface_get_data(surface);
+  int stride = cairo_image_surface_get_stride(surface);
+  unsigned char *value = data + y * stride + x * 4;
+  return ((uint32_t)value[2] << 24) | ((uint32_t)value[1] << 16) |
+         ((uint32_t)value[0] << 8) | value[3];
+}
+
 static void test_scroll_clip(void) {
   char *error = NULL;
   TaiDocument *document = tai_html_parse(
@@ -37,16 +46,20 @@ static void test_scroll_clip(void) {
   TaiDisplayList *list = tai_display_list_create(layout, &error);
   assert(list && !error);
 
-  assert(tai_display_list_count(list) == 8);
-  const TaiDisplayCommand *hit_only = tai_display_list_command(list, 1);
-  const TaiDisplayCommand *push = tai_display_list_command(list, 2);
-  const TaiDisplayCommand *pop = tai_display_list_command(list, 7);
+  assert(tai_display_list_count(list) == 10);
+  const TaiDisplayCommand *outer_push = tai_display_list_command(list, 0);
+  const TaiDisplayCommand *hit_only = tai_display_list_command(list, 2);
+  const TaiDisplayCommand *push = tai_display_list_command(list, 3);
+  const TaiDisplayCommand *pop = tai_display_list_command(list, 8);
+  const TaiDisplayCommand *outer_pop = tai_display_list_command(list, 9);
+  assert(outer_push && outer_push->kind == TAI_PUSH_CLIP);
   assert(hit_only && hit_only->kind == TAI_DRAW_HIT_TEST);
   assert(hit_only->node_id == scroller->id);
   assert(push && push->kind == TAI_PUSH_CLIP_SCROLL);
   assert(push->x == 13 && push->y == 18 && push->width == 174);
   assert(push->height == 20 && push->scroll_y == 20);
   assert(pop && pop->kind == TAI_POP_CLIP_SCROLL);
+  assert(outer_pop && outer_pop->kind == TAI_POP_CLIP);
 
   TaiDisplayHit hit = {0};
   assert(tai_display_list_hit_test(list, 150, 20, &hit));
@@ -163,6 +176,89 @@ static void test_nested_scroll_raster_and_hit_agree(void) {
   free(error);
 }
 
+static void test_rounded_overflow_clip_raster_and_hit(void) {
+  char *error = NULL;
+  TaiDocument *document = tai_html_parse(
+      "<main style=\"height:20px;overflow:clip;border-radius:10px;"
+      "background-color:red\"><div style=\"height:40px;"
+      "background-color:blue\"></div></main>", &error);
+  assert(document && !error);
+  TaiNode *root = tai_document_root(document);
+  TaiNode *child = find_tag(root, "div");
+  TaiStylesheet *sheet = tai_css_parse(
+      "html {display:block} body {display:block} main {display:block} "
+      "div {display:block}", &error);
+  assert(child && sheet && tai_css_style(root, sheet, &error));
+  TaiLayout *layout = tai_layout_create(root, 200.0, false, &error);
+  TaiDisplayList *list = layout ? tai_display_list_create(layout, &error) : NULL;
+  assert(layout && list && !error);
+  bool found_clip = false;
+  for (size_t index = 0; index < tai_display_list_count(list); index++) {
+    const TaiDisplayCommand *command = tai_display_list_command(list, index);
+    if (command->kind == TAI_PUSH_CLIP) {
+      assert(command->radius == 10.0 && command->scroll_y == 0.0);
+      found_clip = true;
+    }
+  }
+  assert(found_clip);
+
+  TaiDisplayHit hit = {0};
+  /* Python's Blend overflow mask only affects raster; a descendant leaf can
+   * still win point hit testing at this rounded-off corner. */
+  assert(tai_display_list_hit_test(list, 13, 18, &hit));
+  assert(hit.node_id == child->id);
+  assert(tai_display_list_hit_test(list, 100, 18, &hit));
+  assert(hit.node_id == child->id);
+  assert(tai_display_list_write_png(list, "/tmp/tai-ci-rounded-clip.png",
+                                    200, 80, &error));
+  cairo_surface_t *surface =
+      cairo_image_surface_create_from_png("/tmp/tai-ci-rounded-clip.png");
+  assert(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+  assert(pixel(surface, 13, 18) == 0xffffffffU);
+  /* The isolated destination-in mask removes the parent's red fill at the
+   * antialiased edge instead of blending it into the child blue. */
+  assert(pixel(surface, 19, 18) == 0xffffffffU);
+  assert(pixel(surface, 20, 18) == 0x0000ffffU);
+  assert(pixel(surface, 100, 18) == 0x0000ffffU);
+  cairo_surface_destroy(surface);
+  tai_display_list_destroy(list);
+  tai_layout_destroy(layout);
+  tai_css_destroy(sheet);
+  tai_document_destroy(document);
+  free(error);
+}
+
+static void test_rounded_fill_raster_and_hit(void) {
+  char *error = NULL;
+  TaiDocument *document = tai_html_parse(
+      "<div style=\"height:20px;border-radius:10px;"
+      "background-color:red\"></div>", &error);
+  assert(document && !error);
+  TaiNode *root = tai_document_root(document);
+  TaiStylesheet *sheet = tai_css_parse(
+      "html {display:block} body {display:block} div {display:block}", &error);
+  assert(sheet && tai_css_style(root, sheet, &error));
+  TaiLayout *layout = tai_layout_create(root, 200.0, false, &error);
+  TaiDisplayList *list = layout ? tai_display_list_create(layout, &error) : NULL;
+  assert(layout && list && !error);
+  TaiDisplayHit hit = {0};
+  assert(!tai_display_list_hit_test(list, 13, 18, &hit));
+  assert(tai_display_list_hit_test(list, 100, 18, &hit));
+  assert(tai_display_list_write_png(list, "/tmp/tai-ci-rounded-fill.png",
+                                    200, 80, &error));
+  cairo_surface_t *surface =
+      cairo_image_surface_create_from_png("/tmp/tai-ci-rounded-fill.png");
+  assert(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+  assert(pixel(surface, 13, 18) == 0xffffffffU);
+  assert(pixel(surface, 100, 18) == 0xff0000ffU);
+  cairo_surface_destroy(surface);
+  tai_display_list_destroy(list);
+  tai_layout_destroy(layout);
+  tai_css_destroy(sheet);
+  tai_document_destroy(document);
+  free(error);
+}
+
 int main(void) {
   char *error = NULL;
   TaiDocument *document = tai_html_parse(
@@ -224,5 +320,7 @@ int main(void) {
   test_scroll_clip();
   test_transparent_scroll_hit_region();
   test_nested_scroll_raster_and_hit_agree();
+  test_rounded_overflow_clip_raster_and_hit();
+  test_rounded_fill_raster_and_hit();
   return 0;
 }

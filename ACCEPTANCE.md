@@ -24,8 +24,8 @@ list 在來源 DOM/layout 釋放後仍可 raster；page-scroll differential 另�
 viewport→document hit conversion，並以 nested element scroll 交叉檢查 raster/hit。
 `tests/test_cli.c` 驗證 `TaiPage`→display list→800×532 page viewport PNG 的成功、尺寸、
 opaque background、anchor pixel 與 CLI 失敗路徑。這不
-勾選上述完整 paint/raster acceptance，因 rounded clip、其餘 effects、互動 scroll input、
-image、rounded shape hit、input/event dispatch、SDL presentation 與完整 Python
+勾選上述完整 paint/raster acceptance，因其餘 effects、互動 scroll input、
+image、input/event dispatch、SDL presentation 與完整 Python
 display/raster differential 尚未移植。
 
 不以外網網站可用性作 deterministic acceptance；人工 test.md scenarios 改為本地 fixtures。

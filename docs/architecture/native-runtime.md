@@ -26,8 +26,8 @@ private, incompatible node layouts.
   state. Construction reads styles and only mutates a fixed `overflow: scroll`
   node to persist its clamped `scroll_y`, matching the reference owner-thread
   behavior.
-- `TaiDisplayList` copies command text, font names, colors, geometry, clip
-  rectangles, scroll offsets, and scalar DOM node IDs; it keeps no DOM or
+- `TaiDisplayList` copies command text, font names, colors, geometry, rounded
+  clip radii, scroll offsets, and scalar DOM node IDs; it keeps no DOM or
   layout pointers and can outlive both. Raw hit results retain only copied ID,
   kind, and bounds. `TaiPage` owns viewport dimensions and clamped page scroll,
   converts viewport coordinates to document coordinates once, and resolves the
@@ -43,8 +43,9 @@ thread. `tai_layout_walk` adds paired enter/leave events at the same seam so the
 display-list builder can preserve effect nesting without exposing layout
 implementation structs. `tai_display_list_write_png` and
 `tai_display_list_hit_test` consume the resulting self-contained list. Hit
-testing shares flat paint ordering and paired scroll effects with raster; the
-small `TaiPage` adapter applies the shared viewport-to-document origin to hit
+testing shares flat paint ordering and paired clip/scroll effects with raster;
+rounded raster-only clips preserve the frozen Python Blend-mask hit semantics.
+The small `TaiPage` adapter applies the shared viewport-to-document origin to hit
 testing and viewport PNG raster, then resolves a successful hit to a live DOM
 node. The display list remains immutable document-coordinate state. The CLI
 owns the page/network/URL lifecycle and uses one

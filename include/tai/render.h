@@ -9,7 +9,9 @@ typedef enum {
   TAI_DRAW_FILL_RECT,
   TAI_DRAW_TEXT,
   TAI_DRAW_HIT_TEST,
+  TAI_PUSH_CLIP,
   TAI_PUSH_CLIP_SCROLL,
+  TAI_POP_CLIP,
   TAI_POP_CLIP_SCROLL
 } TaiDrawKind;
 
@@ -22,6 +24,8 @@ typedef struct {
   double font_size;
   double ascent;
   double scroll_y;
+  double radius;
+  double hit_radius;
   size_t node_id;
   bool bold, italic;
 } TaiDisplayCommand;
@@ -38,8 +42,9 @@ void tai_display_list_destroy(TaiDisplayList *list);
 size_t tai_display_list_count(const TaiDisplayList *list);
 const TaiDisplayCommand *tai_display_list_command(const TaiDisplayList *list,
                                                   size_t index);
-/* Queries document-space coordinates in front-to-back paint order. On a miss
- * or invalid input, hit is cleared and false is returned. */
+/* Queries document-space coordinates in front-to-back paint order. Raster and
+ * hit-test radii are copied independently to match the reference parsers. On
+ * a miss or invalid input, hit is cleared and false is returned. */
 bool tai_display_list_hit_test(const TaiDisplayList *list, double x, double y,
                                TaiDisplayHit *hit);
 void tai_display_list_json(FILE *out, const TaiDisplayList *list);

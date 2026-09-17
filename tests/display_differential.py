@@ -30,6 +30,11 @@ SCROLL_CASES = [
     "<div style='background-color:#778899'>nested</div>"
     "<div style='background-color:#aabbcc'>content</div></div></div>",
 ]
+ROUNDED_FILL_CASES = [
+    "<div style='height:20px;border-radius:10px;background-color:#112233'></div>",
+    "<div style='height:20px;border-radius:10.5px;background-color:#112233'></div>",
+    "<div style='height:20px;border-radius:1e999px;background-color:#112233'></div>",
+]
 
 
 NAMED_COLORS = {
@@ -99,6 +104,28 @@ def native_leaves(commands):
             if command["kind"] in ("fill_rect", "text")]
 
 
+def oracle_rounded_fills(commands):
+    fills = []
+    for command in commands:
+        if command["kind"] in ("DrawRect", "DrawRRect"):
+            left, top, right, bottom = command["rect"]
+            fill = {"kind": "fill_rect", "x": left, "y": top,
+                    "width": right - left, "height": bottom - top,
+                    "rgba": rgba(command["color"])}
+            if command["kind"] == "DrawRRect":
+                fill["radius"] = command["radius"]
+            fills.append(fill)
+        if "children" in command:
+            fills.extend(oracle_rounded_fills(command["children"]))
+    return fills
+
+
+def native_rounded_fills(commands):
+    keys = ("kind", "x", "y", "width", "height", "rgba", "radius")
+    return [{key: command[key] for key in keys if key in command}
+            for command in commands if command["kind"] == "fill_rect"]
+
+
 def oracle_scroll_structure(commands):
     output = []
     for command in commands:
@@ -124,6 +151,8 @@ def native_scroll_structure(commands):
     leaf_keys = ("kind", "x", "y", "width", "height", "rgba", "text")
     output = []
     for command in commands:
+        if command["kind"] in ("push_clip", "pop_clip"):
+            continue
         if command["kind"] == "push_clip_scroll":
             output.append({key: command[key] for key in
                            ("kind", "x", "y", "width", "height", "scroll_y")})
@@ -172,5 +201,16 @@ for index, html in enumerate(SCROLL_CASES):
             native_scroll_structure(actual_output["display"]),
             f"scroll case {index}")
 
+for index, html in enumerate(ROUNDED_FILL_CASES):
+    expected_output = json.loads(subprocess.check_output(
+        [sys.executable, str(ORACLE), "layout", html]))
+    url = "data:text/html," + quote(html, safe="")
+    actual_output = json.loads(subprocess.check_output(
+        [sys.argv[1], "--headless", url]))
+    compare(oracle_rounded_fills(expected_output["display"]),
+            native_rounded_fills(actual_output["display"]),
+            f"rounded fill case {index}")
+
 print(f"Display differential: {len(CASES)} leaf and "
-      f"{len(SCROLL_CASES)} scroll cases passed")
+      f"{len(SCROLL_CASES)} scroll and {len(ROUNDED_FILL_CASES)} rounded "
+      "fill cases passed")

@@ -39,7 +39,7 @@ TextLayout width 為整段 word 的 `measureText`，height 為 ascent+descent；
 Display-list ownership 與 borrowed lifetime 的權威定義在
 [`docs/architecture/native-runtime.md`](architecture/native-runtime.md)。初始 Cairo backend
 按 paint traversal 順序支援 `fill_rect`、`text`、不 raster 的 `hit_test`，以及成對的
-`push_clip_scroll`/`pop_clip_scroll`，以 opaque white ARGB32 image surface 輸出 PNG；Cairo
+`push_clip`/`pop_clip`、`push_clip_scroll`/`pop_clip_scroll`，以 opaque white ARGB32 image surface 輸出 PNG；Cairo
 的 premultiplied/native-endian 像素格式尚未接 SDL3 的 RGBA conversion。
 
 `tests/display_differential.py` 遞迴穿過 Python `Blend.children`，將可比較的 `DrawRect`、
@@ -47,15 +47,21 @@ Display-list ownership 與 borrowed lifetime 的權威定義在
 文字、顏色及幾何；案例包含多 block、換行和巢狀 styled element。字型 family 與 glyph
 pixel 不在此 gate。overflow scroll 案例另將 Python `DrawHitTest`/`Scroll` 正規化為 native
 hit-only leaf 與 push/pop，
-驗證 empty-container elision 與 nested subtree ordering；Python clip 所用的 destination-in
-rounded mask 尚不在可比較集合。
+驗證 empty-container elision 與 nested subtree ordering；rounded-fill differential 則涵蓋
+`10px`、`10.5px`、`1e999px` 的 reference DrawRRect/DrawRect 分流。rounded fill/clip 的 key-region
+raster 與 corner/center hit 由 `tests/test_render.c` 和 `tests/hit_differential.py` 覆蓋。
 
 座標契約如下：layout leaves 和 clip rect 都儲存 document coordinates；scroll child 不先改寫
-為 local coordinates。Cairo 遇到 push 時先在當前 document transform 下套用 border-box clip，
-再 `translate(0, -scroll_y)`，直到配對 pop restore。`tai_display_list_hit_test` 接受 document-space
+為 local coordinates。`push_clip_scroll` 在當前 document transform 下先套用矩形 border-box
+clip、再 `translate(0, -scroll_y)`，直到配對 pop restore；`push_clip` 則先隔離整個 subtree，
+在配對 pop 以 rounded destination-in mask 合成，避免 parent 背景在 antialiased corner 漏入 child。
+`tai_display_list_hit_test` 接受 document-space
 座標，從最前景 leaf 反向搜尋；scroll 子樹先拒絕 clip 外點，再將 y 加上 `scroll_y` 後遞迴，
-巢狀 transform 依序合成。矩形使用 Skia `Rect.contains` 的半開邊界：包含 left/top，不包含
-right/bottom。每個可命中 leaf 複製 stable node ID；透明 scroll container 在其 Scroll 之前
+巢狀 transform 依序合成。`push_clip` 是 raster-only rounded overflow mask；它不改變
+descendant point-hit traversal，因 frozen Python 對 `Blend` mask 也不做 hit recursion。
+`push_clip_scroll` 則保留 Python `Scroll.clip_rect.contains` 的矩形 hit gate，再轉換 child
+coordinates。rounded fill 或 hit-only scroll leaf 以 Skia `Rect.contains` 的半開外框加上 clamp
+後的 quarter-ellipse 判定。每個可命中 leaf 複製 stable node ID；透明 scroll container 在其 Scroll 之前
 加入 hit-only leaf，使可見 child 未覆蓋時仍可命中。raw display query 不解析 DOM；`TaiPage`
 才在其 document 存活時將 ID 解析成 live `TaiNode`。page scroll 由 `TaiPage` 擁有並 clamp 至
 `[0, max(document_height + 2 * VSTEP - viewport_height, 0)]`；
@@ -64,13 +70,14 @@ right/bottom。每個可命中 leaf 複製 stable node ID；透明 scroll contai
 改寫或污染 immutable display list。
 
 `tests/hit_differential.py` 以 frozen `hit_test_paint_commands` 比較最上層 paint leaf、clip
-內外、非零與巢狀 scroll、透明 scroll container 和矩形邊界。`tests/test_render.c` 另以同一個
+內外、非零與巢狀 scroll、transparent scroll container、矩形與 rounded corner 邊界，包含 fractional/huge
+radius 的寬鬆 effect parser。`tests/test_render.c` 另以同一個
 雙層非零 scroll fixture 交叉檢查 Cairo key pixel 與 hit target，並在其外疊加 page scroll。
 `tests/page_scroll_differential.py` 比較 frozen Python 的 page clamp、viewport conversion、零與
 非零 scroll 及半開邊界。
 
-這個切片刻意沒有宣稱完整等價於 Python `paint_tree`：尚缺 rounded `overflow: clip`、
-opacity/blend、blur、image 與 rounded shape hit。`tests/test_render.c` 用非零 scroll
+這個切片刻意沒有宣稱完整等價於 Python `paint_tree`：尚缺 opacity/blend、blur 與 image。
+`tests/test_render.c` 用非零 scroll
 驗證 command order、clip/translation raster key regions，並在釋放 source DOM/layout 後再次
 raster，作為自包含 display-list ownership contract 的測試證據。
 

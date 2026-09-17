@@ -2,15 +2,23 @@
 
 #include <cairo/cairo.h>
 #include <ctype.h>
+#include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 typedef struct {
+  size_t outer_start;
+  size_t scroll_start;
+  bool scroll;
+} ClipStart;
+
+typedef struct {
   TaiDisplayCommand *items;
   size_t count, capacity;
-  size_t *scroll_starts;
-  size_t scroll_count, scroll_capacity;
+  ClipStart *clip_starts;
+  size_t clip_count, clip_capacity;
   bool failed;
 } Build;
 
@@ -48,24 +56,24 @@ static bool append(Build *build, TaiDisplayCommand command) {
   return true;
 }
 
-static bool remember_scroll(Build *build, size_t index) {
-  if (build->scroll_count == build->scroll_capacity) {
-    size_t capacity = build->scroll_capacity ? build->scroll_capacity * 2 : 4;
-    if (capacity < build->scroll_count + 1 ||
-        capacity > SIZE_MAX / sizeof(*build->scroll_starts)) {
+static bool remember_clip(Build *build, ClipStart start) {
+  if (build->clip_count == build->clip_capacity) {
+    size_t capacity = build->clip_capacity ? build->clip_capacity * 2 : 4;
+    if (capacity < build->clip_count + 1 ||
+        capacity > SIZE_MAX / sizeof(*build->clip_starts)) {
       build->failed = true;
       return false;
     }
-    size_t *next = realloc(build->scroll_starts,
-                           capacity * sizeof(*build->scroll_starts));
+    ClipStart *next = realloc(build->clip_starts,
+                              capacity * sizeof(*build->clip_starts));
     if (!next) {
       build->failed = true;
       return false;
     }
-    build->scroll_starts = next;
-    build->scroll_capacity = capacity;
+    build->clip_starts = next;
+    build->clip_capacity = capacity;
   }
-  build->scroll_starts[build->scroll_count++] = index;
+  build->clip_starts[build->clip_count++] = start;
   return true;
 }
 
@@ -136,6 +144,35 @@ static const char *style(const TaiNode *node, const char *key,
   return value ? value : fallback;
 }
 
+static double effect_radius(const TaiNode *node) {
+  const char *value = style(node, "border-radius", "0px");
+  char *end = NULL;
+  double radius = strtod(value, &end);
+  if (end == value) return 0.0;
+  while (isspace((unsigned char)*end)) end++;
+  if (*end &&
+      (tolower((unsigned char)end[0]) != 'p' ||
+       tolower((unsigned char)end[1]) != 'x'))
+    return 0.0;
+  if (*end) {
+    end += 2;
+    while (isspace((unsigned char)*end)) end++;
+    if (*end) return 0.0;
+  }
+  return fmax(0.0, radius);
+}
+
+static double fill_radius(const TaiNode *node) {
+  const char *value = style(node, "border-radius", "0px");
+  errno = 0;
+  char *end = NULL;
+  long radius = strtol(value, &end, 10);
+  if (end == value || errno == ERANGE) return 0.0;
+  while (isspace((unsigned char)*end)) end++;
+  if (strcmp(end, "px")) return 0.0;
+  return radius > 0 ? (double)radius : 0.0;
+}
+
 static char *font_family(const char *value) {
   const char *end = strchr(value, ',');
   size_t length = end ? (size_t)(end - value) : strlen(value);
@@ -175,6 +212,8 @@ static bool make_fill(Build *build, const TaiLayoutItem *item) {
       .width = item->width,
       .height = item->height,
       .rgba = rgba,
+      .radius = fill_radius(item->node),
+      .hit_radius = effect_radius(item->node),
       .node_id = item->node->id,
   };
   return append(build, command);
@@ -193,6 +232,7 @@ static bool make_text(Build *build, const TaiLayoutItem *item) {
       .font_family = font_family(style(item->node, "font-family", "serif")),
       .font_size = item->font_size > 0 ? item->font_size : 16.0,
       .ascent = item->ascent,
+      .hit_radius = effect_radius(item->node),
       .bold = item->bold,
       .italic = item->italic,
       .node_id = item->node->id,
@@ -215,42 +255,81 @@ static bool is_scroll_container(const TaiLayoutItem *item) {
   return item->kind == TAI_LAYOUT_BLOCK && item->scrollable;
 }
 
+static bool is_clip_container(const TaiLayoutItem *item) {
+  if (item->kind != TAI_LAYOUT_BLOCK || !item->node ||
+      item->node->kind != TAI_ELEMENT)
+    return false;
+  const char *overflow = style(item->node, "overflow", "visible");
+  return !strcmp(overflow, "clip") || !strcmp(overflow, "scroll");
+}
+
 static bool collect(const TaiLayoutItem *item, TaiLayoutVisitEvent event,
                     void *opaque) {
   Build *build = opaque;
   if (event == TAI_LAYOUT_LEAVE) {
-    if (is_scroll_container(item)) {
-      if (!build->scroll_count) {
+    if (is_clip_container(item)) {
+      if (!build->clip_count) {
         build->failed = true;
         return false;
       }
-      size_t start = build->scroll_starts[--build->scroll_count];
-      if (build->count == start + 1) {
-        build->count--;
+      ClipStart start = build->clip_starts[--build->clip_count];
+      if (start.scroll) {
+        if (build->count == start.scroll_start + 1)
+          build->count--;
+        else if (!append(build, (TaiDisplayCommand){
+                                   .kind = TAI_POP_CLIP_SCROLL}))
+          return false;
+      }
+      if (build->count == start.outer_start + 1) {
+        build->count = start.outer_start;
         return true;
       }
-      return append(build, (TaiDisplayCommand){.kind = TAI_POP_CLIP_SCROLL});
+      if (build->count == start.outer_start + 2 &&
+          build->items[start.outer_start + 1].kind == TAI_DRAW_HIT_TEST) {
+        build->items[start.outer_start] = build->items[start.outer_start + 1];
+        build->count = start.outer_start + 1;
+        return true;
+      }
+      return append(build, (TaiDisplayCommand){.kind = TAI_POP_CLIP});
     }
     return true;
   }
-  if (item->kind == TAI_LAYOUT_BLOCK && !make_fill(build, item)) return false;
-  if (is_scroll_container(item)) {
+  if (is_clip_container(item)) {
+    ClipStart start = {
+        .outer_start = build->count,
+        .scroll = is_scroll_container(item),
+    };
     if (!append(build, (TaiDisplayCommand){
-                         .kind = TAI_DRAW_HIT_TEST,
+                         .kind = TAI_PUSH_CLIP,
                          .x = item->x, .y = item->y,
                          .width = item->width, .height = item->height,
-                         .node_id = item->node->id,
+                         .radius = effect_radius(item->node),
                      }))
       return false;
-    size_t start = build->count;
-    if (!append(build, (TaiDisplayCommand){
-                         .kind = TAI_PUSH_CLIP_SCROLL,
-                         .x = item->x, .y = item->y,
-                         .width = item->width, .height = item->height,
-                         .scroll_y = item->scroll_y,
-                     }) || !remember_scroll(build, start))
+    if (start.scroll) {
+      if (item->kind == TAI_LAYOUT_BLOCK && !make_fill(build, item)) return false;
+      if (!append(build, (TaiDisplayCommand){
+                           .kind = TAI_DRAW_HIT_TEST,
+                           .x = item->x, .y = item->y,
+                           .width = item->width, .height = item->height,
+                           .hit_radius = effect_radius(item->node),
+                           .node_id = item->node->id,
+                       }))
+        return false;
+      start.scroll_start = build->count;
+      if (!append(build, (TaiDisplayCommand){
+                           .kind = TAI_PUSH_CLIP_SCROLL,
+                           .x = item->x, .y = item->y,
+                           .width = item->width, .height = item->height,
+                           .scroll_y = item->scroll_y,
+                       }))
+        return false;
+    } else if (item->kind == TAI_LAYOUT_BLOCK && !make_fill(build, item)) {
       return false;
+    }
+    return remember_clip(build, start);
   }
+  if (item->kind == TAI_LAYOUT_BLOCK && !make_fill(build, item)) return false;
   if (item->kind == TAI_LAYOUT_TEXT && !make_text(build, item)) return false;
   return !build->failed;
 }
@@ -271,12 +350,12 @@ TaiDisplayList *tai_display_list_create(const TaiLayout *layout, char **error) {
       free((char *)build.items[i].font_family);
     }
     free(build.items);
-    free(build.scroll_starts);
+    free(build.clip_starts);
     if (error && !*error) *error = tai_strdup("display list allocation failed");
     return NULL;
   }
   TaiDisplayList *list = calloc(1, sizeof(*list));
-  free(build.scroll_starts);
+  free(build.clip_starts);
   if (!list) {
     for (size_t i = 0; i < build.count; i++) {
       free((char *)build.items[i].text);
@@ -318,33 +397,68 @@ static bool contains(const TaiDisplayCommand *command, double x, double y) {
   return x >= left && y >= top && x < right && y < bottom;
 }
 
+static bool rounded_contains(const TaiDisplayCommand *command, double x,
+                             double y) {
+  if (!contains(command, x, y)) return false;
+  double left = (double)(float)command->x;
+  double top = (double)(float)command->y;
+  double right = (double)(float)(command->x + command->width);
+  double bottom = (double)(float)(command->y + command->height);
+  double width = fmax(0.0, right - left);
+  double height = fmax(0.0, bottom - top);
+  if (width == 0.0 || height == 0.0) return false;
+  double radius = fmax(0.0, command->hit_radius);
+  radius = fmin(radius, fmin(width / 2.0, height / 2.0));
+  if (radius == 0.0) return true;
+  double inner_left = left + radius;
+  double inner_right = right - radius;
+  double inner_top = top + radius;
+  double inner_bottom = bottom - radius;
+  if ((inner_left <= x && x <= inner_right) ||
+      (inner_top <= y && y <= inner_bottom))
+    return true;
+  double center_x = x < inner_left ? inner_left : inner_right;
+  double center_y = y < inner_top ? inner_top : inner_bottom;
+  double dx = (x - center_x) / radius;
+  double dy = (y - center_y) / radius;
+  return dx * dx + dy * dy <= 1.0;
+}
+
 static bool hit_range(const TaiDisplayList *list, size_t begin, size_t end,
                       double x, double y, TaiDisplayHit *hit) {
   size_t index = end;
   while (index > begin) {
     const TaiDisplayCommand *command = &list->items[--index];
-    if (command->kind == TAI_POP_CLIP_SCROLL) {
+    if (command->kind == TAI_POP_CLIP ||
+        command->kind == TAI_POP_CLIP_SCROLL) {
       size_t depth = 1;
       size_t push = index;
       while (push > begin && depth) {
         const TaiDisplayCommand *candidate = &list->items[--push];
-        if (candidate->kind == TAI_POP_CLIP_SCROLL)
+        if (candidate->kind == TAI_POP_CLIP ||
+            candidate->kind == TAI_POP_CLIP_SCROLL)
           depth++;
-        else if (candidate->kind == TAI_PUSH_CLIP_SCROLL)
+        else if (candidate->kind == TAI_PUSH_CLIP_SCROLL ||
+                 candidate->kind == TAI_PUSH_CLIP)
           depth--;
       }
       if (depth) return false;
       const TaiDisplayCommand *clip = &list->items[push];
-      if (contains(clip, x, y) &&
-          hit_range(list, push + 1, index, x, y + clip->scroll_y, hit))
+      if ((clip->kind == TAI_PUSH_CLIP || contains(clip, x, y)) &&
+          hit_range(list, push + 1, index, x,
+                    y + (clip->kind == TAI_PUSH_CLIP_SCROLL
+                             ? clip->scroll_y : 0.0), hit))
         return true;
       index = push;
       continue;
     }
-    if (command->kind == TAI_PUSH_CLIP_SCROLL) return false;
+    if (command->kind == TAI_PUSH_CLIP_SCROLL ||
+        command->kind == TAI_PUSH_CLIP)
+      return false;
     if ((command->kind == TAI_DRAW_FILL_RECT ||
          command->kind == TAI_DRAW_TEXT ||
-         command->kind == TAI_DRAW_HIT_TEST) && contains(command, x, y)) {
+         command->kind == TAI_DRAW_HIT_TEST) &&
+        rounded_contains(command, x, y)) {
       *hit = (TaiDisplayHit){
           .node_id = command->node_id, .kind = command->kind,
           .x = command->x, .y = command->y,
@@ -372,10 +486,14 @@ void tai_display_list_json(FILE *out, const TaiDisplayList *list) {
       const char *kind = command->kind == TAI_DRAW_TEXT ? "text" :
                          command->kind == TAI_DRAW_FILL_RECT ? "fill_rect" :
                          command->kind == TAI_DRAW_HIT_TEST ? "hit_test" :
+                         command->kind == TAI_PUSH_CLIP ? "push_clip" :
                          command->kind == TAI_PUSH_CLIP_SCROLL ?
-                             "push_clip_scroll" : "pop_clip_scroll";
+                             "push_clip_scroll" :
+                         command->kind == TAI_POP_CLIP ? "pop_clip" :
+                             "pop_clip_scroll";
       fprintf(out, "{\"kind\":\"%s\"", kind);
-      if (command->kind == TAI_POP_CLIP_SCROLL) {
+      if (command->kind == TAI_POP_CLIP ||
+          command->kind == TAI_POP_CLIP_SCROLL) {
         fputc('}', out);
         continue;
       }
@@ -385,6 +503,12 @@ void tai_display_list_json(FILE *out, const TaiDisplayList *list) {
               command->rgba);
       if (command->kind == TAI_PUSH_CLIP_SCROLL)
         fprintf(out, ",\"scroll_y\":%.17g", command->scroll_y);
+      if (command->radius > 0.0) {
+        if (isinf(command->radius))
+          fputs(",\"radius\":Infinity", out);
+        else
+          fprintf(out, ",\"radius\":%.17g", command->radius);
+      }
       if (command->text) {
         fputs(",\"text\":", out);
         tai_json_string(out, command->text);
@@ -409,6 +533,28 @@ static void cairo_color(uint32_t rgba, double *r, double *g, double *b,
   *a = (double)(rgba & 255) / 255.0;
 }
 
+static void cairo_rounded_rectangle(cairo_t *context,
+                                    const TaiDisplayCommand *command) {
+  double radius = fmax(0.0, command->radius);
+  radius = fmin(radius, fmin(command->width / 2.0, command->height / 2.0));
+  if (radius == 0.0) {
+    cairo_rectangle(context, command->x, command->y, command->width,
+                    command->height);
+    return;
+  }
+  static const double pi = 3.14159265358979323846;
+  double left = command->x;
+  double top = command->y;
+  double right = command->x + command->width;
+  double bottom = command->y + command->height;
+  cairo_new_sub_path(context);
+  cairo_arc(context, right - radius, top + radius, radius, -pi / 2.0, 0.0);
+  cairo_arc(context, right - radius, bottom - radius, radius, 0.0, pi / 2.0);
+  cairo_arc(context, left + radius, bottom - radius, radius, pi / 2.0, pi);
+  cairo_arc(context, left + radius, top + radius, radius, pi, 3.0 * pi / 2.0);
+  cairo_close_path(context);
+}
+
 bool tai_display_list_write_png_region(const TaiDisplayList *list,
                                        const char *path, int width, int height,
                                        double document_x, double document_y,
@@ -425,6 +571,16 @@ bool tai_display_list_write_png_region(const TaiDisplayList *list,
   cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
                                                           width, height);
   cairo_t *context = cairo_create(surface);
+  const TaiDisplayCommand **clip_stack =
+      list->count ? calloc(list->count, sizeof(*clip_stack)) : NULL;
+  if (list->count && !clip_stack) {
+    cairo_destroy(context);
+    cairo_surface_destroy(surface);
+    set_error(error, "PNG clip stack allocation failed");
+    return false;
+  }
+  size_t clip_depth = 0;
+  bool valid = true;
   cairo_set_source_rgb(context, 1, 1, 1);
   cairo_paint(context);
   cairo_translate(context, -document_x, -document_y);
@@ -433,19 +589,38 @@ bool tai_display_list_write_png_region(const TaiDisplayList *list,
     double r, g, b, a;
     cairo_color(command->rgba, &r, &g, &b, &a);
     cairo_set_source_rgba(context, r, g, b, a);
-    if (command->kind == TAI_PUSH_CLIP_SCROLL) {
+    if (command->kind == TAI_PUSH_CLIP) {
       cairo_save(context);
-      cairo_rectangle(context, command->x, command->y, command->width,
-                      command->height);
+      cairo_push_group(context);
+      clip_stack[clip_depth++] = command;
+    } else if (command->kind == TAI_PUSH_CLIP_SCROLL) {
+      cairo_save(context);
+      cairo_rectangle(context, command->x, command->y,
+                      command->width, command->height);
       cairo_clip(context);
       cairo_translate(context, 0, -command->scroll_y);
-    } else if (command->kind == TAI_POP_CLIP_SCROLL) {
+      clip_stack[clip_depth++] = command;
+    } else if (command->kind == TAI_POP_CLIP ||
+               command->kind == TAI_POP_CLIP_SCROLL) {
+      if (!clip_depth) {
+        valid = false;
+        break;
+      }
+      const TaiDisplayCommand *clip = clip_stack[--clip_depth];
+      if (clip->kind == TAI_PUSH_CLIP) {
+        cairo_pattern_t *group = cairo_pop_group(context);
+        cairo_set_antialias(context, CAIRO_ANTIALIAS_NONE);
+        cairo_rounded_rectangle(context, clip);
+        cairo_clip(context);
+        cairo_set_source(context, group);
+        cairo_paint(context);
+        cairo_pattern_destroy(group);
+      }
       cairo_restore(context);
     } else if (command->kind == TAI_DRAW_HIT_TEST) {
       continue;
     } else if (command->kind == TAI_DRAW_FILL_RECT) {
-      cairo_rectangle(context, command->x, command->y, command->width,
-                      command->height);
+      cairo_rounded_rectangle(context, command);
       cairo_fill(context);
     } else {
       cairo_select_font_face(
@@ -457,11 +632,17 @@ bool tai_display_list_write_png_region(const TaiDisplayList *list,
       cairo_show_text(context, command->text);
     }
   }
+  if (clip_depth) valid = false;
   cairo_status_t status = cairo_status(context);
-  if (status == CAIRO_STATUS_SUCCESS)
+  if (valid && status == CAIRO_STATUS_SUCCESS)
     status = cairo_surface_write_to_png(surface, path);
   cairo_destroy(context);
   cairo_surface_destroy(surface);
+  free(clip_stack);
+  if (!valid) {
+    set_error(error, "invalid display list clip pairing");
+    return false;
+  }
   if (status != CAIRO_STATUS_SUCCESS) {
     set_error(error, cairo_status_to_string(status));
     return false;
