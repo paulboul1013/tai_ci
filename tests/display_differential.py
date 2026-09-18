@@ -35,6 +35,30 @@ ROUNDED_FILL_CASES = [
     "<div style='height:20px;border-radius:10.5px;background-color:#112233'></div>",
     "<div style='height:20px;border-radius:1e999px;background-color:#112233'></div>",
 ]
+EFFECT_CASES = [
+    "<div style='background-color:#ff0000;opacity: 50% '>opacity</div>",
+    "<div style='background-color:#ff0000;opacity:bogus'>fallback</div>",
+    "<div style='background-color:#ff0000;opacity:0x0p0'>hex fallback</div>",
+    "<div style='background-color:#ff0000;opacity:2'>clamp high</div>",
+    "<div style='background-color:#ff0000;opacity:-1'>clamp low</div>",
+    "<div style='background-color:#ff0000;mix-blend-mode: MuLtIpLy '>multiply</div>",
+    "<div style='background-color:#ff0000;mix-blend-mode:difference'>difference</div>",
+    "<div style='background-color:#ff0000;mix-blend-mode:destination-in'>mask</div>",
+    "<div style='background-color:#ff0000;mix-blend-mode:unknown'>fallback</div>",
+    "<div style='background-color:#ff0000;mix-blend-mode:normal'>normal</div>",
+]
+BLUR_CASES = [
+    "<div style='background-color:red;filter:blur(2px)'>blur</div>",
+    "<div style='background-color:red;filter: BLUR( 2PX ) '>blur</div>",
+    "<div style='background-color:red;filter:blur(1e2px)'>blur</div>",
+    "<div style='background-color:red;filter:blur(0)'>zero</div>",
+    "<div style='background-color:red;filter:blur(-2px)'>negative</div>",
+    "<div style='background-color:red;filter:blur(nanpx)'>nan</div>",
+    "<div style='background-color:red;filter:blur(2)'>unitless</div>",
+    "<div style='background-color:red;filter:blur(2px) extra'>invalid</div>",
+    "<main style='height:20px;overflow:scroll;filter:blur(2px)'>"
+    "<div style='height:40px;background-color:red'>nested scroll</div></main>",
+]
 
 
 NAMED_COLORS = {
@@ -166,6 +190,51 @@ def native_scroll_structure(commands):
     return output
 
 
+def oracle_effect_structure(commands):
+    output = []
+    for command in commands:
+        if command["kind"] == "Blend":
+            if command["should_save"]:
+                mode = command["blend_mode"] or "source-over"
+                if mode not in ("multiply", "difference", "destination-in"):
+                    mode = "source-over"
+                output.append({"kind": "push_blend",
+                               "opacity": command["opacity"],
+                               "blend_mode": mode})
+            output.extend(oracle_effect_structure(command["children"]))
+            if command["should_save"]:
+                output.append({"kind": "pop_blend"})
+        elif "children" in command:
+            output.extend(oracle_effect_structure(command["children"]))
+    return output
+
+
+def oracle_blur_structure(commands):
+    output = []
+    for command in commands:
+        if command["kind"] == "Blur":
+            output.append({"kind": "push_blur", "sigma": command["sigma"]})
+            output.extend(oracle_blur_structure(command["children"]))
+            output.append({"kind": "pop_blur"})
+        elif "children" in command:
+            output.extend(oracle_blur_structure(command["children"]))
+    return output
+
+
+def native_blur_structure(commands):
+    return [({"kind": command["kind"], "sigma": command["sigma"]}
+             if command["kind"] == "push_blur" else {"kind": "pop_blur"})
+            for command in commands
+            if command["kind"] in ("push_blur", "pop_blur")]
+
+
+def native_effect_structure(commands):
+    keys = ("kind", "opacity", "blend_mode")
+    return [{key: command[key] for key in keys if key in command}
+            for command in commands
+            if command["kind"] in ("push_blend", "pop_blend")]
+
+
 def compare(expected, actual, path="display"):
     if isinstance(expected, dict):
         assert expected.keys() == actual.keys(), (path, expected, actual)
@@ -211,6 +280,26 @@ for index, html in enumerate(ROUNDED_FILL_CASES):
             native_rounded_fills(actual_output["display"]),
             f"rounded fill case {index}")
 
+for index, html in enumerate(EFFECT_CASES):
+    expected_output = json.loads(subprocess.check_output(
+        [sys.executable, str(ORACLE), "layout", html]))
+    url = "data:text/html," + quote(html, safe="")
+    actual_output = json.loads(subprocess.check_output(
+        [sys.argv[1], "--headless", url]))
+    compare(oracle_effect_structure(expected_output["display"]),
+            native_effect_structure(actual_output["display"]),
+            f"effect case {index}")
+
+for index, html in enumerate(BLUR_CASES):
+    expected_output = json.loads(subprocess.check_output(
+        [sys.executable, str(ORACLE), "layout", html]))
+    url = "data:text/html," + quote(html, safe="")
+    actual_output = json.loads(subprocess.check_output(
+        [sys.argv[1], "--headless", url]))
+    compare(oracle_blur_structure(expected_output["display"]),
+            native_blur_structure(actual_output["display"]),
+            f"blur case {index}")
+
 print(f"Display differential: {len(CASES)} leaf and "
       f"{len(SCROLL_CASES)} scroll and {len(ROUNDED_FILL_CASES)} rounded "
-      "fill cases passed")
+      f"fill, {len(EFFECT_CASES)} effect, and {len(BLUR_CASES)} blur cases passed")

@@ -22,12 +22,15 @@ private, incompatible node layouts.
   string values.
 - `TaiResponse` owns headers and body. Queue handoff transfers response
   ownership, and cancellation still destroys payloads.
-- `TaiLayout` borrows the styled DOM and owns layout nodes, words, and font
-  state. Construction reads styles and only mutates a fixed `overflow: scroll`
+- `TaiLayout` borrows the styled DOM and owns layout nodes, words, font
+  state, and successfully decoded OpenMoji cache entries. PNG decoding uses
+  the existing Cairo dependency; missing/corrupt assets are not cached.
+  Construction reads styles and only mutates a fixed `overflow: scroll`
   node to persist its clamped `scroll_y`, matching the reference owner-thread
   behavior.
-- `TaiDisplayList` copies command text, font names, colors, geometry, rounded
-  clip radii, scroll offsets, and scalar DOM node IDs; it keeps no DOM or
+- `TaiDisplayList` copies command text, font names, colors, geometry, decoded
+  premultiplied image pixels, rounded
+  clip radii, scroll offsets, blur sigma, opacity/blend scalars, and scalar DOM node IDs; it keeps no DOM or
   layout pointers and can outlive both. Raw hit results retain only copied ID,
   kind, and bounds. `TaiPage` owns viewport dimensions and clamped page scroll,
   converts viewport coordinates to document coordinates once, and resolves the
@@ -43,8 +46,11 @@ thread. `tai_layout_walk` adds paired enter/leave events at the same seam so the
 display-list builder can preserve effect nesting without exposing layout
 implementation structs. `tai_display_list_write_png` and
 `tai_display_list_hit_test` consume the resulting self-contained list. Hit
-testing shares flat paint ordering and paired clip/scroll effects with raster;
+testing shares flat paint ordering and paired clip/scroll/blur/blend effects with raster;
 rounded raster-only clips preserve the frozen Python Blend-mask hit semantics.
+Blur owns no persistent surface: each synchronous raster call owns and deterministically
+destroys its Cairo group pattern, Gaussian kernel, and two temporary pixel buffers on both
+success and failure.
 The small `TaiPage` adapter applies the shared viewport-to-document origin to hit
 testing and viewport PNG raster, then resolves a successful hit to a live DOM
 node. The display list remains immutable document-coordinate state. The CLI

@@ -8,12 +8,24 @@ typedef struct TaiDisplayList TaiDisplayList;
 typedef enum {
   TAI_DRAW_FILL_RECT,
   TAI_DRAW_TEXT,
+  TAI_DRAW_IMAGE,
   TAI_DRAW_HIT_TEST,
   TAI_PUSH_CLIP,
   TAI_PUSH_CLIP_SCROLL,
+  TAI_PUSH_BLEND,
+  TAI_PUSH_BLUR,
   TAI_POP_CLIP,
-  TAI_POP_CLIP_SCROLL
+  TAI_POP_CLIP_SCROLL,
+  TAI_POP_BLEND,
+  TAI_POP_BLUR
 } TaiDrawKind;
+
+typedef enum {
+  TAI_BLEND_SOURCE_OVER,
+  TAI_BLEND_MULTIPLY,
+  TAI_BLEND_DIFFERENCE,
+  TAI_BLEND_DESTINATION_IN
+} TaiBlendMode;
 
 typedef struct {
   TaiDrawKind kind;
@@ -26,8 +38,14 @@ typedef struct {
   double scroll_y;
   double radius;
   double hit_radius;
+  double opacity;
+  double sigma;
+  TaiBlendMode blend_mode;
   size_t node_id;
   bool bold, italic;
+  /* Owned by TaiDisplayList for image commands; NULL otherwise. */
+  const unsigned char *image_pixels;
+  int image_width, image_height, image_stride;
 } TaiDisplayCommand;
 
 typedef struct {

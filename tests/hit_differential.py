@@ -31,6 +31,12 @@ CASES = [
     ("<div style='height:20px;border-radius:10px'>x</div>", 17, 25),
     ("<main style='height:20px;overflow:clip;border-radius:10px'><div style='height:40px;background-color:blue'></div></main>", 13, 18),
     ("<main style='height:20px;overflow:clip;border-radius:10px'><div style='height:40px;background-color:blue'></div></main>", 100, 18),
+    ("<div style='height:20px;background-color:red;opacity:0'></div>", 20, 20),
+    ("<div style='height:20px;background-color:red;mix-blend-mode:multiply'></div>", 20, 20),
+    ("<div style='height:20px;background-color:red;filter:blur(4px)'></div>", 20, 20),
+    ("<div style='height:20px;background-color:red;filter:blur(4px)'></div>", 10, 20),
+    ("<main data-scroll='20' style='height:20px;overflow:scroll;filter:blur(2px)'><div style='height:20px;background-color:red'>a</div><div style='height:20px;background-color:blue'>b</div></main>", 150, 20),
+    ("<main data-scroll='20' style='height:20px;overflow:scroll;filter:blur(2px)'><div style='height:20px;background-color:red'>a</div><div style='height:20px;background-color:blue'>b</div></main>", 150, 38),
 ]
 
 

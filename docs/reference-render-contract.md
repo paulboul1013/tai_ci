@@ -41,6 +41,17 @@ Display-list ownership 與 borrowed lifetime 的權威定義在
 按 paint traversal 順序支援 `fill_rect`、`text`、不 raster 的 `hit_test`，以及成對的
 `push_clip`/`pop_clip`、`push_clip_scroll`/`pop_clip_scroll`，以 opaque white ARGB32 image surface 輸出 PNG；Cairo
 的 premultiplied/native-endian 像素格式尚未接 SDL3 的 RGBA conversion。
+Opacity 與 mix-blend-mode 另以成對 `push_blend`/`pop_blend` 表示；push 複製 clamp 後 alpha
+與 effective source-over/multiply/difference/destination-in mode，pop 將 isolated Cairo group
+一次合成回 parent。normal、src-over、source-over 且 opacity 1 的 no-op subtree 不產生命令；
+未知 mode 仍隔離但以 source-over 執行，符合 frozen oracle。
+CSS `filter: blur(...)` 以成對 `push_blur`/`pop_blur` 表示，push 僅複製 sigma，並位於
+overflow group 內、subtree leaves 外，因此固定順序為 subtree → blur → rounded overflow clip
+→ opacity/blend。sigma zero 與 invalid/negative/unitless non-zero 值不產生命令。Cairo group 的
+premultiplied ARGB32 channels 使用截斷於 3σ 的 separable Gaussian kernel；這與 Skia 使用相同
+sigma 語意但不宣稱逐像素相同，acceptance 限於結構與穩定 key regions。Exact convolution
+另有每次 effect 25,000,000 channel-tap work budget；超限時 PNG raster 明確失敗，不會靜默換成
+不同濾鏡或讓不受信任 CSS 長時間佔用 raster thread。display list 仍保留原 sigma。
 
 `tests/display_differential.py` 遞迴穿過 Python `Blend.children`，將可比較的 `DrawRect`、
 `DrawText` 正規化為 native RGBA 與 x/y/width/height，以 `0.0001` 絕對誤差比較順序、種類、
@@ -76,7 +87,37 @@ radius 的寬鬆 effect parser。`tests/test_render.c` 另以同一個
 `tests/page_scroll_differential.py` 比較 frozen Python 的 page clamp、viewport conversion、零與
 非零 scroll 及半開邊界。
 
-這個切片刻意沒有宣稱完整等價於 Python `paint_tree`：尚缺 opacity/blend、blur 與 image。
+Opacity/blend differential 涵蓋 numeric/percentage、invalid fallback、clamp、case/whitespace、
+unknown/normal elision；raster key pixels 涵蓋 subtree alpha、multiply、difference、destination-in、
+sibling isolation，以及 rounded clip/scroll 在 outer blend 內的 nesting。Blend hit traversal 只反向
+遞迴，不因 opacity zero 拒絕，也不新增 clip 或座標轉換。成對效果共用同一 Cairo stack，錯配
+或未閉合會安全失敗。
+
+Blur differential 涵蓋 px、case/whitespace、scientific notation、zero forms、negative、NaN、
+unsupported unitless non-zero 與 invalid suffix；oracle probe 另鎖定 `blur(infpx)` 會解析成
+infinity，但 frozen oracle 的 strict JSON serializer 隨即失敗。Native 為維持有限配置與合法
+JSON，刻意將所有 non-finite sigma 視為 `none`。Blur raster key regions 驗證完整 subtree 只
+隔離一次、expanded pixels 再被 rounded overflow 裁切、outer opacity/blend ordering 與 sibling
+isolation；Blur hit traversal 不 clip、不 reject、不轉換座標。
+大 finite sigma 的 regression 另驗證 work-budget error 與 deterministic cleanup；這是相對
+Skia oracle 的刻意資源限制。
+
+OpenMoji image slice 對 Python length 恰為一個 code point 的普通 word，依序查找目前工作目錄
+`openmoji/{UPPERCASE_HEX}_color.png`、`openmoji/{UPPERCASE_HEX}.png`。只快取成功 decode；缺檔不
+negative-cache；確定會拋例外的 corrupt/unreadable 候選立即 fallback 文字。Skia 回傳 `None` 後繼續
+plain candidate 的分支沒有可攜 deterministic fixture，因此不在本 slice 的 comparison boundary。
+asset layout 固定寬 22，
+高度使用 Python ties-to-even rounding，image ascent 等於高度、descent 為零。display command 自有
+premultiplied pixels，沒有 DOM/layout/path/decoder borrow；Cairo bilinear scaling 走既有
+scroll/blur/rounded clip/opacity/blend stack，且 image leaf 不新增 hit target。普通 `<img src>` 仍忽略。
+PNG decoder 使用既有 Cairo dependency，這個 slice 不宣稱一般 image/WebP/remote fetch 支援。
+Native cache 由單一 `TaiLayout` 擁有並在 layout destruction 清除，不像 frozen Python module-global
+cache 跨 layout 存活；差異只在同一 process 中 asset 被外部修改／刪除後另建 layout 時可觀察，換取
+明確 owner 與 deterministic cleanup。解碼前另限制 64 MiB 檔案、16384 單邊與 25,000,000 pixels；
+超限會依 decoder rejection 路徑 fallback，避免不受信任本地 asset 在驗證前造成無界配置。
+
+這個切片刻意沒有宣稱完整等價於 Python `paint_tree`；blur 僅在上述 Gaussian comparison boundary
+驗證，一般 HTML image 與 SDL presentation 仍未實作。
 `tests/test_render.c` 用非零 scroll
 驗證 command order、clip/translation raster key regions，並在釋放 source DOM/layout 後再次
 raster，作為自包含 display-list ownership contract 的測試證據。

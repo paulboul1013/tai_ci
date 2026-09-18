@@ -1,13 +1,24 @@
+#define _POSIX_C_SOURCE 200809L
 #include "tai/layout.h"
+#include <cairo/cairo.h>
+#include <errno.h>
 #include <fontconfig/fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include <limits.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <utf8proc.h>
 
 typedef struct Box Box;
+typedef struct Image Image;
+struct Image {
+  utf8proc_int32_t codepoint;
+  unsigned char *pixels;
+  int width, height, stride;
+};
 struct Box {
   const char *kind;
   TaiNode *node;
@@ -17,12 +28,15 @@ struct Box {
   double content_height, scroll_y;
   bool bold, italic, scrollable;
   char *word;
+  Image *image;
 };
 struct TaiLayout {
   Box *root;
   FT_Library ft;
   FcConfig *fc;
   bool rtl, failed;
+  Image **images;
+  size_t image_count, image_capacity;
 };
 static const char *property(TaiNode *n, const char *key, const char *fallback) {
   const char *v = tai_map_get(&n->style, key);
@@ -177,6 +191,146 @@ static bool whitespace(utf8proc_int32_t c) {
          t == UTF8PROC_CATEGORY_ZS || t == UTF8PROC_CATEGORY_ZL ||
          t == UTF8PROC_CATEGORY_ZP;
 }
+static uint32_t png_u32(const unsigned char *bytes) {
+  return ((uint32_t)bytes[0] << 24) | ((uint32_t)bytes[1] << 16) |
+         ((uint32_t)bytes[2] << 8) | (uint32_t)bytes[3];
+}
+static double round_ties_even(double value) {
+  double lower = floor(value);
+  double fraction = value - lower;
+  if (fraction < 0.5) return lower;
+  if (fraction > 0.5) return lower + 1.0;
+  return fmod(lower, 2.0) == 0.0 ? lower : lower + 1.0;
+}
+
+static bool bounded_png(FILE *file) {
+  struct stat info;
+  if (fstat(fileno(file), &info) != 0 || info.st_size < 24 ||
+      info.st_size > 64 * 1024 * 1024)
+    return false;
+  unsigned char header[24];
+  rewind(file);
+  bool read = fread(header, 1, sizeof(header), file) == sizeof(header);
+  static const unsigned char signature[8] = {
+      137, 80, 78, 71, 13, 10, 26, 10};
+  if (!read || memcmp(header, signature, sizeof(signature)) ||
+      memcmp(header + 12, "IHDR", 4))
+    return false;
+  uint32_t width = png_u32(header + 16);
+  uint32_t height = png_u32(header + 20);
+  const uint32_t max_dimension = 16384;
+  const uint32_t max_pixels = 25000000;
+  return width && height && width <= max_dimension && height <= max_dimension &&
+         width <= max_pixels / height;
+}
+
+typedef struct {
+  FILE *file;
+  size_t remaining;
+} PngReader;
+
+static cairo_status_t read_png(void *closure, unsigned char *data,
+                               unsigned int length) {
+  PngReader *reader = closure;
+  if ((size_t)length > reader->remaining) return CAIRO_STATUS_READ_ERROR;
+  size_t count = fread(data, 1, length, reader->file);
+  reader->remaining -= count;
+  return count == length ? CAIRO_STATUS_SUCCESS : CAIRO_STATUS_READ_ERROR;
+}
+
+static Image *emoji(TaiLayout *l, const char *text, size_t length) {
+  utf8proc_int32_t codepoint;
+  utf8proc_ssize_t bytes = utf8proc_iterate(
+      (const unsigned char *)text, (utf8proc_ssize_t)length, &codepoint);
+  if (bytes < 1 || (size_t)bytes != length) return NULL;
+  for (size_t i = 0; i < l->image_count; i++)
+    if (l->images[i]->codepoint == codepoint) return l->images[i];
+
+  char path[64];
+  const char *suffixes[] = {"_color.png", ".png"};
+  cairo_surface_t *surface = NULL;
+  for (size_t i = 0; i < 2; i++) {
+    int written = snprintf(path, sizeof(path), "openmoji/%X%s",
+                           (unsigned int)codepoint, suffixes[i]);
+    if (written < 0 || (size_t)written >= sizeof(path)) return NULL;
+    FILE *file = fopen(path, "rb");
+    if (!file) {
+      if (errno == ENOENT) continue;
+      return NULL;
+    }
+    if (!bounded_png(file)) {
+      fclose(file);
+      return NULL;
+    }
+    rewind(file);
+    PngReader reader = {file, 64 * 1024 * 1024};
+    surface = cairo_image_surface_create_from_png_stream(read_png, &reader);
+    fclose(file);
+    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+      cairo_surface_destroy(surface);
+      return NULL;
+    }
+    break;
+  }
+  if (!surface) return NULL;
+  int source_width = cairo_image_surface_get_width(surface);
+  int source_height = cairo_image_surface_get_height(surface);
+  int source_stride = cairo_image_surface_get_stride(surface);
+  if (source_width <= 0 || source_height <= 0 || source_stride <= 0 ||
+      source_width > INT_MAX / 4 || source_stride < source_width * 4) {
+    cairo_surface_destroy(surface);
+    return NULL;
+  }
+  double scaled = (double)source_height * 22.0 / (double)source_width;
+  double rounded = round_ties_even(scaled);
+  if (!isfinite(rounded) || rounded > INT_MAX) {
+    cairo_surface_destroy(surface);
+    return NULL;
+  }
+  size_t stride = (size_t)source_width * 4;
+  if ((size_t)source_height > SIZE_MAX / stride) {
+    cairo_surface_destroy(surface);
+    return NULL;
+  }
+  unsigned char *pixels = malloc((size_t)source_height * stride);
+  if (!pixels) {
+    cairo_surface_destroy(surface);
+    l->failed = true;
+    return NULL;
+  }
+  cairo_surface_flush(surface);
+  const unsigned char *source = cairo_image_surface_get_data(surface);
+  for (int y = 0; y < source_height; y++)
+    memcpy(pixels + (size_t)y * stride,
+           source + (size_t)y * (size_t)source_stride, stride);
+  cairo_surface_destroy(surface);
+  if (l->image_count == l->image_capacity) {
+    size_t capacity = l->image_capacity ? l->image_capacity * 2 : 4;
+    if (capacity < l->image_count + 1 ||
+        capacity > SIZE_MAX / sizeof(*l->images)) {
+      free(pixels);
+      l->failed = true;
+      return NULL;
+    }
+    Image **next = realloc(l->images, capacity * sizeof(*next));
+    if (!next) {
+      free(pixels);
+      l->failed = true;
+      return NULL;
+    }
+    l->images = next;
+    l->image_capacity = capacity;
+  }
+  Image *image = malloc(sizeof(*image));
+  if (!image) {
+    free(pixels);
+    l->failed = true;
+    return NULL;
+  }
+  *image = (Image){codepoint, pixels, source_width, source_height, (int)stride};
+  l->images[l->image_count++] = image;
+  return image;
+}
 typedef struct {
   TaiLayout *owner;
   Box *block, *line;
@@ -195,7 +349,8 @@ static bool newline(Inline *in) {
 }
 static void word(Inline *in, TaiNode *node, const char *s, size_t n) {
   TaiLayout *l = in->owner;
-  Box *b = box(l, "TextLayout", node);
+  Image *image = in->pre ? NULL : emoji(l, s, n);
+  Box *b = box(l, image ? "EmojiLayout" : "TextLayout", node);
   if (!b)
     return;
   b->word = tai_strndup(s, n);
@@ -221,14 +376,19 @@ static void word(Inline *in, TaiNode *node, const char *s, size_t n) {
     release(b);
     return;
   }
-  b->width = measure(f, b->word);
+  b->width = image ? 22.0 : measure(f, b->word);
   b->font_size = size;
   b->bold = !strcmp(property(node, "font-weight", "normal"), "bold") ||
             atoi(property(node, "font-weight", "normal")) >= 600;
   b->italic = !strcmp(property(node, "font-style", "normal"), "italic") ||
               !strcmp(property(node, "font-style", "normal"), "oblique");
-  b->ascent = (double)f->ascender * size / f->units_per_EM;
-  b->descent = -(double)f->descender * size / f->units_per_EM;
+  b->image = image;
+  double image_height = image ? fmax(1.0, round_ties_even(
+      (double)image->height * 22.0 / (double)image->width)) : 0.0;
+  b->ascent = image ? image_height :
+      (double)f->ascender * size / f->units_per_EM;
+  b->descent = image ? 0.0 :
+      -(double)f->descender * size / f->units_per_EM;
   b->height = b->ascent + b->descent;
   b->space = in->pre ? 0 : measure(f, " ");
   FT_Done_Face(f);
@@ -472,6 +632,11 @@ void tai_layout_destroy(TaiLayout *l) {
     FT_Done_FreeType(l->ft);
   if (l->fc)
     FcConfigDestroy(l->fc);
+  for (size_t i = 0; i < l->image_count; i++) {
+    free(l->images[i]->pixels);
+    free(l->images[i]);
+  }
+  free(l->images);
   free(l);
 }
 double tai_layout_height(const TaiLayout *l) {
@@ -481,6 +646,7 @@ static TaiLayoutItemKind item_kind(const Box *b) {
   if (!strcmp(b->kind, "DocumentLayout")) return TAI_LAYOUT_DOCUMENT;
   if (!strcmp(b->kind, "BlockLayout")) return TAI_LAYOUT_BLOCK;
   if (!strcmp(b->kind, "LineLayout")) return TAI_LAYOUT_LINE;
+  if (!strcmp(b->kind, "EmojiLayout")) return TAI_LAYOUT_IMAGE;
   return TAI_LAYOUT_TEXT;
 }
 static bool visit_box(const Box *b, TaiLayoutVisitor visitor, void *opaque) {
@@ -499,6 +665,10 @@ static bool visit_box(const Box *b, TaiLayoutVisitor visitor, void *opaque) {
       .content_height = b->content_height,
       .scroll_y = b->scroll_y,
       .bold = b->bold, .italic = b->italic, .scrollable = b->scrollable,
+      .image_pixels = b->image ? b->image->pixels : NULL,
+      .image_width = b->image ? b->image->width : 0,
+      .image_height = b->image ? b->image->height : 0,
+      .image_stride = b->image ? b->image->stride : 0,
   };
   if (!visitor(&item, opaque)) return false;
   for (size_t i = 0; i < b->count; i++)
@@ -514,6 +684,10 @@ static bool walk_box(const Box *b, TaiLayoutTreeVisitor visitor,
       .font_size = b->font_size, .content_height = b->content_height,
       .scroll_y = b->scroll_y, .bold = b->bold, .italic = b->italic,
       .scrollable = b->scrollable,
+      .image_pixels = b->image ? b->image->pixels : NULL,
+      .image_width = b->image ? b->image->width : 0,
+      .image_height = b->image ? b->image->height : 0,
+      .image_stride = b->image ? b->image->stride : 0,
   };
   if (!visitor(&item, TAI_LAYOUT_ENTER, opaque)) return false;
   for (size_t i = 0; i < b->count; i++)
@@ -561,6 +735,9 @@ static void json_box(FILE *out, const Box *b) {
     fputs(",\"word\":", out);
     tai_json_string(out, b->word);
   }
+  if (b->image)
+    fprintf(out, ",\"ascent\":%.17g,\"descent\":%.17g,\"space\":%.17g",
+            b->ascent, b->descent, b->space);
   fputs(",\"children\":[", out);
   for (size_t i = 0; i < b->count; i++) {
     if (i)

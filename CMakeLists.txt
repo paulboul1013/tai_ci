@@ -117,6 +117,10 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/browser_differential.py" $<TARGET_FILE:tai-browser>)
   add_test(NAME display_differential COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/display_differential.py" $<TARGET_FILE:tai-browser>)
+  add_test(NAME image_differential COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/image_differential.py" $<TARGET_FILE:tai-browser>)
+  add_test(NAME blur_oracle_probe COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/blur_oracle_probe.py")
   add_executable(test_cli tests/test_cli.c)
   target_link_libraries(test_cli PRIVATE PkgConfig::CAIRO)
   target_compile_options(test_cli PRIVATE -Wall -Wextra -Wpedantic -Werror)

@@ -6,7 +6,8 @@ typedef enum {
   TAI_LAYOUT_DOCUMENT,
   TAI_LAYOUT_BLOCK,
   TAI_LAYOUT_LINE,
-  TAI_LAYOUT_TEXT
+  TAI_LAYOUT_TEXT,
+  TAI_LAYOUT_IMAGE
 } TaiLayoutItemKind;
 typedef struct {
   TaiLayoutItemKind kind;
@@ -15,6 +16,10 @@ typedef struct {
   double x, y, width, height, ascent, descent, space, font_size;
   double content_height, scroll_y;
   bool bold, italic, scrollable;
+  /* Borrowed immutable premultiplied Cairo ARGB32 pixels, valid only during
+   * the callback. image_stride is bytes per row. */
+  const unsigned char *image_pixels;
+  int image_width, image_height, image_stride;
 } TaiLayoutItem;
 typedef bool (*TaiLayoutVisitor)(const TaiLayoutItem *item, void *opaque);
 typedef enum { TAI_LAYOUT_ENTER, TAI_LAYOUT_LEAVE } TaiLayoutVisitEvent;
