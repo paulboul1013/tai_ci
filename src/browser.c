@@ -17,6 +17,12 @@ typedef struct {
     const char *source;
 } Resource;
 
+typedef struct {
+    TaiNode **nodes;
+    double *scroll_y;
+    size_t count;
+} ScrollSnapshot;
+
 struct TaiPage {
     TaiUrl *url;
     TaiDocument *document;
@@ -27,6 +33,7 @@ struct TaiPage {
     double viewport_width;
     double viewport_height;
     double scroll_y;
+    bool rtl;
     bool secure;
     bool dirty;
 };
@@ -127,6 +134,33 @@ static void resources_destroy(Resource *resources, size_t count) {
     free(resources);
 }
 
+static bool node_count(const TaiNode *node, size_t *count) {
+    if (*count == SIZE_MAX) return false;
+    (*count)++;
+    for (size_t index = 0; index < node->child_count; index++)
+        if (!node_count(node->children[index], count)) return false;
+    return true;
+}
+
+static void snapshot_scroll(TaiNode *node, ScrollSnapshot *snapshot,
+                            size_t *index) {
+    snapshot->nodes[*index] = node;
+    snapshot->scroll_y[*index] = node->scroll_y;
+    (*index)++;
+    for (size_t child = 0; child < node->child_count; child++)
+        snapshot_scroll(node->children[child], snapshot, index);
+}
+
+static void restore_scroll(const ScrollSnapshot *snapshot) {
+    for (size_t index = 0; index < snapshot->count; index++)
+        snapshot->nodes[index]->scroll_y = snapshot->scroll_y[index];
+}
+
+static void snapshot_destroy(ScrollSnapshot *snapshot) {
+    free(snapshot->scroll_y);
+    free(snapshot->nodes);
+}
+
 static TaiMap *parse_csp(const char *header) {
     if (!header) return NULL;
     char *copy = tai_strdup(header);
@@ -173,6 +207,7 @@ TaiPage *tai_page_load(TaiNetwork *network, const TaiUrl *url,
     if (!page) goto oom;
     page->viewport_width = viewport_width;
     page->viewport_height = viewport_height;
+    page->rtl = rtl;
     page->url = tai_url_parse(tai_url_string(url));
     if (!page->url) goto oom;
     response = tai_network_request(network, url, NULL, NULL, NULL, NULL);
@@ -261,6 +296,64 @@ TaiNode *tai_page_root(const TaiPage *page) {
 const TaiLayout *tai_page_layout(const TaiPage *page) { return page ? page->layout : NULL; }
 const TaiDisplayList *tai_page_display_list(const TaiPage *page) {
     return page ? page->display : NULL;
+}
+bool tai_page_resize(TaiPage *page, double viewport_width,
+                     double viewport_height, char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (!page || !page->document || !page->styles ||
+        !isfinite(viewport_width) || !isfinite(viewport_height) ||
+        viewport_width <= 0.0 || viewport_height <= 0.0 ||
+        viewport_width > INT_MAX || viewport_height > INT_MAX)
+        return diagnostic(error, "invalid page resize input");
+    if (page->viewport_width == viewport_width &&
+        page->viewport_height == viewport_height)
+        return true;
+
+    ScrollSnapshot snapshot = {0};
+    if (!node_count(tai_document_root(page->document), &snapshot.count) ||
+        snapshot.count > SIZE_MAX / sizeof(*snapshot.nodes) ||
+        snapshot.count > SIZE_MAX / sizeof(*snapshot.scroll_y) ||
+        !(snapshot.nodes = malloc(snapshot.count * sizeof(*snapshot.nodes))) ||
+        !(snapshot.scroll_y = malloc(snapshot.count * sizeof(*snapshot.scroll_y)))) {
+        snapshot_destroy(&snapshot);
+        return diagnostic(error, "page resize allocation failed");
+    }
+    size_t snapshot_index = 0;
+    snapshot_scroll(tai_document_root(page->document), &snapshot, &snapshot_index);
+
+    TaiLayout *replacement_layout = tai_layout_create(
+        tai_document_root(page->document), viewport_width, page->rtl, error);
+    if (!replacement_layout) {
+        restore_scroll(&snapshot);
+        snapshot_destroy(&snapshot);
+        return false;
+    }
+    TaiDisplayList *replacement_display = tai_display_list_create(
+        replacement_layout, error);
+    if (!replacement_display) {
+        tai_layout_destroy(replacement_layout);
+        restore_scroll(&snapshot);
+        snapshot_destroy(&snapshot);
+        return false;
+    }
+
+    TaiDisplayList *old_display = page->display;
+    TaiLayout *old_layout = page->layout;
+    page->layout = replacement_layout;
+    page->display = replacement_display;
+    page->viewport_width = viewport_width;
+    page->viewport_height = viewport_height;
+    page->scroll_y = fmax(0.0, fmin(page->scroll_y, tai_page_max_scroll_y(page)));
+    tai_display_list_destroy(old_display);
+    tai_layout_destroy(old_layout);
+    snapshot_destroy(&snapshot);
+    return true;
+}
+double tai_page_viewport_width(const TaiPage *page) {
+    return page ? page->viewport_width : 0.0;
+}
+double tai_page_viewport_height(const TaiPage *page) {
+    return page ? page->viewport_height : 0.0;
 }
 TaiNode *tai_page_hit_test(const TaiPage *page, double x, double y,
                            TaiDisplayHit *hit) {

@@ -19,6 +19,12 @@ void tai_page_destroy(TaiPage *page);
 TaiNode *tai_page_root(const TaiPage *page);
 const TaiLayout *tai_page_layout(const TaiPage *page);
 const TaiDisplayList *tai_page_display_list(const TaiPage *page);
+/* Rebuilds the layout and self-contained display list for a finite positive
+ * viewport. On failure, every observable page field remains unchanged. */
+bool tai_page_resize(TaiPage *page, double viewport_width,
+                     double viewport_height, char **error);
+double tai_page_viewport_width(const TaiPage *page);
+double tai_page_viewport_height(const TaiPage *page);
 /* Resolves a document-space display hit while the page owns its document. */
 TaiNode *tai_page_hit_test(const TaiPage *page, double x, double y,
                            TaiDisplayHit *hit);

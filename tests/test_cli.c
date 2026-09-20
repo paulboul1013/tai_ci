@@ -60,6 +60,9 @@ int main(int argc, char **argv) {
   assert(run(browser, option_as_value) == 2);
   char *unknown_option[] = {(char *)browser, "--unknown-option", NULL};
   assert(run(browser, unknown_option) == 2);
+  char *incompatible_options[] = {(char *)browser, "--window",
+                                  "--screenshot", (char *)output, NULL};
+  assert(run(browser, incompatible_options) == 2);
   unlink(output);
   return 0;
 }

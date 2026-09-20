@@ -945,15 +945,17 @@ static bool blur_group_surface(cairo_pattern_t *pattern, double sigma) {
   return true;
 }
 
-bool tai_display_list_write_png_region(const TaiDisplayList *list,
-                                       const char *path, int width, int height,
-                                       double document_x, double document_y,
-                                       char **error) {
+static bool raster_region(const TaiDisplayList *list, const char *path,
+                          int width, int height, double document_x,
+                          double document_y, unsigned char **pixels,
+                          int *stride, char **error) {
   if (error) {
     free(*error);
     *error = NULL;
   }
-  if (!list || !path || width <= 0 || height <= 0 ||
+  if (pixels) *pixels = NULL;
+  if (stride) *stride = 0;
+  if (!list || (!path && (!pixels || !stride)) || width <= 0 || height <= 0 ||
       !isfinite(document_x) || !isfinite(document_y)) {
     set_error(error, "invalid PNG output input");
     return false;
@@ -1082,8 +1084,25 @@ bool tai_display_list_write_png_region(const TaiDisplayList *list,
   }
   if (effect_depth) valid = false;
   cairo_status_t status = cairo_status(context);
-  if (valid && status == CAIRO_STATUS_SUCCESS)
-    status = cairo_surface_write_to_png(surface, path);
+  if (valid && status == CAIRO_STATUS_SUCCESS) {
+    cairo_surface_flush(surface);
+    if (path) status = cairo_surface_write_to_png(surface, path);
+    else {
+      int pitch = cairo_image_surface_get_stride(surface);
+      if (pitch <= 0 || (size_t)height > SIZE_MAX / (size_t)pitch) {
+        status = CAIRO_STATUS_NO_MEMORY;
+      } else {
+        unsigned char *copy = malloc((size_t)pitch * (size_t)height);
+        if (!copy) status = CAIRO_STATUS_NO_MEMORY;
+        else {
+          memcpy(copy, cairo_image_surface_get_data(surface),
+                 (size_t)pitch * (size_t)height);
+          *pixels = copy;
+          *stride = pitch;
+        }
+      }
+    }
+  }
   cairo_destroy(context);
   cairo_surface_destroy(surface);
   free(effect_stack);
@@ -1097,6 +1116,21 @@ bool tai_display_list_write_png_region(const TaiDisplayList *list,
     return false;
   }
   return true;
+}
+
+bool tai_display_list_write_png_region(const TaiDisplayList *list,
+                                       const char *path, int width, int height,
+                                       double document_x, double document_y,
+                                       char **error) {
+  return raster_region(list, path, width, height, document_x, document_y,
+                       NULL, NULL, error);
+}
+
+bool tai_display_list_raster_region(const TaiDisplayList *list,
+    int width, int height, double document_x, double document_y,
+    unsigned char **pixels, int *stride, char **error) {
+  return raster_region(list, NULL, width, height, document_x, document_y,
+                       pixels, stride, error);
 }
 
 bool tai_display_list_write_png(const TaiDisplayList *list, const char *path,

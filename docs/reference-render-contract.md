@@ -40,7 +40,7 @@ Display-list ownership 與 borrowed lifetime 的權威定義在
 [`docs/architecture/native-runtime.md`](architecture/native-runtime.md)。初始 Cairo backend
 按 paint traversal 順序支援 `fill_rect`、`text`、不 raster 的 `hit_test`，以及成對的
 `push_clip`/`pop_clip`、`push_clip_scroll`/`pop_clip_scroll`，以 opaque white ARGB32 image surface 輸出 PNG；Cairo
-的 premultiplied/native-endian 像素格式尚未接 SDL3 的 RGBA conversion。
+的 premultiplied/native-endian 像素格式由下述 SDL3 slice 以不透明 ARGB8888 texture 接收。
 Opacity 與 mix-blend-mode 另以成對 `push_blend`/`pop_blend` 表示；push 複製 clamp 後 alpha
 與 effective source-over/multiply/difference/destination-in mode，pop 將 isolated Cairo group
 一次合成回 parent。normal、src-over、source-over 且 opacity 1 的 no-op subtree 不產生命令；
@@ -133,3 +133,22 @@ page viewport，並套用相同 page scroll。未指定 screenshot 時維持原�
 紅色區塊 anchor pixels、無法寫檔、缺少參數、option-as-value 與 unknown option。這是
 `TaiPage → display list → Cairo PNG` 的間接 E2E，不代表 SDL presentation 或完整 Python
 paint-tree 等價。
+
+## SDL3 presentation slice
+
+`tai-browser --window URL` 以 `TaiPage` 開啟可調整大小的 SDL3 視窗。Cairo 先在不透明白底
+繪製 native-endian premultiplied ARGB32；因最終 alpha 皆為 255，其數值布局可直接上傳至
+SDL `ARGB8888` texture。每次 raster 呼叫交付獨立擁有的 pixel copy，SDL adapter 在上傳後
+釋放。初次取得的 physical pixel size 與非零 `SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED` 都先以
+新 dimensions 原子地重建 page layout/display list、夾住 page scroll，然後 raster、upload、
+present 並替換 texture；若 page replacement 或 raster/upload/present 失敗，舊 texture 保留。
+超過單邊或總像素限制的事件在 reflow 前拒絕。expose 重新呈現現存 texture；
+quit/close 結束事件迴圈，依 texture→renderer→window→SDL 順序釋放。zero-size resize 略過，
+超過單邊 8192 或 25,000,000 pixels 的 raster 明確失敗。
+
+`tests/test_browser.c` 覆蓋窄 viewport 的文字換行、viewport/scroll 更新與無效尺寸 no-op；
+`tests/test_presentation.c` 以 SDL dummy driver 在 owner-thread event filter 注入 resize 後 quit，
+驗證 page 使用新 viewport，並鎖定超限 event 不會改寫 page viewport。
+`tests/layout_differential.py` 另以 80px 寬度的換行案例比對 frozen Python/C layout geometry。
+`--window` 不輸出 JSON，且不得與
+`--screenshot` 併用；既有無視窗 JSON/PNG 行為保持原契約。

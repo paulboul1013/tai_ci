@@ -28,7 +28,7 @@ viewport→document hit conversion，並以 nested element scroll 交叉檢查 r
 opaque background、anchor pixel 與 CLI 失敗路徑。這不
 勾選上述完整 paint/raster acceptance；blur 已以 3σ separable Gaussian 的結構與穩定
 key-region comparison boundary 驗證，但仍缺互動 scroll input、
-一般 `<img>`/remote image/WebP、input/event dispatch、SDL presentation 與完整 Python
+一般 `<img>`/remote image/WebP、input/event dispatch、完整 SDL browser orchestration 與 Python
 display/raster differential 尚未移植。
 
 不以外網網站可用性作 deterministic acceptance；人工 test.md scenarios 改為本地 fixtures。

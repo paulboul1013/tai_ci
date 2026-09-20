@@ -39,7 +39,7 @@ tai_ci/
 | `tests/reference/` | Frozen Python oracle | `browser.py`、`runtime.js`、CSS、manifest、reference server 與人工 scenarios |
 | `docs/` | On-demand project knowledge | Python analysis、render contract、agent rules、architecture details |
 | `deps/quickjs/` | JavaScript dependency | QuickJS-NG source integrated by CMake |
-| `deps/SDL/` | Future window/input source | vendored SDL3 checkout；CMake 尚未編譯或連結 |
+| `deps/SDL/` | Window/presentation source | vendored SDL3 checkout；CMake 建置並連結靜態 SDL3 |
 | `deps/sysroot/` | Local dependency prefix | development headers and libraries such as utf8proc/cmocka |
 | `build*/` | Generated artifacts | Ninja files、CTest metadata、libraries、executables；不屬於 source of truth |
 
@@ -57,14 +57,15 @@ Public headers and implementations use the same subsystem name:
 | `js.h` / `js.c` | QuickJS-NG context、DOM bridge、event dispatch |
 | `layout.h` / `layout.c` | block/line/text geometry and font measurement |
 | `render.h` / `render.c` | self-contained display list and Cairo PNG raster |
+| `presentation.h` / `presentation.c` | SDL3 window, texture and resize/quit presentation |
 | `scheduler.h` / `scheduler.c` | priority tasks、generation cancellation、frame deadlines |
 | `browser.h` / `browser.c` | `TaiPage` navigation and subsystem orchestration |
-| `main.c` | `tai-browser` JSON/screenshot CLI |
+| `main.c` | `tai-browser` JSON/screenshot/`--window` CLI |
 | `html_entities.inc` | generated named-entity lookup included by `dom.c` |
 
 Public header index: `browser.h`, `core.h`, `css.h`, `dom.h`, `js.h`,
 `layout.h`, `network.h`, `render.h`, `scheduler.h`, and `url.h` under
-`include/tai/`.
+`include/tai/`，另含 `presentation.h`。
 
 ## Native subsystem map
 
@@ -83,18 +84,21 @@ graph TD
   Layout --> DOM
   Display --> Layout
   Display --> Cairo[Cairo PNG]
+  CLI --> Window[SDL presentation]
+  Window --> Display
   Scheduler[Scheduler] -. future browser/window integration .-> Page
 ```
 
-`tai_core` compiles these native subsystems into one library. `tai-browser` is
-the current synchronous headless consumer; SDL window/input/presentation remains
-a future consumer rather than an implemented edge in this graph.
+`tai_core` compiles the core native subsystems. `tai_presentation` links the
+vendored SDL3 library and consumes the same immutable display list as headless
+PNG output. The opt-in `--window` path presents one page and handles resize,
+expose and quit; input dispatch remains future work.
 
 ## Test layout
 
 - `test_*.c` mirrors native subsystem boundaries.
 - `test_browser.c`, `test_cli.c`, `test_core.c`, `test_css.c`, `test_dom.c`,
-  `test_js.c`, `test_layout.c`, `test_network.c`, `test_render.c`,
+  `test_js.c`, `test_layout.c`, `test_network.c`, `test_presentation.c`, `test_render.c`,
   `test_scheduler.c`, and `test_url.c` are the native test executables.
 - `browser_differential.py`, `css_differential.py`, `dom_differential.py`,
   `layout_differential.py`, and `url_differential.py` compare C with the Python

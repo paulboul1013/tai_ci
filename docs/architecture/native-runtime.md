@@ -35,9 +35,17 @@ private, incompatible node layouts.
   kind, and bounds. `TaiPage` owns viewport dimensions and clamped page scroll,
   converts viewport coordinates to document coordinates once, and resolves the
   copied ID through its live document.
-- Cairo contexts and surfaces are created and destroyed inside the synchronous
-  PNG call. A future raster worker may receive a self-contained display list,
-  never mutable DOM state.
+- Cairo contexts and surfaces are created and destroyed inside synchronous
+  PNG or memory raster calls. The memory call returns an owned opaque ARGB32
+  copy. The presentation adapter borrows `TaiPage`, owns SDL video/window,
+  renderer and texture on the caller thread, and obtains a display-list borrow
+  only while rastering a frame. Page resize atomically replaces layout then its
+  self-contained display list before the adapter uploads a new frame; failed
+  replacement construction restores DOM scroll state and leaves the old page
+  fields intact. The adapter replaces the texture only after the new frame is
+  presented; exposed windows repaint the retained texture.
+  A future raster worker may receive a self-contained display list, never
+  mutable DOM state.
 
 ## Current native rendering boundary
 

@@ -666,6 +666,24 @@ int main(void) {
   assert(background_pixel[0] == 0 && background_pixel[1] == 0 &&
          background_pixel[2] == 255 && background_pixel[3] == 255);
   cairo_surface_destroy(surface);
+  unsigned char *frame = NULL;
+  int frame_stride = 0;
+  assert(tai_display_list_raster_region(list, 200, 80, 0, 0,
+                                         &frame, &frame_stride, &error));
+  assert(frame && frame_stride >= 200 * 4);
+  unsigned char *frame_pixel = frame + 37 * frame_stride + 14 * 4;
+  assert(frame_pixel[0] == 0 && frame_pixel[1] == 0 &&
+         frame_pixel[2] == 255 && frame_pixel[3] == 255);
+  free(frame);
+  frame = NULL;
+  assert(tai_display_list_raster_region(list, 100, 60, 0, 0,
+                                         &frame, &frame_stride, &error));
+  assert(frame && frame_stride >= 100 * 4);
+  free(frame);
+  frame = NULL;
+  assert(!tai_display_list_raster_region(list, 0, 80, 0, 0,
+                                          &frame, &frame_stride, &error));
+  assert(!frame && error);
 
   tai_display_list_destroy(list);
   free(error);

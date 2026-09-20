@@ -77,5 +77,9 @@ bool tai_display_list_write_png_region(const TaiDisplayList *list,
                                        const char *path, int width, int height,
                                        double document_x, double document_y,
                                        char **error);
+/* Returns an owned, opaque ARGB32 Cairo raster. Caller frees *pixels. */
+bool tai_display_list_raster_region(const TaiDisplayList *list,
+    int width, int height, double document_x, double document_y,
+    unsigned char **pixels, int *stride, char **error);
 
 #endif

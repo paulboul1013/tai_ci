@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tai/browser.h"
+#include "tai/presentation.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -16,7 +17,7 @@ enum { TAI_SCREENSHOT_HEIGHT = 532 };
 
 static void usage(const char *program) {
     fprintf(stderr,
-            "usage: %s [--headless] [--rtl] [--screenshot OUTPUT.png] URL\n",
+            "usage: %s [--headless|--window] [--rtl] [--screenshot OUTPUT.png] URL\n",
             program);
 }
 
@@ -46,6 +47,7 @@ static char *read_default_css(const char *argv0, size_t *length) {
     char *css;
     const char *candidates[] = {
         TAI_DEFAULT_CSS_RELATIVE_PATH,
+        "assets/browser.css",
         "../assets/browser.css",
     };
     for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
@@ -61,11 +63,13 @@ static char *read_default_css(const char *argv0, size_t *length) {
 
 int main(int argc, char **argv) {
     bool rtl = false;
+    bool window = false;
     const char *url_text = NULL;
     const char *screenshot_path = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--rtl")) rtl = true;
         else if (!strcmp(argv[i], "--headless")) continue;
+        else if (!strcmp(argv[i], "--window")) window = true;
         else if (!strcmp(argv[i], "--screenshot")) {
             if (++i == argc || !strncmp(argv[i], "--", 2)) {
                 usage(argv[0]);
@@ -81,6 +85,7 @@ int main(int argc, char **argv) {
         else { usage(argv[0]); return 2; }
     }
     if (!url_text) url_text = "about:blank";
+    if (window && screenshot_path) { usage(argv[0]); return 2; }
     size_t css_length = 0;
     char *css = read_default_css(argv[0], &css_length);
     (void)css_length;
@@ -93,7 +98,12 @@ int main(int argc, char **argv) {
         : NULL;
     bool success = page != NULL;
     if (!page) fprintf(stderr, "load failed: %s\n", error ? error : "allocation failed");
-    else if (screenshot_path) {
+    else if (window) {
+        success = tai_present_window(page, TAI_SCREENSHOT_WIDTH,
+                                     TAI_SCREENSHOT_HEIGHT, &error);
+        if (!success) fprintf(stderr, "window failed: %s\n",
+                              error ? error : "presentation failed");
+    } else if (screenshot_path) {
         success = tai_page_write_viewport_png(page, screenshot_path, &error);
         if (!success)
             fprintf(stderr, "screenshot failed: %s\n",

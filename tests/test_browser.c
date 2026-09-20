@@ -24,6 +24,17 @@ static uint32_t pixel(cairo_surface_t *surface, int x, int y) {
            ((uint32_t)value[0] << 8) | value[3];
 }
 
+static const TaiDisplayCommand *text_command(const TaiDisplayList *list,
+                                              const char *text) {
+    for (size_t index = 0; index < tai_display_list_count(list); index++) {
+        const TaiDisplayCommand *command =
+            tai_display_list_command(list, index);
+        if (command->kind == TAI_DRAW_TEXT && !strcmp(command->text, text))
+            return command;
+    }
+    return NULL;
+}
+
 int main(void) {
     char *error = NULL;
     TaiNetwork *network = tai_network_create();
@@ -45,6 +56,45 @@ int main(void) {
     assert(hit_node && hit_node->kind == TAI_TEXT);
     assert(hit_node->id == hit.node_id);
     assert(!tai_page_hit_test(page, 799.0, 21.0, &hit));
+
+    TaiUrl *resize_url = tai_url_parse(
+        "data:text/html,<p>one%20two%20three%20four%20five%20six</p>");
+    TaiPage *resize_page = tai_page_load(network, resize_url,
+        "html {display:block} body {display:block} p {display:block}",
+        300.0, 100.0, false, &error);
+    assert(resize_page && !error);
+    const TaiDisplayList *wide_display = tai_page_display_list(resize_page);
+    const TaiDisplayCommand *wide_six = text_command(wide_display, "six");
+    assert(wide_six);
+    double wide_six_y = wide_six->y;
+    assert(tai_page_set_scroll_y(resize_page, 1000.0));
+    double old_scroll = tai_page_scroll_y(resize_page);
+    assert(tai_page_resize(resize_page, 80.0, 40.0, &error));
+    assert(!error && tai_page_viewport_width(resize_page) == 80.0 &&
+           tai_page_viewport_height(resize_page) == 40.0);
+    const TaiDisplayList *narrow_display = tai_page_display_list(resize_page);
+    const TaiDisplayCommand *narrow_six = text_command(narrow_display, "six");
+    assert(narrow_six && narrow_six->y > wide_six_y);
+    assert(tai_page_scroll_y(resize_page) <= tai_page_max_scroll_y(resize_page));
+    assert(tai_page_scroll_y(resize_page) <= old_scroll);
+    const TaiDisplayList *before_invalid = tai_page_display_list(resize_page);
+    double before_width = tai_page_viewport_width(resize_page);
+    double before_height = tai_page_viewport_height(resize_page);
+    double before_scroll = tai_page_scroll_y(resize_page);
+    assert(!tai_page_resize(resize_page, 0.0, 40.0, &error));
+    assert(error);
+    free(error);
+    error = NULL;
+    assert(!tai_page_resize(resize_page, NAN, 40.0, &error));
+    assert(error);
+    free(error);
+    error = NULL;
+    assert(tai_page_display_list(resize_page) == before_invalid &&
+           tai_page_viewport_width(resize_page) == before_width &&
+           tai_page_viewport_height(resize_page) == before_height &&
+           tai_page_scroll_y(resize_page) == before_scroll);
+    tai_page_destroy(resize_page);
+    tai_url_destroy(resize_url);
 
     TaiUrl *scroll_url = tai_url_parse(
         "data:text/html,%3Cdiv%20style%3D%22height%3A30px%3Bbackground-color%3Ared%22%3E%3C%2Fdiv%3E%3Csection%20style%3D%22height%3A30px%3Bbackground-color%3Ablue%22%3E%3C%2Fsection%3E");
