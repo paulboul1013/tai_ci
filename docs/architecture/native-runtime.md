@@ -47,6 +47,9 @@ private, incompatible node layouts.
   it adapts only accepted window wheel, PageUp/PageDown, and up/down arrow
   events into finite proposals through `TaiPage`'s clamped page-scroll
   interface; an unchanged clamp leaves the retained texture untouched.
+  Each present composes a stateless scrollbar thumb from borrowed page scroll
+  and viewport values above the retained texture. The overlay owns no resource
+  and never mutates the display list or Cairo pixels; expose recomposes it.
   A future raster worker may receive a self-contained display list, never
   mutable DOM state.
 

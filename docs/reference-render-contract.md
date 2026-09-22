@@ -154,11 +154,19 @@ Python 將 wheel y 轉為 int，因此 native 對絕對值小於一的 SDL3 floa
 direction、非本視窗或不支援的 key 都是 no-op。只有 clamped scroll 實際改變才 raster、upload、
 present 並在成功後替換 texture；夾限 no-op 保留既有 texture。
 
+每次 texture 呈現（含 expose）均依當前 `TaiPage` viewport、clamped scroll 與 max scroll，
+在頁面 texture 之上繪製右緣不佔 layout 寬度的 opaque blue scrollbar thumb；無垂直 overflow
+時不繪製。其寬度為 12px，長度依 frozen Python 的 viewport²/document-height 比例，
+最短 20px 並裁切於 viewport；只顯示，不接受點擊或拖曳。此 overlay 不進入 Cairo raster、
+display list、headless JSON 或 `--screenshot` PNG。
+
 `tests/test_browser.c` 覆蓋窄 viewport 的文字換行、viewport/scroll 更新與無效尺寸 no-op；
 `tests/test_presentation.c` 以 SDL dummy driver 在 owner-thread event filter 注入 resize、wheel、
 PageUp/PageDown、↑/↓ 後 quit，驗證 page 使用新 viewport、100px scroll direction、clamp、flipped
 direction，以及 fractional、非有限、未知 direction、unrelated window 的 no-op；輸入後的非零
 scroll 值也能抓出事件全被忽略的回歸。超限 resize event 不會改寫 page viewport。
+同一測試另以 Python 公式固定 thumb 的 top/middle/bottom、最短 20px、窄視窗裁切、
+無 overflow 與非有限輸入幾何。
 `tests/layout_differential.py` 另以 80px 寬度的換行案例比對 frozen Python/C layout geometry。
 `--window` 不輸出 JSON，且不得與
 `--screenshot` 併用；既有無視窗 JSON/PNG 行為保持原契約。
