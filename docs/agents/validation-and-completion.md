@@ -15,6 +15,10 @@ Rendering comparisons should prefer structure and stable key regions unless
 fonts, backend, and environment are controlled well enough for pixel-perfect
 assertions. Record the comparison boundary and known omissions.
 
+For agent-driven SDL window input and screenshot evidence, follow
+[`native-window-verification.md`](native-window-verification.md). Its real-window
+pixel check complements the focused `presentation_dummy` event test.
+
 Memory safety is a first-class acceptance condition. Reproducible corruption,
 use-after-free, or systematic leaks block completion. Distinguish a passing
 ASan/UBSan run from leak validation when LeakSanitizer cannot execute.
