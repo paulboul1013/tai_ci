@@ -43,7 +43,10 @@ private, incompatible node layouts.
   self-contained display list before the adapter uploads a new frame; failed
   replacement construction restores DOM scroll state and leaves the old page
   fields intact. The adapter replaces the texture only after the new frame is
-  presented; exposed windows repaint the retained texture.
+  presented; exposed windows repaint the retained texture. On its caller thread
+  it adapts only accepted window wheel and PageUp/PageDown events into finite
+  proposals through `TaiPage`'s clamped page-scroll interface; an unchanged
+  clamp leaves the retained texture untouched.
   A future raster worker may receive a self-contained display list, never
   mutable DOM state.
 
