@@ -1,4 +1,5 @@
 #include "tai/presentation.h"
+#include "presentation_geometry.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdint.h>
@@ -10,10 +11,19 @@ static void set_error(char **error, const char *message) {
   if (error && !*error) *error = tai_strdup(message);
 }
 
-static bool present_texture(SDL_Renderer *renderer, SDL_Texture *texture) {
-  return SDL_RenderClear(renderer) &&
-         SDL_RenderTexture(renderer, texture, NULL, NULL) &&
-         SDL_RenderPresent(renderer);
+static bool present_texture(SDL_Renderer *renderer, SDL_Texture *texture,
+                            const TaiPage *page, int width, int height) {
+  if (!SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255) ||
+      !SDL_RenderClear(renderer) ||
+      !SDL_RenderTexture(renderer, texture, NULL, NULL)) return false;
+  TaiScrollbarRect bar;
+  if (tai_scrollbar_geometry(width, height, tai_page_scroll_y(page),
+                             tai_page_max_scroll_y(page), &bar)) {
+    SDL_FRect rect = {bar.x, bar.y, bar.w, bar.h};
+    if (!SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255) ||
+        !SDL_RenderFillRect(renderer, &rect)) return false;
+  }
+  return SDL_RenderPresent(renderer);
 }
 
 static bool valid_pixel_dimensions(int width, int height) {
@@ -70,7 +80,7 @@ static bool paint(SDL_Renderer *renderer, SDL_Texture **texture,
   /* Cairo ARGB32 and SDL ARGB8888 are both native-endian 0xAARRGGBB.
    * Opaque white backing means there is no premultiplied-alpha blend seam. */
   bool ok = next && SDL_UpdateTexture(next, NULL, pixels, stride) &&
-            present_texture(renderer, next);
+            present_texture(renderer, next, page, width, height);
   free(pixels);
   if (!ok) {
     set_error(error, SDL_GetError());
@@ -133,7 +143,9 @@ bool tai_present_window(TaiPage *page, int width, int height, char **error) {
       }
     } else if (event.type == SDL_EVENT_WINDOW_EXPOSED &&
                event.window.windowID == SDL_GetWindowID(window) && texture) {
-      if (!present_texture(renderer, texture)) {
+      if (!present_texture(renderer, texture, page,
+                           (int)tai_page_viewport_width(page),
+                           (int)tai_page_viewport_height(page))) {
         set_error(error, SDL_GetError());
         ok = false;
         break;

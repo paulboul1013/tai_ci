@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tai/presentation.h"
+#include "../src/presentation_geometry.h"
 #include <SDL3/SDL.h>
 #include <assert.h>
 #include <math.h>
@@ -95,6 +96,21 @@ static void *request_quit(void *unused) {
 }
 
 int main(void) {
+  TaiScrollbarRect bar = {0};
+  assert(!tai_scrollbar_geometry(100, 100, 0, 0, &bar));
+  assert(tai_scrollbar_geometry(100, 100, 0, 300, &bar));
+  assert(bar.x == 88 && bar.y == 0 && bar.w == 12 && bar.h == 25);
+  assert(tai_scrollbar_geometry(100, 100, 150, 300, &bar));
+  assert(bar.y == 37.5f && bar.h == 25);
+  assert(tai_scrollbar_geometry(100, 100, 300, 300, &bar));
+  assert(bar.y == 75 && bar.y + bar.h == 100);
+  assert(tai_scrollbar_geometry(8, 100, 450, 900, &bar));
+  assert(bar.x == 0 && bar.w == 8 && bar.y == 40 && bar.h == 20);
+  assert(tai_scrollbar_geometry(8, 10, 90, 90, &bar));
+  assert(bar.x == 0 && bar.w == 8 && bar.y == 0 && bar.h == 10);
+  assert(!tai_scrollbar_geometry(100, 100, NAN, 300, &bar));
+  assert(!tai_scrollbar_geometry(100, 100, 0, INFINITY, &bar));
+  assert(!tai_scrollbar_geometry(0, 100, 0, 300, &bar));
   char *error = NULL;
   assert(!tai_present_window(NULL, 800, 532, &error));
   assert(error);
