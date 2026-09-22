@@ -46,9 +46,9 @@ static bool handle_scroll_event(TaiPage *page, const SDL_Event *event,
   }
   if (event->type != SDL_EVENT_KEY_DOWN || event->key.windowID != window_id)
     return false;
-  if (event->key.key == SDLK_PAGEUP)
+  if (event->key.key == SDLK_PAGEUP || event->key.key == SDLK_UP)
     return scroll_page(page, -TAI_PRESENTATION_SCROLL_STEP);
-  if (event->key.key == SDLK_PAGEDOWN)
+  if (event->key.key == SDLK_PAGEDOWN || event->key.key == SDLK_DOWN)
     return scroll_page(page, TAI_PRESENTATION_SCROLL_STEP);
   return false;
 }

@@ -146,16 +146,17 @@ present 並替換 texture；若 page replacement 或 raster/upload/present 失�
 quit/close 結束事件迴圈，依 texture→renderer→window→SDL 順序釋放。zero-size resize 略過，
 超過單邊 8192 或 25,000,000 pixels 的 raster 明確失敗。
 
-同一視窗的 `SDL_EVENT_MOUSE_WHEEL` 與 `SDL_EVENT_KEY_DOWN` 的 `PageUp`/`PageDown`
-直接透過 `TaiPage` 的既有 page-scroll seam。Frozen Python oracle 的 step 是 100px：normal
-wheel 正 tick/`PageUp` 為 −100，負 tick/`PageDown` 為 +100；flipped wheel 先反向。
+同一視窗的 `SDL_EVENT_MOUSE_WHEEL` 與 `SDL_EVENT_KEY_DOWN` 的 `PageUp`/`↑`、
+`PageDown`/`↓` 直接透過 `TaiPage` 的既有 page-scroll seam。Frozen Python oracle 的 step
+是 100px：normal wheel 正 tick/`PageUp`/`↑` 為 −100，負 tick/`PageDown`/`↓` 為 +100；
+flipped wheel 先反向。
 Python 將 wheel y 轉為 int，因此 native 對絕對值小於一的 SDL3 float delta 不動。非有限、未知
 direction、非本視窗或不支援的 key 都是 no-op。只有 clamped scroll 實際改變才 raster、upload、
 present 並在成功後替換 texture；夾限 no-op 保留既有 texture。
 
 `tests/test_browser.c` 覆蓋窄 viewport 的文字換行、viewport/scroll 更新與無效尺寸 no-op；
 `tests/test_presentation.c` 以 SDL dummy driver 在 owner-thread event filter 注入 resize、wheel、
-PageUp/PageDown 後 quit，驗證 page 使用新 viewport、100px scroll direction、clamp、flipped
+PageUp/PageDown、↑/↓ 後 quit，驗證 page 使用新 viewport、100px scroll direction、clamp、flipped
 direction，以及 fractional、非有限、未知 direction、unrelated window 的 no-op；輸入後的非零
 scroll 值也能抓出事件全被忽略的回歸。超限 resize event 不會改寫 page viewport。
 `tests/layout_differential.py` 另以 80px 寬度的換行案例比對 frozen Python/C layout geometry。

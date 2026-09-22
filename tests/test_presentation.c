@@ -19,6 +19,8 @@ typedef enum {
   INPUT_WHEEL_UP,
   INPUT_PAGE_DOWN,
   INPUT_PAGE_UP,
+  INPUT_ARROW_DOWN,
+  INPUT_ARROW_UP,
   INPUT_UNRELATED_WHEEL,
   INPUT_FLIPPED_DOWN,
   INPUT_FRACTIONAL_WHEEL,
@@ -62,7 +64,9 @@ static SDL_Event make_input_event(InputKind kind, SDL_WindowID window_id) {
   return (SDL_Event){.key = {
       .type = SDL_EVENT_KEY_DOWN,
       .windowID = window_id,
-      .key = kind == INPUT_PAGE_UP ? SDLK_PAGEUP : SDLK_PAGEDOWN,
+      .key = kind == INPUT_PAGE_UP ? SDLK_PAGEUP :
+             kind == INPUT_PAGE_DOWN ? SDLK_PAGEDOWN :
+             kind == INPUT_ARROW_UP ? SDLK_UP : SDLK_DOWN,
       .down = true,
   }};
 }
@@ -159,6 +163,7 @@ int main(void) {
       INPUT_PAGE_UP, INPUT_WHEEL_DOWN, INPUT_PAGE_DOWN, INPUT_PAGE_UP, INPUT_WHEEL_UP,
       INPUT_FLIPPED_DOWN, INPUT_FRACTIONAL_WHEEL, INPUT_NONFINITE_WHEEL,
       INPUT_UNKNOWN_DIRECTION, INPUT_UNRELATED_WHEEL,
+      INPUT_ARROW_DOWN, INPUT_ARROW_UP, INPUT_ARROW_DOWN,
   };
   InputEvents input = {
       .kinds = scroll_inputs,
@@ -173,7 +178,7 @@ int main(void) {
   assert(tai_present_window(input_page, 64, 64, &error));
   assert(pthread_join(thread, NULL) == 0);
   assert(!error && input_injected && input_events_queued &&
-         tai_page_scroll_y(input_page) == 100.0);
+         tai_page_scroll_y(input_page) == 200.0);
 
   tai_page_destroy(input_page);
   tai_url_destroy(input_url);

@@ -10,7 +10,7 @@
 
 **State:** `VALIDATING`
 
-`tai-browser --window URL` 的 wheel 與 PageUp/PageDown 已接到既有 `TaiPage` scroll seam。presentation 僅在 clamped scroll 改變後重繪；SDL 資源仍由 caller thread 的 presentation 擁有。
+`tai-browser --window URL` 的 wheel、PageUp/PageDown 與 ↑/↓ 已接到既有 `TaiPage` scroll seam。presentation 僅在 clamped scroll 改變後重繪；SDL 資源仍由 caller thread 的 presentation 擁有。
 
 **刻意差異：** frozen Python 對非 flipped 的未知 wheel direction 仍當 normal，且 `int()` 遇非有限 y 會拋錯；native 將這兩種無效 SDL 輸入視為 no-op，以免無效事件改變頁面或中止視窗。有效 normal／flipped 輸入維持相同方向；後續完整輸入路由須沿用此驗證邊界。
 
