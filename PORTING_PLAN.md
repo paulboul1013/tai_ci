@@ -6,19 +6,27 @@
 
 `COMPLETE` 僅在功能、build、相關測試、Python oracle、ownership review、差異記錄與上下游整合皆有證據時使用；其餘進行中的可執行切片維持 `VALIDATING`。完整定義見 [`docs/agents/project-records.md`](docs/agents/project-records.md)。
 
-## 目前切片：window 互動輸入與單頁導覽
+## 目前切片：window 單視窗 chrome、網址列與 history
 
 **State:** `VALIDATING`
 
-`tai-browser --window URL` 已接上當前視窗的 click、SDL text input、Backspace/左右/Return 特殊鍵、文字與 password 控制項、checkbox、button/Enter 表單送出，以及成功後在同一視窗替換文件。PageUp/PageDown、↑/↓ 與 wheel 維持既有 page scroll 路徑；presentation 依目前 scroll state 繪製右緣藍色 thumb。SDL text input 只在視窗聚焦且文字控制項有效時啟動，focus loss 與清理時停止。
+`tai-browser --window URL` 的目前範圍是單視窗 chrome、可編輯地址列、Back/Forward 與 URL history；既有頁面 click、表單輸入/提交、同視窗文件導覽、fragment 與 scroll 路徑仍整合於此視窗。精確幾何、viewport、事件路由與呈現契約見 [render contract](docs/reference-render-contract.md)；page/session、SDL 資源與 callback ownership 見 [native runtime](docs/architecture/native-runtime.md)。本切片維持 `VALIDATING`，整體驗收仍未完成。
 
-`TaiPage` 建立擁有 URL、method/body 的 navigation intent；外層 window/session owner 以目前頁 URL 作 referrer、沿用 viewport 載入候選頁。候選頁成功後才替換並銷毀舊頁，失敗時保留舊頁。相同文件的 fragment 連結更新 URL/scroll；跨文件 fragment 在新文件 layout 建立後捲到目標。Presentation 仍只擁有 caller thread 的 SDL 資源，network 與 page slot 留在外層 owner。
+Python 參考實作另有 tabs、bookmark、新視窗及外部網址啟動，這些不屬於本切片。窄寬地址欄會被裁切且 bookmark row 尚未實作；tabs 是下一個切片。
 
-**刻意差異：** frozen Python 對非 flipped 的未知 wheel direction 仍當 normal，且 `int()` 遇非有限 y 會拋錯；native 將這兩種無效 SDL 輸入視為 no-op，以免無效事件改變頁面或中止視窗。有效 normal／flipped 輸入維持相同方向；後續完整輸入路由須沿用此驗證邊界。
+**刻意差異與限制：** malformed/unsupported direct address 會被 native 拒絕；`mailto:` 不啟動外部程式；載入失敗時 native 保留舊 page/history，而 Python 會先更新 URL/history 並顯示 Network Error。Back/Forward 只保存 URL 並以 GET 重載，不保存 POST body、舊 DOM 或 scroll。Native 支援地址列未聚焦時 Alt+Left/Alt+Right；沒有 Ctrl+N、新視窗或 Escape 專用操作。Frozen Python 對未知 wheel direction 與非有限 y 的處理和 native no-op 不同。低寬度控件可用性、chrome pixel diff、自动化原生視窗輸入順序仍是缺口；Python event dispatcher 未見 Escape 分支。行為細節見 [render contract](docs/reference-render-contract.md)。
 
-**已驗證：** Python oracle probes 核對文字插入/左右/Backspace、`quote_plus`、GET query 分隔與 fragment/query 的既有差異。Dummy SDL 覆蓋目前/其他視窗、focus、Unicode、特殊鍵、preventDefault、button/Enter 導覽、替換後的新頁 checkbox 輸入，以及候選載入失敗後同一事件迴圈仍處理後續 click。Local HTTP fixture 驗證 GET path/query、POST body/headers、Referer、跨文件 fragment scroll、preventDefault 不發請求，以及失敗載入保留原 page slot。完整 CTest 25/25 與最終 focused CTest 5/5 通過；ASan/UBSan focused `presentation_dummy`、`browser_headless`、`browser_navigation` 3/3 通過，均設 `ASAN_OPTIONS=detect_leaks=0`，因此不構成 LeakSanitizer 結論。此前 scrollbar slice 的原生視窗截圖證據仍適用於該 overlay。
+`TaiPage` 提供 navigation intent；session/window owner 負責候選頁與 history 的提交。具體狀態、已知差異與下一個移植 seam 由本計畫追蹤；驗證結果只記錄於 [ACCEPTANCE.md](ACCEPTANCE.md)，chrome 幾何與測試案例清單記錄於 [render contract](docs/reference-render-contract.md)。
 
-**範圍差異與下一個 seam：** history/back-forward、tabs、browser chrome、mailto 外部程式啟動、一般網站相容性，以及原生視窗鍵盤自動操作仍未完成；鍵盤/text input 僅有 dummy SDL 證據。`tai_present_window` 舊介面沒有 navigation callback，需要 link/form 導覽的呼叫端應使用 `tai_present_window_with_navigation`。詳細通用缺口見 subsystem dashboard；已刪除的舊 handoff 不再作為連結目標。
+**既有輸入/history 邊界與下一個 seam：** 文字/password、checkbox、button/Enter 表單、同視窗文件替換、fragment、page scroll/wheel 與 session history 均已納入目前 window slice。尚未涵蓋 tabs、bookmark、新視窗與 mailto 外部啟動；地址列低寬度可用性、native chrome pixel diff、自動化原生視窗輸入順序及配置故障注入仍待驗證。舊 `tai_present_window` 與 `tai_present_window_with_history` 仍提供不帶可見 chrome 的相容入口。
+
+## 下一個切片：tabs
+
+Python `BrowserWindow` 擁有有序 tabs 與 active tab；Chrome 的 New Tab 按鈕建立預設首頁 `https://browser.engineering/`，Tab N 連結切換 active tab，Back/Forward/地址列作用於目前 tab。參考 UI 未找到單一 tab 關閉控制；關閉視窗會關閉其所有 tabs。開始實作前先以 Python oracle 固定 tab row 的高度／窄寬排版與點擊邊界。
+
+1. **定義 tab owner 與生命週期。** 建立 window/tab-set 邊界，讓每個 tab 擁有獨立 `TaiSession`（live page、history、scroll），由 window 共用 network、default CSS 與尺寸。驗收：切換 tab 不複製 `TaiPage *` 或重用另一 tab 的 history；window close 逐一釋放所有 session。
+2. **新增與切換 tab 的垂直路徑。** 點 New Tab 建立並選取預設首頁 tab；點 Tab N 切換目前內容、網址列與 Back/Forward availability。驗收：兩個 tab 可各自導覽和返回，來回切換後 page URL、scroll、history index 保持隔離；關閉窗口完整清理。
+3. **補齊 oracle 與整合驗證。** Dummy SDL 覆蓋新建、切換、toolbar/page hit boundary 和窄寬排列；本地 HTTP fixture 驗證各 tab 的 history/referrer；完成 focused/full CTest、ASan/UBSan、Python 幾何比對與原生手動 smoke test。Bookmark、新視窗和單 tab close 不擴入此切片，除非 oracle 顯示屬於 tab 基本契約。
 
 ## Subsystem dashboard
 
@@ -32,7 +40,7 @@
 | Paint / raster | display commands/raster → `src/render.c` | Cairo, layout | VALIDATING | structural differentials；scroll/blur/blend/image key-region tests；viewport PNG | general/remote images and WebP; exact scope → [`render contract`](docs/reference-render-contract.md) |
 | JavaScript / events | JS runtime/context → `src/js.c` | QuickJS-NG, DOM, CSS, network | VALIDATING | bridge, cancellation, exception tests | bubbling, broad DOM mutation, timers/fetch, browser integration |
 | Scheduling | task runners/clocks → `src/scheduler.c` | threads, network | VALIDATING | priority/FIFO/aging/generation unit tests | browser/network/frame integration and close protocol |
-| Browser / window | app/window/tab/chrome → `src/browser.c`, `src/presentation.c`, `src/main.c` | page, Cairo, SDL3 | VALIDATING | headless/PNG E2E; resize/layout differential; dummy SDL scroll/click/text/key/focus/navigation; local HTTP GET/POST/referrer/failure/fragment fixture; native scrollbar screenshots | history/back-forward, tabs, Chrome, external launch, real-window keyboard validation, broader input ordering |
+| Browser / window | app/window/tab/chrome → `src/browser.c`, `src/session.c`, `src/presentation.c`, `src/main.c` | page, Cairo, SDL3 | VALIDATING | verification record: [`ACCEPTANCE.md`](ACCEPTANCE.md); geometry and presentation cases: [`render contract`](docs/reference-render-contract.md) | low-width address/control clipping and unimplemented bookmark row; native chrome pixel diff, tabs/new window, mailto external launch, automated real-window keyboard/event-order validation |
 
 ## Disclosure map
 
@@ -50,6 +58,4 @@ Read the indicated source only when its branch is active:
 ## Evidence constraints
 
 - The Python browser is the behavioral authority; compare at the affected boundary before declaring equivalence.
-- `ASAN_OPTIONS=detect_leaks=0` supports ASan/UBSan claims only. Fontconfig/SDL system-library allocations leave LeakSanitizer inconclusive.
-- The sandbox may block the localhost network fixture. Record an externally rerun loopback result separately; never call that sandbox failure a product regression.
 - Keep `ARCHITECTURE.md` as the directory index and put architecture, rendering, and acceptance details in their disclosed references rather than duplicating them here.

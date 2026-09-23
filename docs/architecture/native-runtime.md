@@ -73,6 +73,26 @@ private, incompatible node layouts.
   callback; callers that need link/form navigation use the callback variant.
   Fragment scrolling runs after the candidate layout exists, before the first
   frame is presented.
+  `TaiSession` owns one live page and an array of copied URL strings; it borrows
+  network and default CSS. A successful new navigation commits a loaded
+  candidate and a new history entry together, discarding forward URLs. Back
+  and Forward load the selected URL as GET before replacing the page and index;
+  failure preserves both. A same-document fragment activation carries an owned
+  URL signal from page to presentation and session. If history allocation fails,
+  the page restores its prior URL and scroll before the event ends. The
+  presentation adapter routes focused Alt+Left/Alt+Right for its own SDL
+  window to the session callback; ordinary arrows remain page-control input.
+  `TaiSession` also normalizes address submissions and loads them as GET; a
+  successful candidate and its URL history entry commit together.
+  The chrome-enabled entry point, `tai_present_window_with_chrome`, borrows its
+  callback table and userdata for the duration of the call. Its address editor
+  owns its UTF-8 text buffer. The adapter owns separate page and chrome SDL
+  textures; chrome drawing uses a temporary Cairo image surface/context, which
+  is destroyed after texture upload. Both textures are destroyed before the
+  renderer/window/SDL resources during cleanup.
+  The chrome adapter borrows the session/history callbacks and owns no page or
+  network state. Its geometry, rendering, and event-routing contract is recorded
+  in [`docs/reference-render-contract.md`](../reference-render-contract.md).
 
 ## Current native rendering boundary
 

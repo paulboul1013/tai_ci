@@ -34,4 +34,10 @@ display/raster differential 尚未移植。
 不以外網網站可用性作 deterministic acceptance；人工 test.md scenarios 改為本地 fixtures。
 Pixel-perfect 只在字型、版本、backend 與環境固定時使用；優先比較 DOM/layout/display 結構。
 
-截至 2026-09-23，原生瀏覽器另有一條仍屬 `VALIDATING` 的互動切片：目前視窗 click、文字/password 輸入、checkbox、button/Enter 表單提交與同視窗文件替換。Dummy SDL 覆蓋視窗 ID、focus、Unicode、特殊鍵、preventDefault、替換後新頁的 checkbox 輸入，以及候選載入失敗後仍處理後續事件；loopback HTTP fixture 驗證 GET query、POST payload/headers、Referer、跨文件 fragment scroll、preventDefault 不發請求與舊頁保留。完整 CTest 25/25 與最終 focused CTest 5/5 通過。ASan/UBSan focused `browser_headless`、`browser_navigation`、`presentation_dummy` 3/3 通過並使用 `ASAN_OPTIONS=detect_leaks=0`，不代表 LeakSanitizer 無洩漏證據。這些結果不勾選上述任何整體驗收條件；history/back-forward、tabs、browser chrome、mailto 外部啟動與原生視窗鍵盤驗證仍未完成。
+截至 2026-09-23，原生瀏覽器另有仍屬 `VALIDATING` 的互動、history 與單視窗 chrome 切片。Focused presentation/session/browser tests 涵蓋 window input、地址列編輯、history/fragment、GET/POST/Referer 及失敗保留；幾何與 presentation case 清單見 [render contract](docs/reference-render-contract.md)。
+
+最新 release focused CTest `presentation_chrome`、`presentation_dummy`、`browser_address`、`browser_history`、`browser_navigation` 5/5 通過。完整 CTest 28/28 通過（207.97s）。前次與 sanitizer loopback 測試併跑時，`display_differential` subprocess 曾因 `PermissionError` 無法啟動 `build/tai-browser`（檔案 mode 確認為 755）；隔離完整重跑未重現，推測是併行造成的暫時執行限制，根因未確認。ASan/UBSan focused 5/5：`presentation_dummy`、`browser_history`、`presentation_chrome` 在 sandbox 內通過，`browser_address` 與 `browser_navigation` 在允許 loopback 的 elevated 執行下通過；均設 `ASAN_OPTIONS=detect_leaks=0`，LeakSanitizer 未執行。`presentation_chrome` 覆蓋 toolbar 寬度切換與小尺寸 resize 邊界；完整案例與幾何見 [render contract](docs/reference-render-contract.md)。800×600 原生視窗截圖 `/tmp/tai-chrome-window.png` 已擷取並目視確認 toolbar 與 page content 可見，尚未做 Python/native pixel diff；dummy SDL 狀態測試及目視檢查均不構成 raster parity 證據。以上結果不勾選任何整體 acceptance 條件。
+
+使用者於 2026-09-23 手動開啟 `https://browser.engineering/`，回報原生視窗中的基本 chrome／導覽測試成功。具體操作序列未記錄，因此此回報補充代表性手動 smoke evidence，不替代逐項自動化、Python 行為比對或 pixel diff。
+
+已知刻意差異、目前移植切片與剩餘功能缺口的唯一紀錄見 [PORTING_PLAN.md](PORTING_PLAN.md)。逐項原生視窗鍵盤輸入與事件順序仍未自動化驗證。
