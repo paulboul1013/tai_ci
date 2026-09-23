@@ -33,3 +33,5 @@ display/raster differential 尚未移植。
 
 不以外網網站可用性作 deterministic acceptance；人工 test.md scenarios 改為本地 fixtures。
 Pixel-perfect 只在字型、版本、backend 與環境固定時使用；優先比較 DOM/layout/display 結構。
+
+截至 2026-09-23，原生瀏覽器另有一條仍屬 `VALIDATING` 的互動切片：目前視窗 click、文字/password 輸入、checkbox、button/Enter 表單提交與同視窗文件替換。Dummy SDL 覆蓋視窗 ID、focus、Unicode、特殊鍵、preventDefault、替換後新頁的 checkbox 輸入，以及候選載入失敗後仍處理後續事件；loopback HTTP fixture 驗證 GET query、POST payload/headers、Referer、跨文件 fragment scroll、preventDefault 不發請求與舊頁保留。完整 CTest 25/25 與最終 focused CTest 5/5 通過。ASan/UBSan focused `browser_headless`、`browser_navigation`、`presentation_dummy` 3/3 通過並使用 `ASAN_OPTIONS=detect_leaks=0`，不代表 LeakSanitizer 無洩漏證據。這些結果不勾選上述任何整體驗收條件；history/back-forward、tabs、browser chrome、mailto 外部啟動與原生視窗鍵盤驗證仍未完成。

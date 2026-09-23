@@ -50,8 +50,29 @@ private, incompatible node layouts.
   Each present composes a stateless scrollbar thumb from borrowed page scroll
   and viewport values above the retained texture. The overlay owns no resource
   and never mutates the display list or Cairo pixels; expose recomposes it.
+  The window adapter also accepts pointer, key, and text events only for its
+  own SDL window ID. SDL text input runs only while that window is focused and
+  the current page has an active text/password control; focus loss and adapter
+  cleanup stop it. Backspace, left/right, and Return go through the focused
+  page-control seam, while PageUp/PageDown and up/down retain page-scroll
+  behavior.
   A future raster worker may receive a self-contained display list, never
   mutable DOM state.
+
+- Window navigation keeps network and page-session ownership outside
+  `TaiPage`. A page owns at most one pending `TaiNavigationIntent`, including
+  its resolved URL and optional POST body; taking the intent transfers
+  ownership to the caller. `tai_present_window_with_navigation` lends that
+  intent to the outer owner, which builds a candidate with the old page URL as
+  referrer and the existing viewport. The caller-owned page slot changes only
+  after candidate load succeeds, at which point the old page is destroyed. A
+  failed load leaves the old page and its DOM/layout/display list live. Any
+  handled intent is a repaint boundary, so presentation paints whichever page
+  remains current without retaining a pointer to a page the callback may have
+  freed. The compatibility `tai_present_window` API has no navigation
+  callback; callers that need link/form navigation use the callback variant.
+  Fragment scrolling runs after the candidate layout exists, before the first
+  frame is presented.
 
 ## Current native rendering boundary
 

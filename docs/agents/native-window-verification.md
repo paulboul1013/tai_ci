@@ -14,15 +14,18 @@ cmake --build build --target tai-browser test_presentation -j 4
 ctest --test-dir build -R '^presentation_dummy$' --output-on-failure
 ```
 
-`tests/test_presentation.c` injects SDL wheel, PageUp/PageDown, and up/down
-arrow events. It also covers flipped wheel direction, fractional/nonfinite
-input, unrelated windows, scroll clamps, and resize. Record the result; this
-step is complete only when the focused test passes on the binary being checked.
+`tests/test_presentation.c` injects SDL wheel, pointer, text, and key events.
+It covers flipped wheel direction, fractional/nonfinite input, unrelated
+windows, scroll clamps, resize, active-control text input, focus loss/gain,
+Unicode text, Backspace/left/right/Return, and a navigation callback replacing
+the page while the same SDL window remains open. Record the result; this step
+is complete only when the focused test passes on the binary being checked.
 
 | Movement | SDL dummy evidence | Real-window automation |
 |---|---|---|
 | Wheel down/up | Direction, clamp, flipped and invalid input | Targeted X11 buttons `5`/`4` |
 | PageDown/PageUp, down/up arrows | 100px step and clamp | Requires real keyboard focus; see step 4 |
+| Text, Backspace/left/right/Return | Focused dummy SDL input and form navigation | Not covered by the standing X11 automation scope |
 
 ## 2. Start and identify one real window
 
@@ -43,6 +46,25 @@ network or display access is denied by the sandbox, retry with the required
 approval and record the restriction separately from browser behavior. This
 step is complete when exactly one target window is identified and its initial
 capture shows page content plus a right-edge blue thumb.
+
+### Elevated X11 authorization scope
+
+Desktop automation can require elevated sandbox permission. When the user has
+granted standing consent for native-window verification, invoke the scoped
+commands directly; do not pause for a second conversational confirmation. The
+permitted scope is limited to the `Tai Gar` window started in this procedure
+and its newly resolved X11 ID:
+
+- `xdotool search --name '^Tai Gar$'` to find the window;
+- `xdotool click --window <current-id> 4|5` for targeted wheel input;
+- `xdotool windowclose <current-id>` only to clean up that test window; and
+- `xwd -silent -id <current-id>` to capture that same window.
+
+Do not broaden this consent to whole-desktop captures, active-window lookup,
+general keyboard injection, or another application's window ID. Capture files
+belong in a temporary path unless the user requested a destination. If the
+execution platform still refuses a scoped elevated command, report that as an
+environment restriction rather than requesting browser code changes.
 
 ## 3. Inject movement and capture each state
 
@@ -107,9 +129,10 @@ image used for the claim.
 `KeyPress`, but SDL's XInput2 path can skip it. With XInput2 disabled, this
 WSLg session still lost keyboard focus and emitted an SDL key event with
 `windowID=0`; the browser correctly ignored that event. Use the focused dummy
-SDL test for PageUp/PageDown and arrow behavior, and targeted wheel input for
-real-window visual evidence. Do not change the browser to accept unfocused
-`windowID=0` keys just to satisfy desktop automation.
+SDL test for PageUp/PageDown, arrow, and text/control behavior, and targeted
+wheel input for real-window visual evidence. Do not change the browser to
+accept unfocused `windowID=0` keys just to satisfy desktop automation. The
+standing native-window authorization does not include keyboard injection.
 
 If a targeted wheel does not move the page, check the launch environment,
 window ID, overflow, and scroll clamp, then compare captures. A command that
