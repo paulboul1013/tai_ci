@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <utf8proc.h>
 
 typedef enum { RESOURCE_STYLE, RESOURCE_SCRIPT } ResourceKind;
 static const double TAI_PAGE_VERTICAL_STEP = 18.0;
@@ -23,6 +24,11 @@ typedef struct {
     size_t count;
 } ScrollSnapshot;
 
+struct TaiNavigationIntent {
+    char *url;
+    char *body;
+};
+
 struct TaiPage {
     TaiUrl *url;
     TaiDocument *document;
@@ -36,11 +42,32 @@ struct TaiPage {
     bool rtl;
     bool secure;
     bool dirty;
+    TaiNode *focused;
+    TaiNavigationIntent *navigation;
 };
 
 static bool diagnostic(char **error, const char *message) {
     if (error && !*error) *error = tai_strdup(message);
     return false;
+}
+
+void tai_navigation_intent_destroy(TaiNavigationIntent *intent) {
+    if (!intent) return;
+    free(intent->url);
+    free(intent->body);
+    free(intent);
+}
+
+const char *tai_navigation_intent_url(const TaiNavigationIntent *intent) {
+    return intent ? intent->url : NULL;
+}
+
+bool tai_navigation_intent_is_post(const TaiNavigationIntent *intent) {
+    return intent && intent->body != NULL;
+}
+
+const char *tai_navigation_intent_body(const TaiNavigationIntent *intent) {
+    return intent ? intent->body : NULL;
 }
 
 static bool append(char **text, size_t *length, const char *part) {
@@ -188,9 +215,13 @@ static void invalidated(void *opaque) {
     ((TaiPage *)opaque)->dirty = true;
 }
 
-TaiPage *tai_page_load(TaiNetwork *network, const TaiUrl *url,
-                       const char *default_css, double viewport_width,
-                       double viewport_height, bool rtl, char **error) {
+static bool scroll_to_fragment(TaiPage *page, const char *fragment,
+                              char **error);
+
+TaiPage *tai_page_load_request(TaiNetwork *network, const TaiUrl *url,
+                               const TaiUrl *referrer, const char *payload,
+                               const char *default_css, double viewport_width,
+                               double viewport_height, bool rtl, char **error) {
     if (error) { free(*error); *error = NULL; }
     if (!network || !url || !default_css || !isfinite(viewport_width) ||
         !isfinite(viewport_height) || viewport_width <= 0.0 ||
@@ -210,7 +241,7 @@ TaiPage *tai_page_load(TaiNetwork *network, const TaiUrl *url,
     page->rtl = rtl;
     page->url = tai_url_parse(tai_url_string(url));
     if (!page->url) goto oom;
-    response = tai_network_request(network, url, NULL, NULL, NULL, NULL);
+    response = tai_network_request(network, url, referrer, payload, NULL, NULL);
     if (!response) goto oom;
     if (response->error) {
         diagnostic(error, response->error);
@@ -263,6 +294,8 @@ TaiPage *tai_page_load(TaiNetwork *network, const TaiUrl *url,
     page->layout = tai_layout_create(tai_document_root(page->document),
                                      viewport_width, rtl, error);
     if (!page->layout) goto fail;
+    if (!scroll_to_fragment(page, tai_url_fragment(page->url), error))
+        goto fail;
     page->display = tai_display_list_create(page->layout, error);
     if (!page->display) goto fail;
     resources_destroy(resources, resource_count);
@@ -279,8 +312,38 @@ fail:
     return NULL;
 }
 
+TaiPage *tai_page_load(TaiNetwork *network, const TaiUrl *url,
+                       const char *default_css, double viewport_width,
+                       double viewport_height, bool rtl, char **error) {
+    return tai_page_load_request(network, url, NULL, NULL, default_css,
+                                 viewport_width, viewport_height, rtl, error);
+}
+
+bool tai_page_replace_from_intent(TaiNetwork *network, TaiPage **page,
+                                  const TaiNavigationIntent *intent,
+                                  const char *default_css, bool rtl,
+                                  char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (!network || !page || !*page || !intent || !intent->url ||
+        !default_css)
+        return diagnostic(error, "invalid page navigation input");
+    TaiUrl *url = tai_url_parse(intent->url);
+    if (!url) return diagnostic(error, "navigation URL allocation failed");
+    TaiPage *candidate = tai_page_load_request(
+        network, url, tai_page_url(*page), intent->body, default_css,
+        tai_page_viewport_width(*page), tai_page_viewport_height(*page), rtl,
+        error);
+    tai_url_destroy(url);
+    if (!candidate) return false;
+    TaiPage *old_page = *page;
+    *page = candidate;
+    tai_page_destroy(old_page);
+    return true;
+}
+
 void tai_page_destroy(TaiPage *page) {
     if (!page) return;
+    tai_navigation_intent_destroy(page->navigation);
     tai_display_list_destroy(page->display);
     tai_layout_destroy(page->layout);
     tai_js_destroy(page->javascript);
@@ -288,6 +351,30 @@ void tai_page_destroy(TaiPage *page) {
     tai_document_destroy(page->document);
     tai_url_destroy(page->url);
     free(page);
+}
+
+bool tai_page_take_navigation_intent(TaiPage *page,
+                                     TaiNavigationIntent **intent) {
+    if (!page || !intent) return false;
+    *intent = page->navigation;
+    page->navigation = NULL;
+    return true;
+}
+
+static bool set_navigation_intent(TaiPage *page, const TaiUrl *url,
+                                  const char *body, char **error) {
+    if (!page || !url) return true;
+    TaiNavigationIntent *intent = calloc(1, sizeof(*intent));
+    if (!intent) return diagnostic(error, "navigation intent allocation failed");
+    intent->url = tai_strdup(tai_url_string(url));
+    if (body) intent->body = tai_strdup(body);
+    if (!intent->url || (body && !intent->body)) {
+        tai_navigation_intent_destroy(intent);
+        return diagnostic(error, "navigation intent allocation failed");
+    }
+    tai_navigation_intent_destroy(page->navigation);
+    page->navigation = intent;
+    return true;
 }
 
 TaiNode *tai_page_root(const TaiPage *page) {
@@ -381,6 +468,407 @@ bool tai_page_set_scroll_y(TaiPage *page, double scroll_y) {
     page->scroll_y = fmax(0.0, fmin(scroll_y, tai_page_max_scroll_y(page)));
     return true;
 }
+
+/* A DOM mutation cannot be rolled back, but a frame replacement can: keep the
+ * old layout/display pair alive until a self-contained replacement exists.
+ * Styling can also fail after changing individual computed-style maps, so the
+ * dirty bit remains set until the complete visual frame is available. */
+static bool rebuild_dirty_page(TaiPage *page, char **error) {
+    ScrollSnapshot snapshot = {0};
+    TaiNode *root = tai_document_root(page->document);
+    if (!node_count(root, &snapshot.count) ||
+        snapshot.count > SIZE_MAX / sizeof(*snapshot.nodes) ||
+        snapshot.count > SIZE_MAX / sizeof(*snapshot.scroll_y) ||
+        !(snapshot.nodes = malloc(snapshot.count * sizeof(*snapshot.nodes))) ||
+        !(snapshot.scroll_y = malloc(snapshot.count * sizeof(*snapshot.scroll_y)))) {
+        snapshot_destroy(&snapshot);
+        return diagnostic(error, "page frame rebuild allocation failed");
+    }
+    size_t snapshot_index = 0;
+    snapshot_scroll(root, &snapshot, &snapshot_index);
+
+    if (!tai_css_style(root, page->styles, error)) {
+        snapshot_destroy(&snapshot);
+        return false;
+    }
+    TaiLayout *replacement_layout = tai_layout_create(
+        root, page->viewport_width, page->rtl, error);
+    if (!replacement_layout) {
+        restore_scroll(&snapshot);
+        snapshot_destroy(&snapshot);
+        return false;
+    }
+    TaiDisplayList *replacement_display = tai_display_list_create(
+        replacement_layout, error);
+    if (!replacement_display) {
+        tai_layout_destroy(replacement_layout);
+        restore_scroll(&snapshot);
+        snapshot_destroy(&snapshot);
+        return false;
+    }
+
+    TaiDisplayList *old_display = page->display;
+    TaiLayout *old_layout = page->layout;
+    page->layout = replacement_layout;
+    page->display = replacement_display;
+    page->scroll_y = fmax(0.0, fmin(page->scroll_y, tai_page_max_scroll_y(page)));
+    page->dirty = false;
+    tai_display_list_destroy(old_display);
+    tai_layout_destroy(old_layout);
+    snapshot_destroy(&snapshot);
+    return true;
+}
+
+static bool ascii_case_equal(const char *left, const char *right) {
+    if (!left || !right) return false;
+    while (*left && *right) {
+        unsigned char a = (unsigned char)*left++, b = (unsigned char)*right++;
+        if (a >= 'A' && a <= 'Z') a = (unsigned char)(a + ('a' - 'A'));
+        if (b >= 'A' && b <= 'Z') b = (unsigned char)(b + ('a' - 'A'));
+        if (a != b) return false;
+    }
+    return !*left && !*right;
+}
+
+static bool text_input_node(const TaiNode *node) {
+    if (!node || node->kind != TAI_ELEMENT || strcmp(node->tag, "input"))
+        return false;
+    const char *type = tai_map_get(&node->attributes, "type");
+    return !type || (!ascii_case_equal(type, "hidden") &&
+                     strcmp(type, "checkbox"));
+}
+
+static size_t utf8_count(const char *text) {
+    size_t count = 0;
+    for (const unsigned char *p = (const unsigned char *)text; *p;) {
+        utf8proc_int32_t codepoint;
+        utf8proc_ssize_t used = utf8proc_iterate(p, -1, &codepoint);
+        p += used > 0 ? (size_t)used : 1;
+        if (count == SIZE_MAX) return SIZE_MAX;
+        count++;
+    }
+    return count;
+}
+
+static size_t utf8_offset(const char *text, size_t index) {
+    size_t offset = 0;
+    while (text[offset] && index) {
+        utf8proc_int32_t codepoint;
+        utf8proc_ssize_t used = utf8proc_iterate(
+            (const utf8proc_uint8_t *)text + offset, -1, &codepoint);
+        offset += used > 0 ? (size_t)used : 1;
+        index--;
+    }
+    return offset;
+}
+
+/* SDL text is untrusted UTF-8. Mirror the oracle's errors=ignore plus control
+ * filtering, but cap the public string boundary before allocation. */
+static char *filtered_input(const char *text, size_t *codepoints, char **error) {
+    enum { TAI_TEXT_INPUT_MAX = 4096 };
+    if (codepoints) *codepoints = 0;
+    if (!text) return tai_strdup("");
+    size_t length = 0;
+    while (text[length]) {
+        if (length == TAI_TEXT_INPUT_MAX) {
+            diagnostic(error, "text input exceeds 4096 bytes");
+            return NULL;
+        }
+        length++;
+    }
+    char *result = malloc(length + 1);
+    if (!result) {
+        diagnostic(error, "text input allocation failed");
+        return NULL;
+    }
+    size_t source = 0, output = 0, count = 0;
+    while (source < length) {
+        utf8proc_int32_t codepoint;
+        utf8proc_ssize_t used = utf8proc_iterate(
+            (const utf8proc_uint8_t *)text + source,
+            (utf8proc_ssize_t)(length - source), &codepoint);
+        if (used < 1) { source++; continue; }
+        if (codepoint >= 0x20) {
+            memcpy(result + output, text + source, (size_t)used);
+            output += (size_t)used;
+            count++;
+        }
+        source += (size_t)used;
+    }
+    result[output] = '\0';
+    if (codepoints) *codepoints = count;
+    return result;
+}
+
+static bool replace_input_value(TaiNode *node, size_t start, size_t end,
+                                const char *replacement, size_t replacement_count,
+                                char **error) {
+    const char *value = tai_map_get(&node->attributes, "value");
+    if (!value) value = "";
+    size_t count = utf8_count(value);
+    if (count == SIZE_MAX) return diagnostic(error, "invalid input value");
+    if (start > count) start = count;
+    if (end < start) end = start;
+    if (end > count) end = count;
+    size_t left = utf8_offset(value, start);
+    size_t right = utf8_offset(value, end);
+    size_t replacement_length = strlen(replacement);
+    size_t value_length = strlen(value);
+    if (left > SIZE_MAX - replacement_length ||
+        left + replacement_length > SIZE_MAX - (value_length - right) - 1)
+        return diagnostic(error, "input value too large");
+    if (start > SIZE_MAX - replacement_count)
+        return diagnostic(error, "input cursor overflow");
+    size_t length = left + replacement_length + value_length - right;
+    char *next = malloc(length + 1);
+    if (!next) return diagnostic(error, "input value allocation failed");
+    memcpy(next, value, left);
+    memcpy(next + left, replacement, replacement_length);
+    memcpy(next + left + replacement_length, value + right,
+           value_length - right + 1);
+    bool ok = tai_map_set(&node->attributes, "value", next, 0);
+    free(next);
+    if (!ok) return diagnostic(error, "input value allocation failed");
+    node->cursor_index = start + replacement_count;
+    return true;
+}
+
+static bool rebuild_if_changed(TaiPage *page, bool local_changed,
+                               bool *changed, char **error) {
+    if (!page->dirty && !local_changed) return true;
+    if (!rebuild_dirty_page(page, error)) return false;
+    if (changed) *changed = true;
+    return true;
+}
+
+enum { TAI_FORM_DATA_MAX = 32 * 1024 * 1024 };
+
+static bool form_safe_byte(unsigned char byte) {
+    return (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') ||
+           (byte >= '0' && byte <= '9') || byte == '_' || byte == '.' ||
+           byte == '-' || byte == '~';
+}
+
+static char *quote_plus(const char *value, char **error) {
+    static const char hex[] = "0123456789ABCDEF";
+    if (!value) value = "";
+    size_t length = strlen(value);
+    if (length > (SIZE_MAX - 1) / 3) {
+        diagnostic(error, "form field is too large");
+        return NULL;
+    }
+    char *encoded = malloc(length * 3 + 1);
+    if (!encoded) {
+        diagnostic(error, "form field allocation failed");
+        return NULL;
+    }
+    size_t output = 0;
+    for (size_t index = 0; index < length; index++) {
+        unsigned char byte = (unsigned char)value[index];
+        if (form_safe_byte(byte)) encoded[output++] = (char)byte;
+        else if (byte == ' ') encoded[output++] = '+';
+        else {
+            encoded[output++] = '%';
+            encoded[output++] = hex[byte >> 4];
+            encoded[output++] = hex[byte & 15];
+        }
+    }
+    encoded[output] = '\0';
+    return encoded;
+}
+
+static bool form_append(char **body, size_t *length, const char *part,
+                        char **error) {
+    size_t part_length = strlen(part);
+    if (part_length > TAI_FORM_DATA_MAX - *length ||
+        *length + part_length == TAI_FORM_DATA_MAX) {
+        return diagnostic(error, "encoded form data exceeds 32 MiB");
+    }
+    char *next = realloc(*body, *length + part_length + 1);
+    if (!next) return diagnostic(error, "form data allocation failed");
+    memcpy(next + *length, part, part_length + 1);
+    *body = next;
+    *length += part_length;
+    return true;
+}
+
+static bool encode_form_inputs(const TaiNode *node, char **body,
+                               size_t *length, char **error) {
+    if (node->kind == TAI_ELEMENT && !strcmp(node->tag, "input")) {
+        const char *name = tai_map_get(&node->attributes, "name");
+        if (name) {
+            const char *type = tai_map_get(&node->attributes, "type");
+            bool checkbox = type && !strcmp(type, "checkbox");
+            if (!checkbox || node->checked) {
+                const char *value = tai_map_get(&node->attributes, "value");
+                if (checkbox && !value) value = "on";
+                if (!value) value = "";
+                char *encoded_name = quote_plus(name, error);
+                char *encoded_value = quote_plus(value, error);
+                if (!encoded_name || !encoded_value) {
+                    free(encoded_name);
+                    free(encoded_value);
+                    return false;
+                }
+                bool ok = (!*length || form_append(body, length, "&", error)) &&
+                          form_append(body, length, encoded_name, error) &&
+                          form_append(body, length, "=", error) &&
+                          form_append(body, length, encoded_value, error);
+                free(encoded_name);
+                free(encoded_value);
+                if (!ok) return false;
+            }
+        }
+    }
+    for (size_t index = 0; index < node->child_count; index++)
+        if (!encode_form_inputs(node->children[index], body, length, error))
+            return false;
+    return true;
+}
+
+static char *encode_form_data(const TaiNode *form, char **error) {
+    char *body = tai_strdup("");
+    size_t length = 0;
+    if (!body) {
+        diagnostic(error, "form data allocation failed");
+        return NULL;
+    }
+    if (!encode_form_inputs(form, &body, &length, error)) {
+        free(body);
+        return NULL;
+    }
+    return body;
+}
+
+static TaiNode *action_form_ancestor(TaiNode *node) {
+    for (; node; node = node->parent)
+        if (node->kind == TAI_ELEMENT && !strcmp(node->tag, "form") &&
+            tai_map_get(&node->attributes, "action"))
+            return node;
+    return NULL;
+}
+
+static char *join_url_and_query(const TaiUrl *url, const char *body,
+                                char **error) {
+    const char *url_text = tai_url_string(url);
+    const char *path = tai_url_path(url);
+    const char *separator = strchr(path, '?') ? "&" : "?";
+    size_t url_length = strlen(url_text);
+    size_t separator_length = strlen(separator);
+    size_t body_length = strlen(body);
+    if (url_length > TAI_FORM_DATA_MAX ||
+        separator_length > TAI_FORM_DATA_MAX - url_length ||
+        body_length > TAI_FORM_DATA_MAX - url_length - separator_length) {
+        diagnostic(error, "form navigation URL exceeds 32 MiB");
+        return NULL;
+    }
+    size_t length = url_length + separator_length + body_length;
+    char *text = malloc(length + 1);
+    if (!text) {
+        diagnostic(error, "form navigation URL allocation failed");
+        return NULL;
+    }
+    memcpy(text, url_text, url_length);
+    memcpy(text + url_length, separator, separator_length);
+    memcpy(text + url_length + separator_length, body, body_length);
+    text[length] = '\0';
+    return text;
+}
+
+static bool submit_form(TaiPage *page, TaiNode *form, char **error) {
+    bool prevented = false;
+    if (!tai_js_dispatch_event(page->javascript, "submit", form, &prevented,
+                              error))
+        return false;
+    if (prevented) return true;
+
+    char *body = encode_form_data(form, error);
+    if (!body) return false;
+    const char *action = tai_map_get(&form->attributes, "action");
+    TaiUrl *target = tai_url_resolve(page->url, action ? action : "");
+    if (!target) {
+        free(body);
+        return true;
+    }
+    const char *method = tai_map_get(&form->attributes, "method");
+    bool post = method && ascii_case_equal(method, "post");
+    bool ok;
+    if (post) {
+        ok = set_navigation_intent(page, target, body, error);
+    } else {
+        char *get_text = join_url_and_query(target, body, error);
+        TaiUrl *get_target = get_text ? tai_url_parse(get_text) : NULL;
+        free(get_text);
+        if (!get_target) {
+            free(body);
+            tai_url_destroy(target);
+            return diagnostic(error, "form GET URL allocation failed");
+        }
+        ok = set_navigation_intent(page, get_target, NULL, error);
+        tai_url_destroy(get_target);
+    }
+    free(body);
+    tai_url_destroy(target);
+    return ok;
+}
+
+static TaiNode *find_id_node(TaiNode *node, const char *id) {
+    if (node->kind == TAI_ELEMENT) {
+        const char *node_id = tai_map_get(&node->attributes, "id");
+        if (node_id && !strcmp(node_id, id)) return node;
+    }
+    for (size_t index = 0; index < node->child_count; index++) {
+        TaiNode *found = find_id_node(node->children[index], id);
+        if (found) return found;
+    }
+    return NULL;
+}
+
+typedef struct {
+    const TaiNode *target;
+    double y;
+    bool found;
+} FragmentPosition;
+
+static bool find_fragment_position(const TaiLayoutItem *item, void *opaque) {
+    FragmentPosition *position = opaque;
+    for (const TaiNode *node = item->node; node; node = node->parent) {
+        if (node == position->target) {
+            if (!position->found || item->y < position->y)
+                position->y = item->y;
+            position->found = true;
+            break;
+        }
+    }
+    return true;
+}
+
+static bool scroll_to_fragment(TaiPage *page, const char *fragment,
+                              char **error) {
+    if (!page || !fragment || !*fragment) return true;
+    TaiNode *node = find_id_node(tai_document_root(page->document), fragment);
+    if (!node) return true;
+    FragmentPosition position = {.target = node};
+    if (!tai_layout_visit(page->layout, find_fragment_position, &position,
+                          error))
+        return false;
+    if (position.found) tai_page_set_scroll_y(page, position.y);
+    return true;
+}
+
+static bool apply_fragment_url(TaiPage *page, TaiUrl *target,
+                               bool *changed, char **error) {
+    const char *fragment = tai_url_fragment(target);
+    if (!scroll_to_fragment(page, fragment, error)) {
+        tai_url_destroy(target);
+        return false;
+    }
+    tai_url_destroy(page->url);
+    page->url = target;
+    if (changed) *changed = true;
+    return true;
+}
+
 TaiNode *tai_page_viewport_hit_test(const TaiPage *page, double x, double y,
                                     TaiDisplayHit *hit) {
     if (!page || !isfinite(y)) {
@@ -389,6 +877,181 @@ TaiNode *tai_page_viewport_hit_test(const TaiPage *page, double x, double y,
     }
     return tai_page_hit_test(page, x, y + page->scroll_y, hit);
 }
+
+bool tai_page_activate_viewport(TaiPage *page, double x, double y,
+                                bool *changed, char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (changed) *changed = false;
+    if (!page || !page->document || !page->javascript || !page->styles ||
+        !page->layout || !page->display)
+        return diagnostic(error, "invalid page activation input");
+    if (!isfinite(x) || !isfinite(y)) return true;
+
+    /* Python blurs before hit testing or dispatch, so a prevented activation
+     * still visibly clears an already focused control. */
+    bool frame_changed = false;
+    if (page->focused) {
+        page->focused->focused = false;
+        page->focused = NULL;
+        frame_changed = true;
+    }
+
+    TaiNode *target = tai_page_viewport_hit_test(page, x, y, NULL);
+    while (target && target->kind != TAI_ELEMENT) target = target->parent;
+    if (!target) {
+        if (frame_changed && !rebuild_dirty_page(page, error)) return false;
+        if (changed) *changed = frame_changed;
+        return true;
+    }
+
+    bool prevented = false;
+    if (!tai_js_dispatch_event(page->javascript, "click", target, &prevented,
+                               error))
+        return false;
+    if (!prevented) {
+        TaiNode *button = NULL;
+        for (TaiNode *node = target; node; node = node->parent)
+            if (node->kind == TAI_ELEMENT && !strcmp(node->tag, "button")) {
+                button = node;
+                break;
+            }
+        if (button) {
+            TaiNode *form = action_form_ancestor(button);
+            if (form && !submit_form(page, form, error)) return false;
+        } else {
+            bool handled_input = false;
+            for (TaiNode *node = target; node; node = node->parent) {
+                if (node->kind != TAI_ELEMENT || strcmp(node->tag, "input"))
+                    continue;
+                handled_input = true;
+                const char *type = tai_map_get(&node->attributes, "type");
+                if (type && !strcmp(type, "checkbox")) {
+                    node->checked = !node->checked;
+                } else {
+                    page->focused = node;
+                    node->focused = true;
+                    const char *value =
+                        tai_map_get(&node->attributes, "value");
+                    size_t caret = utf8_count(value ? value : "");
+                    if (caret == SIZE_MAX)
+                        return diagnostic(error, "input cursor overflow");
+                    (void)tai_layout_control_caret_index(page->layout, node->id,
+                                                         x, &caret);
+                    node->cursor_index = caret;
+                }
+                frame_changed = true;
+                break;
+            }
+            if (!handled_input) {
+                for (TaiNode *node = target; node; node = node->parent) {
+                    if (node->kind != TAI_ELEMENT || strcmp(node->tag, "a"))
+                        continue;
+                    const char *href = tai_map_get(&node->attributes, "href");
+                    if (href) {
+                        TaiUrl *resolved = tai_url_resolve(page->url, href);
+                        if (resolved && href[0] == '#') {
+                            if (!apply_fragment_url(page, resolved,
+                                                    &frame_changed, error))
+                                return false;
+                            resolved = NULL;
+                        }
+                        else if (resolved &&
+                                 strcmp(tai_url_scheme(resolved), "mailto") &&
+                                 !set_navigation_intent(page, resolved, NULL,
+                                                       error)) {
+                            tai_url_destroy(resolved);
+                            return false;
+                        }
+                        tai_url_destroy(resolved);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    if (!page->dirty && !frame_changed) return true;
+    if (!rebuild_dirty_page(page, error)) return false;
+    if (changed) *changed = true;
+    return true;
+}
+
+bool tai_page_text_input(TaiPage *page, const char *text, bool *changed,
+                         char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (changed) *changed = false;
+    if (!page || !page->document || !page->javascript || !page->layout ||
+        !page->display || !page->styles)
+        return diagnostic(error, "invalid page text input");
+    if (!text_input_node(page->focused)) return true;
+
+    size_t inserted = 0;
+    char *filtered = filtered_input(text, &inserted, error);
+    if (!filtered) return false;
+    if (!*filtered) { free(filtered); return true; }
+    bool prevented = false;
+    if (!tai_js_dispatch_event(page->javascript, "keydown", page->focused,
+                               &prevented, error)) {
+        free(filtered);
+        return false;
+    }
+    bool local_changed = false;
+    if (!prevented) {
+        const char *value = tai_map_get(&page->focused->attributes, "value");
+        size_t cursor = utf8_count(value ? value : "");
+        if (page->focused->cursor_index < cursor)
+            cursor = page->focused->cursor_index;
+        if (!replace_input_value(page->focused, cursor, cursor, filtered,
+                                 inserted, error)) {
+            free(filtered);
+            return false;
+        }
+        local_changed = true;
+    }
+    free(filtered);
+    return rebuild_if_changed(page, local_changed, changed, error);
+}
+
+bool tai_page_key(TaiPage *page, TaiPageKey key, bool *changed, char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (changed) *changed = false;
+    if (!page || !page->document || !page->layout || !page->display ||
+        !page->styles)
+        return diagnostic(error, "invalid page key input");
+    if (!text_input_node(page->focused)) return true;
+    const char *value = tai_map_get(&page->focused->attributes, "value");
+    size_t count = utf8_count(value ? value : "");
+    if (count == SIZE_MAX) return diagnostic(error, "invalid input value");
+    size_t cursor = page->focused->cursor_index;
+    if (cursor > count) cursor = count;
+    bool local_changed = false;
+    if (key == TAI_PAGE_KEY_RETURN) {
+        if (page->focused->kind == TAI_ELEMENT &&
+            !strcmp(page->focused->tag, "input")) {
+            TaiNode *form = action_form_ancestor(page->focused->parent);
+            if (form && !submit_form(page, form, error)) return false;
+        }
+    } else if (key == TAI_PAGE_KEY_BACKSPACE) {
+        if (cursor && !replace_input_value(page->focused, cursor - 1, cursor,
+                                           "", 0, error))
+            return false;
+        local_changed = cursor != 0;
+    } else if (key == TAI_PAGE_KEY_LEFT) {
+        page->focused->cursor_index = cursor ? cursor - 1 : 0;
+        /* The oracle requests a frame even for a clamped arrow key. */
+        local_changed = true;
+    } else if (key == TAI_PAGE_KEY_RIGHT) {
+        page->focused->cursor_index = cursor < count ? cursor + 1 : count;
+        local_changed = true;
+    } else {
+        return true;
+    }
+    return rebuild_if_changed(page, local_changed, changed, error);
+}
+
+bool tai_page_text_input_active(const TaiPage *page) {
+    return page && text_input_node(page->focused);
+}
+
 bool tai_page_write_viewport_png(const TaiPage *page, const char *path,
                                  char **error) {
     if (!page) {

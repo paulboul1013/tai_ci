@@ -24,9 +24,10 @@ struct Box {
   TaiNode *node;
   Box **children;
   size_t count;
-  double x, y, width, height, ascent, descent, space, font_size;
+  double x, y, width, height, ascent, descent, space, font_size, caret_x;
   double content_height, scroll_y;
   bool bold, italic, scrollable;
+  TaiControlKind control;
   char *word;
   Image *image;
 };
@@ -44,6 +45,28 @@ static const char *property(TaiNode *n, const char *key, const char *fallback) {
 }
 static bool tag(TaiNode *n, const char *s) {
   return n->kind == TAI_ELEMENT && !strcmp(n->tag, s);
+}
+static bool ascii_case_equal(const char *left, const char *right) {
+  if (!left || !right) return false;
+  while (*left && *right) {
+    unsigned char a = (unsigned char)*left++, b = (unsigned char)*right++;
+    if (a >= 'A' && a <= 'Z') a = (unsigned char)(a + ('a' - 'A'));
+    if (b >= 'A' && b <= 'Z') b = (unsigned char)(b + ('a' - 'A'));
+    if (a != b) return false;
+  }
+  return !*left && !*right;
+}
+static const char *input_type(const TaiNode *node) {
+  const char *value = tai_map_get(&node->attributes, "type");
+  return value ? value : "text";
+}
+static bool hidden_input(TaiNode *node) {
+  return tag(node, "input") && ascii_case_equal(input_type(node), "hidden");
+}
+static bool checkbox_input(TaiNode *node) {
+  /* This is deliberately exact: the frozen reference does not casefold the
+   * checkbox value even though hidden/password use case-insensitive values. */
+  return tag(node, "input") && !strcmp(input_type(node), "checkbox");
 }
 static bool block(TaiNode *n) {
   return n->kind == TAI_ELEMENT &&
@@ -169,13 +192,14 @@ static FT_Face face(TaiLayout *l, TaiNode *node, bool pre, double *size) {
   }
   return f;
 }
-static double measure(FT_Face f, const char *text) {
+static double measure_n(FT_Face f, const char *text, size_t length) {
   double w = 0;
   const unsigned char *p = (const unsigned char *)text;
-  while (*p) {
+  const unsigned char *end = p + length;
+  while (p < end) {
     utf8proc_int32_t c;
-    utf8proc_ssize_t n = utf8proc_iterate(p, -1, &c);
-    if (n < 1) {
+    utf8proc_ssize_t n = utf8proc_iterate(p, (utf8proc_ssize_t)(end - p), &c);
+    if (n < 1 || p + n > end) {
       p++;
       continue;
     }
@@ -184,6 +208,9 @@ static double measure(FT_Face f, const char *text) {
     p += (size_t)n;
   }
   return w;
+}
+static double measure(FT_Face f, const char *text) {
+  return measure_n(f, text, strlen(text));
 }
 static bool whitespace(utf8proc_int32_t c) {
   utf8proc_category_t t = utf8proc_category(c);
@@ -403,6 +430,124 @@ static void word(Inline *in, TaiNode *node, const char *s, size_t n) {
   }
   in->cursor += b->width + b->space;
 }
+
+static bool append_text(char **text, size_t *length, const char *part) {
+  size_t count = strlen(part);
+  if (*length > SIZE_MAX - count - 1) return false;
+  char *next = realloc(*text, *length + count + 1);
+  if (!next) return false;
+  memcpy(next + *length, part, count + 1);
+  *text = next;
+  *length += count;
+  return true;
+}
+
+static bool node_text(const TaiNode *node, char **text, size_t *length) {
+  if (node->kind == TAI_TEXT) return append_text(text, length, node->text);
+  for (size_t i = 0; i < node->child_count; i++)
+    if (!node_text(node->children[i], text, length)) return false;
+  return true;
+}
+
+static char *password_display(const char *value) {
+  size_t count = 0;
+  for (const unsigned char *p = (const unsigned char *)value; *p;) {
+    utf8proc_int32_t codepoint;
+    utf8proc_ssize_t used = utf8proc_iterate(p, -1, &codepoint);
+    p += used > 0 ? (size_t)used : 1;
+    if (count == SIZE_MAX) return NULL;
+    count++;
+  }
+  if (count > (SIZE_MAX - 1) / 1) return NULL;
+  char *display = malloc(count + 1);
+  if (!display) return NULL;
+  memset(display, '*', count);
+  display[count] = '\0';
+  return display;
+}
+
+static void inline_control(Inline *in, TaiNode *node) {
+  TaiLayout *layout = in->owner;
+  bool checkbox = checkbox_input(node), button = tag(node, "button");
+  Box *box_control = box(layout, button ? "ButtonLayout" : "InputLayout", node);
+  if (!box_control) return;
+  box_control->control = button ? TAI_CONTROL_BUTTON :
+      checkbox ? TAI_CONTROL_CHECKBOX :
+      ascii_case_equal(input_type(node), "password") ? TAI_CONTROL_PASSWORD :
+      TAI_CONTROL_TEXT;
+
+  double size;
+  FT_Face f = face(layout, node, false, &size);
+  if (!f) { release(box_control); return; }
+  box_control->font_size = size;
+  box_control->bold = !strcmp(property(node, "font-weight", "normal"), "bold") ||
+                      atoi(property(node, "font-weight", "normal")) >= 600;
+  box_control->italic = !strcmp(property(node, "font-style", "normal"), "italic") ||
+                        !strcmp(property(node, "font-style", "normal"), "oblique");
+  box_control->space = measure(f, " ");
+  if (checkbox) {
+    box_control->width = 13.0;
+    box_control->height = 13.0;
+    box_control->ascent = 13.0;
+    box_control->descent = 0.0;
+  } else {
+    double css_width;
+    box_control->width = fixed_px(property(node, "width", "auto"),
+                                   &css_width) && css_width > 0.0
+                             ? css_width : 200.0;
+    box_control->ascent = (double)f->ascender * size / f->units_per_EM;
+    box_control->descent = -(double)f->descender * size / f->units_per_EM;
+    box_control->height = box_control->ascent + box_control->descent;
+    if (button) {
+      char *contents = NULL;
+      size_t length = 0;
+      if (!node_text(node, &contents, &length)) {
+        free(contents);
+        FT_Done_Face(f);
+        release(box_control);
+        layout->failed = true;
+        return;
+      }
+      box_control->word = contents ? contents : tai_strdup("");
+      if (!box_control->word) layout->failed = true;
+      box_control->height += 8.0;
+      box_control->ascent = box_control->height;
+      box_control->descent = 0.0;
+    } else {
+      const char *value = tai_map_get(&node->attributes, "value");
+      box_control->word = box_control->control == TAI_CONTROL_PASSWORD
+                              ? password_display(value ? value : "")
+                              : tai_strdup(value ? value : "");
+      if (!box_control->word) layout->failed = true;
+      if (box_control->word) {
+        size_t byte_index = 0, codepoints = 0;
+        size_t length = strlen(box_control->word);
+        while (byte_index < length && codepoints < node->cursor_index) {
+          utf8proc_int32_t codepoint;
+          utf8proc_ssize_t used = utf8proc_iterate(
+              (const utf8proc_uint8_t *)box_control->word + byte_index,
+              (utf8proc_ssize_t)(length - byte_index), &codepoint);
+          byte_index += used > 0 ? (size_t)used : 1;
+          codepoints++;
+        }
+        box_control->caret_x = measure_n(f, box_control->word, byte_index);
+      }
+    }
+  }
+  FT_Done_Face(f);
+  if (layout->failed) { release(box_control); return; }
+  if (in->cursor + box_control->width > in->block->width &&
+      in->line->count && !newline(in)) {
+    release(box_control);
+    return;
+  }
+  if (!append(layout, in->line, box_control)) {
+    release(box_control);
+    return;
+  }
+  in->cursor += box_control->width + box_control->space;
+}
+
 static void recurse(Inline *in, TaiNode *n) {
   if (in->owner->failed)
     return;
@@ -447,6 +592,11 @@ static void recurse(Inline *in, TaiNode *n) {
   }
   if (tag(n, "script") || tag(n, "style") || tag(n, "head"))
     return;
+  if (hidden_input(n)) return;
+  if (tag(n, "input") || tag(n, "button")) {
+    inline_control(in, n);
+    return;
+  }
   if (tag(n, "br")) {
     newline(in);
     return;
@@ -647,11 +797,14 @@ static TaiLayoutItemKind item_kind(const Box *b) {
   if (!strcmp(b->kind, "BlockLayout")) return TAI_LAYOUT_BLOCK;
   if (!strcmp(b->kind, "LineLayout")) return TAI_LAYOUT_LINE;
   if (!strcmp(b->kind, "EmojiLayout")) return TAI_LAYOUT_IMAGE;
+  if (!strcmp(b->kind, "InputLayout")) return TAI_LAYOUT_INPUT;
+  if (!strcmp(b->kind, "ButtonLayout")) return TAI_LAYOUT_BUTTON;
   return TAI_LAYOUT_TEXT;
 }
 static bool visit_box(const Box *b, TaiLayoutVisitor visitor, void *opaque) {
   TaiLayoutItem item = {
       .kind = item_kind(b),
+      .control = b->control,
       .node = b->node,
       .word = b->word,
       .x = b->x,
@@ -662,6 +815,7 @@ static bool visit_box(const Box *b, TaiLayoutVisitor visitor, void *opaque) {
       .descent = b->descent,
       .space = b->space,
       .font_size = b->font_size,
+      .caret_x = b->caret_x,
       .content_height = b->content_height,
       .scroll_y = b->scroll_y,
       .bold = b->bold, .italic = b->italic, .scrollable = b->scrollable,
@@ -678,10 +832,12 @@ static bool visit_box(const Box *b, TaiLayoutVisitor visitor, void *opaque) {
 static bool walk_box(const Box *b, TaiLayoutTreeVisitor visitor,
                      void *opaque) {
   TaiLayoutItem item = {
-      .kind = item_kind(b), .node = b->node, .word = b->word,
+      .kind = item_kind(b), .control = b->control,
+      .node = b->node, .word = b->word,
       .x = b->x, .y = b->y, .width = b->width, .height = b->height,
       .ascent = b->ascent, .descent = b->descent, .space = b->space,
       .font_size = b->font_size, .content_height = b->content_height,
+      .caret_x = b->caret_x,
       .scroll_y = b->scroll_y, .bold = b->bold, .italic = b->italic,
       .scrollable = b->scrollable,
       .image_pixels = b->image ? b->image->pixels : NULL,
@@ -724,6 +880,51 @@ bool tai_layout_walk(const TaiLayout *l, TaiLayoutTreeVisitor visitor,
     if (error) *error = tai_strdup("layout tree visitor aborted");
     return false;
   }
+  return true;
+}
+
+static const Box *find_control_box(const Box *box_control, size_t node_id) {
+  if ((box_control->control == TAI_CONTROL_TEXT ||
+       box_control->control == TAI_CONTROL_PASSWORD) &&
+      box_control->node && box_control->node->id == node_id)
+    return box_control;
+  for (size_t i = 0; i < box_control->count; i++) {
+    const Box *found = find_control_box(box_control->children[i], node_id);
+    if (found) return found;
+  }
+  return NULL;
+}
+
+bool tai_layout_control_caret_index(const TaiLayout *layout, size_t node_id,
+                                    double document_x, size_t *index) {
+  if (index) *index = 0;
+  if (!layout || !layout->root || !isfinite(document_x)) return false;
+  const Box *box_control = find_control_box(layout->root, node_id);
+  if (!box_control || !box_control->word || document_x <= box_control->x)
+    return box_control != NULL;
+  double size;
+  FT_Face f = face((TaiLayout *)layout, box_control->node, false, &size);
+  if (!f) return false;
+  size_t offset = 0, codepoints = 0, length = strlen(box_control->word);
+  double local_x = document_x - box_control->x;
+  double left = 0.0;
+  while (offset < length) {
+    utf8proc_int32_t codepoint;
+    utf8proc_ssize_t used = utf8proc_iterate(
+        (const utf8proc_uint8_t *)box_control->word + offset,
+        (utf8proc_ssize_t)(length - offset), &codepoint);
+    size_t next = offset + (used > 0 ? (size_t)used : 1);
+    double right = left;
+    if (used > 0 &&
+        !FT_Load_Char(f, (FT_ULong)codepoint, FT_LOAD_DEFAULT))
+      right += (double)f->glyph->advance.x / 64;
+    if (local_x < (left + right) / 2.0) break;
+    offset = next;
+    codepoints++;
+    left = right;
+  }
+  FT_Done_Face(f);
+  if (index) *index = codepoints;
   return true;
 }
 static void json_box(FILE *out, const Box *b) {

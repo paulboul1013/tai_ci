@@ -63,6 +63,65 @@ static bool handle_scroll_event(TaiPage *page, const SDL_Event *event,
   return false;
 }
 
+/* This is deliberately a narrow SDL adapter: TaiPage owns coordinate
+ * conversion, DOM target normalization, JavaScript dispatch, and all frame
+ * replacement. Its success result is distinct from a changed frame so a
+ * current-window miss never needlessly replaces the retained texture. */
+static bool handle_page_event(TaiPage *page, const SDL_Event *event,
+                              SDL_WindowID window_id, bool window_focused,
+                              bool *changed,
+                              char **error) {
+  *changed = false;
+  if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+    if (event->button.windowID != window_id ||
+        event->button.button != SDL_BUTTON_LEFT ||
+        !isfinite(event->button.x) || !isfinite(event->button.y))
+      return true;
+    /* The frozen SDL2 reference converts pointer positions to int before
+     * hit-testing. Truncating while still a finite double avoids unsafe casts
+     * yet preserves its observable fractional-coordinate behavior. */
+    return tai_page_activate_viewport(page, trunc(event->button.x),
+                                      trunc(event->button.y), changed, error);
+  }
+  if (event->type == SDL_EVENT_TEXT_INPUT) {
+    if (!window_focused || event->text.windowID != window_id ||
+        !tai_page_text_input_active(page))
+      return true;
+    return tai_page_text_input(page, event->text.text, changed, error);
+  }
+  if (event->type == SDL_EVENT_KEY_DOWN) {
+    if (!window_focused || event->key.windowID != window_id) return true;
+    TaiPageKey key;
+    switch (event->key.key) {
+      case SDLK_BACKSPACE: key = TAI_PAGE_KEY_BACKSPACE; break;
+      case SDLK_LEFT: key = TAI_PAGE_KEY_LEFT; break;
+      case SDLK_RIGHT: key = TAI_PAGE_KEY_RIGHT; break;
+      case SDLK_RETURN: key = TAI_PAGE_KEY_RETURN; break;
+      default:
+        *changed = handle_scroll_event(page, event, window_id);
+        return true;
+    }
+    return tai_page_key(page, key, changed, error);
+  }
+  *changed = handle_scroll_event(page, event, window_id);
+  return true;
+}
+
+static bool sync_text_input(SDL_Window *window, const TaiPage *page,
+                            bool window_focused, bool *started,
+                            char **error) {
+  bool should_start = window_focused && tai_page_text_input_active(page);
+  if (should_start == *started) return true;
+  bool ok = should_start ? SDL_StartTextInput(window) :
+                           SDL_StopTextInput(window);
+  if (!ok) {
+    set_error(error, SDL_GetError());
+    return false;
+  }
+  *started = should_start;
+  return true;
+}
+
 static bool paint(SDL_Renderer *renderer, SDL_Texture **texture,
                   const TaiPage *page, int width, int height, char **error) {
   if (!valid_pixel_dimensions(width, height)) {
@@ -92,9 +151,11 @@ static bool paint(SDL_Renderer *renderer, SDL_Texture **texture,
   return true;
 }
 
-bool tai_present_window(TaiPage *page, int width, int height, char **error) {
+bool tai_present_window_with_navigation(TaiPage **page_slot, int width,
+                                        int height, TaiPresentNavigate navigate,
+                                        void *userdata, char **error) {
   if (error) { free(*error); *error = NULL; }
-  if (!page || width <= 0 || height <= 0) {
+  if (!page_slot || !*page_slot || width <= 0 || height <= 0) {
     set_error(error, "invalid window input");
     return false;
   }
@@ -117,11 +178,14 @@ bool tai_present_window(TaiPage *page, int width, int height, char **error) {
       set_error(error, "unsupported window pixel dimensions");
       ok = false;
     } else {
-      ok = tai_page_resize(page, pixel_width, pixel_height, error) &&
-           paint(renderer, &texture, page, pixel_width, pixel_height, error);
+      ok = tai_page_resize(*page_slot, pixel_width, pixel_height, error) &&
+           paint(renderer, &texture, *page_slot, pixel_width, pixel_height,
+                 error);
     }
   }
   bool running = ok;
+  bool window_focused = true;
+  bool text_input_started = false;
   while (running) {
     SDL_Event event;
     if (!SDL_WaitEvent(&event)) {
@@ -133,42 +197,94 @@ bool tai_present_window(TaiPage *page, int width, int height, char **error) {
         (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
          event.window.windowID == SDL_GetWindowID(window))) {
       running = false;
-    } else if (handle_scroll_event(page, &event, SDL_GetWindowID(window))) {
-      int pixel_width = 0, pixel_height = 0;
-      if (!SDL_GetWindowSizeInPixels(window, &pixel_width, &pixel_height) ||
-          !paint(renderer, &texture, page, pixel_width, pixel_height, error)) {
+    } else if ((event.type == SDL_EVENT_WINDOW_FOCUS_LOST ||
+                event.type == SDL_EVENT_WINDOW_FOCUS_GAINED) &&
+               event.window.windowID == SDL_GetWindowID(window)) {
+      window_focused = event.type == SDL_EVENT_WINDOW_FOCUS_GAINED;
+      if (!sync_text_input(window, *page_slot, window_focused,
+                           &text_input_started, error)) {
+        ok = false;
+        break;
+      }
+    } else {
+      bool changed = false;
+      if (!handle_page_event(*page_slot, &event, SDL_GetWindowID(window),
+                             window_focused, &changed,
+                             error)) {
         if (!error || !*error) set_error(error, SDL_GetError());
         ok = false;
         break;
       }
-    } else if (event.type == SDL_EVENT_WINDOW_EXPOSED &&
-               event.window.windowID == SDL_GetWindowID(window) && texture) {
-      if (!present_texture(renderer, texture, page,
-                           (int)tai_page_viewport_width(page),
-                           (int)tai_page_viewport_height(page))) {
-        set_error(error, SDL_GetError());
+      TaiNavigationIntent *intent = NULL;
+      if (!tai_page_take_navigation_intent(*page_slot, &intent)) {
+        set_error(error, "could not take page navigation intent");
         ok = false;
         break;
       }
-    } else if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED &&
-               event.window.windowID == SDL_GetWindowID(window)) {
-      int pixel_width = event.window.data1;
-      int pixel_height = event.window.data2;
-      if (pixel_width > 0 && pixel_height > 0 &&
-          (!valid_pixel_dimensions(pixel_width, pixel_height) ||
-           !tai_page_resize(page, pixel_width, pixel_height, error) ||
-           !paint(renderer, &texture, page, pixel_width, pixel_height,
-                  error))) {
-        if (!error || !*error)
-          set_error(error, "unsupported window pixel dimensions");
+      if (intent) {
+        bool navigated = !navigate ||
+            navigate(userdata, page_slot, intent, error);
+        tai_navigation_intent_destroy(intent);
+        if (!navigated || !*page_slot) {
+          if (!error || !*error)
+            set_error(error, "navigation handler failed");
+          ok = false;
+          break;
+        }
+        /* The callback may have destroyed the previous page. An intent is a
+         * repaint boundary even when loading fails and the old page remains. */
+        changed = true;
+      }
+      if (!sync_text_input(window, *page_slot, window_focused,
+                           &text_input_started, error)) {
         ok = false;
         break;
+      }
+      if (changed) {
+        int pixel_width = 0, pixel_height = 0;
+        if (!SDL_GetWindowSizeInPixels(window, &pixel_width, &pixel_height) ||
+            !paint(renderer, &texture, *page_slot, pixel_width, pixel_height,
+                   error)) {
+          if (!error || !*error) set_error(error, SDL_GetError());
+          ok = false;
+          break;
+        }
+      } else if (event.type == SDL_EVENT_WINDOW_EXPOSED &&
+                 event.window.windowID == SDL_GetWindowID(window) && texture) {
+        if (!present_texture(renderer, texture, *page_slot,
+                             (int)tai_page_viewport_width(*page_slot),
+                             (int)tai_page_viewport_height(*page_slot))) {
+          set_error(error, SDL_GetError());
+          ok = false;
+          break;
+        }
+      } else if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED &&
+                 event.window.windowID == SDL_GetWindowID(window)) {
+        int pixel_width = event.window.data1;
+        int pixel_height = event.window.data2;
+        if (pixel_width > 0 && pixel_height > 0 &&
+            (!valid_pixel_dimensions(pixel_width, pixel_height) ||
+             !tai_page_resize(*page_slot, pixel_width, pixel_height, error) ||
+             !paint(renderer, &texture, *page_slot, pixel_width, pixel_height,
+                    error))) {
+          if (!error || !*error)
+            set_error(error, "unsupported window pixel dimensions");
+          ok = false;
+          break;
+        }
       }
     }
   }
+  if (text_input_started) SDL_StopTextInput(window);
   SDL_DestroyTexture(texture);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();
   return ok;
+}
+
+bool tai_present_window(TaiPage *page, int width, int height, char **error) {
+  TaiPage *borrowed_page = page;
+  return tai_present_window_with_navigation(&borrowed_page, width, height,
+                                            NULL, NULL, error);
 }

@@ -445,6 +445,61 @@ static bool make_image(Build *build, const TaiLayoutItem *item) {
   return true;
 }
 
+static bool make_control(Build *build, const TaiLayoutItem *item) {
+  if (!item->node || item->width <= 0.0 || item->height <= 0.0) return true;
+  const char *background = tai_map_get(&item->node->style, "background-color");
+  if (!background) background = tai_map_get(&item->node->style, "background");
+  if (!background || !strcmp(background, "transparent"))
+    background = item->control == TAI_CONTROL_BUTTON ? "lightgray" : "white";
+  if (item->control == TAI_CONTROL_CHECKBOX) background = "white";
+  if (!append(build, (TaiDisplayCommand){
+                         .kind = TAI_DRAW_FILL_RECT,
+                         .x = item->x, .y = item->y,
+                         .width = item->width, .height = item->height,
+                         .rgba = color(background, NULL),
+                         .radius = fill_radius(item->node),
+                         .hit_radius = effect_radius(item->node),
+                         .node_id = item->node->id,
+                     }))
+    return false;
+  if (!append(build, (TaiDisplayCommand){
+                         .kind = TAI_DRAW_STROKE_RECT,
+                         .x = item->x, .y = item->y,
+                         .width = item->width, .height = item->height,
+                         .rgba = color("black", NULL),
+                         .radius = fill_radius(item->node),
+                     }))
+    return false;
+  if (item->control == TAI_CONTROL_CHECKBOX) {
+    if (!item->node->checked) return true;
+    double left = item->x, top = item->y;
+    if (!append(build, (TaiDisplayCommand){
+                           .kind = TAI_DRAW_LINE,
+                           .x = left + 3.0, .y = top + 6.0,
+                           .width = left + 6.0, .height = top + 10.0,
+                           .rgba = color("black", NULL), .font_size = 2.0,
+                       }) ||
+        !append(build, (TaiDisplayCommand){
+                           .kind = TAI_DRAW_LINE,
+                           .x = left + 6.0, .y = top + 10.0,
+                           .width = left + 10.0, .height = top + 3.0,
+                           .rgba = color("black", NULL), .font_size = 2.0,
+                       }))
+      return false;
+    return true;
+  }
+  if (item->word && *item->word && !make_text(build, item)) return false;
+  if ((item->control == TAI_CONTROL_TEXT ||
+       item->control == TAI_CONTROL_PASSWORD) && item->node->focused)
+    return append(build, (TaiDisplayCommand){
+        .kind = TAI_DRAW_LINE,
+        .x = item->x + item->caret_x, .y = item->y,
+        .width = item->x + item->caret_x, .height = item->y + item->height,
+        .rgba = color("black", NULL), .font_size = 1.0,
+    });
+  return true;
+}
+
 static bool is_scroll_container(const TaiLayoutItem *item) {
   return item->kind == TAI_LAYOUT_BLOCK && item->scrollable;
 }
@@ -591,6 +646,8 @@ static bool collect(const TaiLayoutItem *item, TaiLayoutVisitEvent event,
   if (item->kind == TAI_LAYOUT_BLOCK && !make_fill(build, item)) return false;
   if (item->kind == TAI_LAYOUT_TEXT && !make_text(build, item)) return false;
   if (item->kind == TAI_LAYOUT_IMAGE && !make_image(build, item)) return false;
+  if ((item->kind == TAI_LAYOUT_INPUT || item->kind == TAI_LAYOUT_BUTTON) &&
+      !make_control(build, item)) return false;
   return !build->failed;
 }
 
@@ -767,6 +824,8 @@ void tai_display_list_json(FILE *out, const TaiDisplayList *list) {
                          command->kind == TAI_DRAW_IMAGE ? "image" :
                          command->kind == TAI_DRAW_FILL_RECT ? "fill_rect" :
                          command->kind == TAI_DRAW_HIT_TEST ? "hit_test" :
+                         command->kind == TAI_DRAW_STROKE_RECT ? "stroke_rect" :
+                         command->kind == TAI_DRAW_LINE ? "line" :
                          command->kind == TAI_PUSH_CLIP ? "push_clip" :
                          command->kind == TAI_PUSH_CLIP_SCROLL ?
                              "push_clip_scroll" :
@@ -1052,6 +1111,16 @@ static bool raster_region(const TaiDisplayList *list, const char *path,
     } else if (command->kind == TAI_DRAW_FILL_RECT) {
       cairo_rounded_rectangle(context, command);
       cairo_fill(context);
+    } else if (command->kind == TAI_DRAW_STROKE_RECT) {
+      cairo_rounded_rectangle(context, command);
+      cairo_set_line_width(context, 1.0);
+      cairo_stroke(context);
+    } else if (command->kind == TAI_DRAW_LINE) {
+      cairo_set_line_width(context, command->font_size > 0.0 ?
+                           command->font_size : 1.0);
+      cairo_move_to(context, command->x, command->y);
+      cairo_line_to(context, command->width, command->height);
+      cairo_stroke(context);
     } else if (command->kind == TAI_DRAW_IMAGE) {
       cairo_surface_t *image = cairo_image_surface_create_for_data(
           (unsigned char *)command->image_pixels, CAIRO_FORMAT_ARGB32,
@@ -1072,7 +1141,7 @@ static bool raster_region(const TaiDisplayList *list, const char *path,
       cairo_fill(context);
       cairo_restore(context);
       cairo_surface_destroy(image);
-    } else {
+    } else if (command->kind == TAI_DRAW_TEXT) {
       cairo_select_font_face(
           context, command->font_family,
           command->italic ? CAIRO_FONT_SLANT_ITALIC : CAIRO_FONT_SLANT_NORMAL,
@@ -1080,6 +1149,9 @@ static bool raster_region(const TaiDisplayList *list, const char *path,
       cairo_set_font_size(context, command->font_size);
       cairo_move_to(context, command->x, command->y + command->ascent);
       cairo_show_text(context, command->text);
+    } else {
+      valid = false;
+      break;
     }
   }
   if (effect_depth) valid = false;

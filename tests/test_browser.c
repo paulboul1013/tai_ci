@@ -35,6 +35,32 @@ static const TaiDisplayCommand *text_command(const TaiDisplayList *list,
     return NULL;
 }
 
+typedef struct {
+    const TaiNode *target;
+    double x, y;
+    bool found;
+} ControlPoint;
+
+static bool find_control_point(const TaiLayoutItem *item, void *opaque) {
+    ControlPoint *point = opaque;
+    if (item->node == point->target &&
+        (item->kind == TAI_LAYOUT_INPUT || item->kind == TAI_LAYOUT_BUTTON)) {
+        point->x = item->x + item->width / 2.0;
+        point->y = item->y + item->height / 2.0;
+        point->found = true;
+    }
+    return true;
+}
+
+static bool activate_control(TaiPage *page, const TaiNode *target,
+                             bool *changed, char **error) {
+    ControlPoint point = {.target = target};
+    if (!tai_layout_visit(tai_page_layout(page), find_control_point, &point,
+                          error) || !point.found)
+        return false;
+    return tai_page_activate_viewport(page, point.x, point.y, changed, error);
+}
+
 int main(void) {
     char *error = NULL;
     TaiNetwork *network = tai_network_create();
@@ -202,6 +228,299 @@ int main(void) {
     assert(state && !strcmp(state, "external"));
     tai_page_destroy(external_page);
     tai_url_destroy(external_url);
+
+    /* RED: viewport activation owns text-to-element normalization, JS event
+     * dispatch, and replacement of the immutable frame after JS invalidates
+     * the DOM. Presentation can then paint only when changed is true. */
+    TaiUrl *activation_url = tai_url_parse(
+        "data:text/html,%3Cstyle%3Ep.active%20%7Bcolor%3Ablue%7D%3C%2Fstyle%3E%3Cp%3EActivate%3C%2Fp%3E%3Cscript%3Evar%20p%3Ddocument.querySelectorAll%28%27p%27%29%5B0%5D%3Bp.addEventListener%28%27click%27%2Cfunction%28%29%7Bthis.setAttribute%28%27class%27%2C%27active%27%29%3B%7D%29%3B%3C%2Fscript%3E");
+    TaiPage *activation_page = tai_page_load(network, activation_url,
+        "html {display:block} body {display:block} p {display:block}",
+        300.0, 100.0, false, &error);
+    assert(activation_page && !error);
+    TaiNode *activation_paragraph = find(tai_page_root(activation_page), "p");
+    assert(activation_paragraph);
+    const TaiDisplayList *activation_before =
+        tai_page_display_list(activation_page);
+    bool changed = false;
+    assert(tai_page_activate_viewport(activation_page, 14.0, 21.0, &changed,
+                                      &error));
+    assert(!error && changed);
+    assert(!strcmp(tai_map_get(&activation_paragraph->attributes, "class"),
+                   "active"));
+    assert(!strcmp(tai_map_get(&activation_paragraph->style, "color"),
+                   "blue"));
+    assert(tai_page_display_list(activation_page) != activation_before);
+    tai_page_destroy(activation_page);
+    tai_url_destroy(activation_url);
+
+    /* preventDefault without a DOM mutation is a successful no-change click.
+     * In particular, it must not replace a presentable immutable frame. */
+    TaiUrl *prevented_url = tai_url_parse(
+        "data:text/html,%3Cp%3EPrevented%3C%2Fp%3E%3Cscript%3Evar%20p%3Ddocument.querySelectorAll%28%27p%27%29%5B0%5D%3Bp.addEventListener%28%27click%27%2Cfunction%28e%29%7Be.preventDefault%28%29%3B%7D%29%3B%3C%2Fscript%3E");
+    TaiPage *prevented_page = tai_page_load(network, prevented_url,
+        "html {display:block} body {display:block} p {display:block}",
+        300.0, 100.0, false, &error);
+    assert(prevented_page && !error);
+    const TaiDisplayList *prevented_before =
+        tai_page_display_list(prevented_page);
+    changed = true;
+    assert(tai_page_activate_viewport(prevented_page, 14.0, 21.0, &changed,
+                                      &error));
+    assert(!error && !changed);
+    assert(tai_page_display_list(prevented_page) == prevented_before);
+    tai_page_destroy(prevented_page);
+    tai_url_destroy(prevented_url);
+
+    /* A finite miss and either non-finite viewport coordinate are handled
+     * requests, rather than errors. None may dispatch the listener or replace
+     * the display list. */
+    TaiUrl *no_change_url = tai_url_parse(
+        "data:text/html,%3Cstyle%3Ep.active%20%7Bcolor%3Ablue%7D%3C%2Fstyle%3E%3Cp%3ENo%20change%3C%2Fp%3E%3Cscript%3Evar%20p%3Ddocument.querySelectorAll%28%27p%27%29%5B0%5D%3Bp.addEventListener%28%27click%27%2Cfunction%28%29%7Bthis.setAttribute%28%27class%27%2C%27active%27%29%3B%7D%29%3B%3C%2Fscript%3E");
+    TaiPage *no_change_page = tai_page_load(network, no_change_url,
+        "html {display:block} body {display:block} p {display:block}",
+        300.0, 100.0, false, &error);
+    assert(no_change_page && !error);
+    TaiNode *no_change_paragraph = find(tai_page_root(no_change_page), "p");
+    assert(no_change_paragraph);
+    const TaiDisplayList *no_change_before =
+        tai_page_display_list(no_change_page);
+    changed = true;
+    assert(tai_page_activate_viewport(no_change_page, 299.0, 21.0, &changed,
+                                      &error));
+    assert(!error && !changed);
+    assert(tai_page_activate_viewport(no_change_page, NAN, 21.0, &changed,
+                                      &error));
+    assert(!error && !changed);
+    assert(tai_page_activate_viewport(no_change_page, 14.0, INFINITY, &changed,
+                                      &error));
+    assert(!error && !changed);
+    assert(!tai_map_get(&no_change_paragraph->attributes, "class"));
+    assert(tai_page_display_list(no_change_page) == no_change_before);
+    tai_page_destroy(no_change_page);
+    tai_url_destroy(no_change_url);
+
+    /* Activation coordinates are viewport-relative even after page scrolling.
+     * The clicked visual point below resolves to section, not the preceding
+     * document-space div. */
+    TaiUrl *scrolled_activation_url = tai_url_parse(
+        "data:text/html,%3Cstyle%3Esection.active%20%7Bcolor%3Ablue%7D%3C%2Fstyle%3E%3Cdiv%20style%3D%22height%3A30px%3Bbackground-color%3Ared%22%3E%3C%2Fdiv%3E%3Csection%20style%3D%22height%3A30px%3Bbackground-color%3Ablue%22%3EScrolled%3C%2Fsection%3E%3Cscript%3Evar%20s%3Ddocument.querySelectorAll%28%27section%27%29%5B0%5D%3Bs.addEventListener%28%27click%27%2Cfunction%28%29%7Bthis.setAttribute%28%27class%27%2C%27active%27%29%3B%7D%29%3B%3C%2Fscript%3E");
+    TaiPage *scrolled_activation_page = tai_page_load(network,
+        scrolled_activation_url,
+        "html {display:block} body {display:block} div {display:block} "
+        "section {display:block}", 200.0, 30.0, false, &error);
+    assert(scrolled_activation_page && !error);
+    TaiNode *scrolled_section =
+        find(tai_page_root(scrolled_activation_page), "section");
+    assert(scrolled_section);
+    assert(tai_page_set_scroll_y(scrolled_activation_page, 30.0));
+    assert(tai_page_viewport_hit_test(scrolled_activation_page, 150.0, 20.0,
+                                      &hit) == scrolled_section);
+    const TaiDisplayList *scrolled_activation_before =
+        tai_page_display_list(scrolled_activation_page);
+    changed = false;
+    assert(tai_page_activate_viewport(scrolled_activation_page, 150.0, 20.0,
+                                      &changed, &error));
+    assert(!error && changed);
+    assert(!strcmp(tai_map_get(&scrolled_section->attributes, "class"),
+                   "active"));
+    assert(!strcmp(tai_map_get(&scrolled_section->style, "color"), "blue"));
+    assert(tai_page_display_list(scrolled_activation_page) !=
+           scrolled_activation_before);
+    tai_page_destroy(scrolled_activation_page);
+    tai_url_destroy(scrolled_activation_url);
+
+    /* RED: controls are laid out as hit-testable native geometry. A checkbox
+     * keeps its parsed `checked` attribute as its initial-value record while
+     * click default action changes only the live checked state. */
+    TaiUrl *checkbox_url = tai_url_parse(
+        "data:text/html,%3Cinput%20type%3Dcheckbox%20checked%3E");
+    TaiPage *checkbox_page = tai_page_load(network, checkbox_url,
+        "html {display:block} body {display:block}",
+        300.0, 100.0, false, &error);
+    assert(checkbox_page && !error);
+    TaiNode *checkbox = find(tai_page_root(checkbox_page), "input");
+    assert(checkbox && checkbox->checked);
+    const TaiDisplayList *checkbox_before =
+        tai_page_display_list(checkbox_page);
+    assert(tai_page_viewport_hit_test(checkbox_page, 14.0, 22.0, &hit) ==
+           checkbox);
+    changed = false;
+    assert(tai_page_activate_viewport(checkbox_page, 14.0, 22.0, &changed,
+                                      &error));
+    assert(!error && changed && !checkbox->checked);
+    assert(tai_map_get(&checkbox->attributes, "checked"));
+    assert(tai_page_display_list(checkbox_page) != checkbox_before);
+    assert(tai_page_viewport_hit_test(checkbox_page, 14.0, 22.0, &hit) ==
+           checkbox);
+    tai_page_destroy(checkbox_page);
+    tai_url_destroy(checkbox_url);
+
+    /* An ordinary text input is also a visible control target. Clicking its
+     * left edge focuses it, preserves its value, and places the caret at zero
+     * in the refreshed immutable frame. */
+    TaiUrl *text_input_url = tai_url_parse(
+        "data:text/html,%3Cinput%20type%3Dtext%20value%3Dcat%3E");
+    TaiPage *text_input_page = tai_page_load(network, text_input_url,
+        "html {display:block} body {display:block}",
+        300.0, 100.0, false, &error);
+    assert(text_input_page && !error);
+    TaiNode *text_input = find(tai_page_root(text_input_page), "input");
+    assert(text_input && !text_input->focused);
+    const TaiDisplayList *text_input_before =
+        tai_page_display_list(text_input_page);
+    assert(tai_page_viewport_hit_test(text_input_page, 14.0, 22.0, &hit) ==
+           text_input);
+    changed = false;
+    assert(tai_page_activate_viewport(text_input_page, 14.0, 22.0, &changed,
+                                      &error));
+    assert(!error && changed && text_input->focused);
+    assert(text_input->cursor_index == 0);
+    assert(!strcmp(tai_map_get(&text_input->attributes, "value"), "cat"));
+    assert(tai_page_display_list(text_input_page) != text_input_before);
+    tai_page_destroy(text_input_page);
+    tai_url_destroy(text_input_url);
+
+    /* RED: focused controls edit at Unicode code-point cursor positions; the
+     * public page seam owns text validation, insertion and special-key redraw. */
+    TaiUrl *edit_url = tai_url_parse(
+        "data:text/html,%3Cinput%20value%3Dcat%3E");
+    TaiPage *edit_page = tai_page_load(network, edit_url,
+        "html {display:block} body {display:block}",
+        300.0, 100.0, false, &error);
+    assert(edit_page && !error);
+    TaiNode *edit_input = find(tai_page_root(edit_page), "input");
+    assert(edit_input);
+    changed = false;
+    assert(tai_page_activate_viewport(edit_page, 14.0, 22.0, &changed,
+                                      &error));
+    assert(changed && edit_input->cursor_index == 0);
+    changed = false;
+    assert(tai_page_text_input(edit_page, "\303\251", &changed, &error));
+    assert(!error && changed && edit_input->cursor_index == 1);
+    assert(!strcmp(tai_map_get(&edit_input->attributes, "value"),
+                   "\303\251cat"));
+    changed = false;
+    assert(tai_page_key(edit_page, TAI_PAGE_KEY_RIGHT, &changed, &error));
+    assert(changed && edit_input->cursor_index == 2);
+    changed = false;
+    assert(tai_page_key(edit_page, TAI_PAGE_KEY_BACKSPACE, &changed, &error));
+    assert(changed && edit_input->cursor_index == 1);
+    assert(!strcmp(tai_map_get(&edit_input->attributes, "value"), "\303\251at"));
+    tai_page_destroy(edit_page);
+    tai_url_destroy(edit_url);
+
+    /* RED: button activation and focused-input Enter produce owned navigation
+     * intents. Form encoding preserves source order and Python quote_plus. */
+    TaiUrl *get_form_url = tai_url_parse(
+        "data:text/html,%3Cform%20action%3D%22http%3A%2F%2Flocalhost%3A8000%2Fsearch%3Fold%3D1%22%3E%3Cbutton%3ESend%3C%2Fbutton%3E%3Cinput%20name%3D%22a%20b%22%20value%3D%22hello%20world%22%3E%3Cinput%20type%3Dcheckbox%20name%3Dflag%20checked%3E%3Cinput%20type%3Dcheckbox%20name%3Dskip%3E%3Cinput%20name%3Dempty%3E%3C/form%3E");
+    TaiPage *get_form_page = tai_page_load(network, get_form_url,
+        "html {display:block} body {display:block}", 300.0, 100.0, false,
+        &error);
+    assert(get_form_url && get_form_page && !error);
+    TaiNode *get_button = find(tai_page_root(get_form_page), "button");
+    assert(get_button);
+    changed = false;
+    assert(activate_control(get_form_page, get_button, &changed, &error));
+    assert(!error);
+    TaiNavigationIntent *intent = NULL;
+    assert(tai_page_take_navigation_intent(get_form_page, &intent));
+    assert(intent && !tai_navigation_intent_is_post(intent));
+    assert(!strcmp(tai_navigation_intent_url(intent),
+        "http://localhost:8000/search?old=1&a+b=hello+world&flag=on&empty="));
+    assert(tai_navigation_intent_body(intent) == NULL);
+    tai_navigation_intent_destroy(intent);
+    tai_page_destroy(get_form_page);
+    tai_url_destroy(get_form_url);
+
+    /* Preserve the oracle's GET composition quirk: a fragment remains before
+     * the appended fields, so the fields become part of the fragment string. */
+    TaiUrl *fragment_get_url = tai_url_parse(
+        "data:text/html,%3Cform%20action%3D%22http://localhost:8000/search?old=1%23frag%22%3E%3Cbutton%3ESend%3C/button%3E%3Cinput%20name%3D%22x%20y%22%20value%3D1%3E%3C/form%3E");
+    TaiPage *fragment_get_page = tai_page_load(network, fragment_get_url,
+        "html {display:block} body {display:block}", 300.0, 100.0, false,
+        &error);
+    assert(fragment_get_url && fragment_get_page && !error);
+    TaiNode *fragment_get_button = find(tai_page_root(fragment_get_page),
+                                        "button");
+    assert(fragment_get_button);
+    changed = false;
+    assert(activate_control(fragment_get_page, fragment_get_button, &changed,
+                             &error));
+    assert(!error);
+    intent = NULL;
+    assert(tai_page_take_navigation_intent(fragment_get_page, &intent));
+    assert(intent && !tai_navigation_intent_is_post(intent));
+    assert(!strcmp(tai_navigation_intent_url(intent),
+        "http://localhost:8000/search?old=1#frag&x+y=1"));
+    tai_navigation_intent_destroy(intent);
+    tai_page_destroy(fragment_get_page);
+    tai_url_destroy(fragment_get_url);
+
+    TaiUrl *post_form_url = tai_url_parse(
+        "data:text/html,%3Cform%20action%3D%22http%3A%2F%2Flocalhost%3A8000%2Fpost%22%20method%3DPOST%3E%3Cinput%20name%3Dq%20value%3D%22%C3%A9%20%26%22%3E%3Cbutton%3ESend%3C%2Fbutton%3E%3C/form%3E");
+    TaiPage *post_form_page = tai_page_load(network, post_form_url,
+        "html {display:block} body {display:block}", 300.0, 100.0, false,
+        &error);
+    assert(post_form_url && post_form_page && !error);
+    TaiNode *post_input = find(tai_page_root(post_form_page), "input");
+    assert(post_input);
+    changed = false;
+    assert(activate_control(post_form_page, post_input, &changed, &error));
+    assert(!error && changed && post_input->focused);
+    changed = false;
+    assert(tai_page_key(post_form_page, TAI_PAGE_KEY_RETURN, &changed, &error));
+    assert(!error && !changed);
+    intent = NULL;
+    assert(tai_page_take_navigation_intent(post_form_page, &intent));
+    assert(intent && tai_navigation_intent_is_post(intent));
+    assert(!strcmp(tai_navigation_intent_url(intent),
+                   "http://localhost:8000/post"));
+    assert(!strcmp(tai_navigation_intent_body(intent), "q=%C3%A9+%26"));
+    tai_navigation_intent_destroy(intent);
+    tai_page_destroy(post_form_page);
+    tai_url_destroy(post_form_url);
+
+    TaiUrl *prevent_submit_url = tai_url_parse(
+        "data:text/html,%3Cform%20action%3D%22http%3A%2F%2Flocalhost%3A8000%2Fnever%22%3E%3Cscript%3Evar%20f%3Ddocument.querySelectorAll%28%27form%27%29%5B0%5D%3Bf.addEventListener%28%27submit%27%2Cfunction%28e%29%7Be.preventDefault%28%29%3B%7D%29%3B%3C%2Fscript%3E%3Cbutton%3ESend%3C%2Fbutton%3E%3C/form%3E");
+    TaiPage *prevent_submit_page = tai_page_load(network, prevent_submit_url,
+        "html {display:block} body {display:block}", 300.0, 100.0, false,
+        &error);
+    assert(prevent_submit_url && prevent_submit_page && !error);
+    TaiNode *prevent_button = find(tai_page_root(prevent_submit_page), "button");
+    assert(prevent_button);
+    changed = false;
+    assert(activate_control(prevent_submit_page, prevent_button, &changed,
+                            &error));
+    assert(!error);
+    intent = NULL;
+    assert(tai_page_take_navigation_intent(prevent_submit_page, &intent));
+    assert(intent == NULL);
+    tai_page_destroy(prevent_submit_page);
+    tai_url_destroy(prevent_submit_url);
+
+    /* Raw # links stay in-document, update the owned URL, and scroll to the
+     * first matching ID. They never return a DOM pointer in the intent. */
+    TaiUrl *fragment_url = tai_url_parse(
+        "data:text/html,%3Ca%20href%3D%22%23target%22%3Ego%3C/a%3E%3Cdiv%20style%3D%22height%3A200px%22%3Egap%3C/div%3E%3Cp%20id%3Dtarget%3Etarget%3C/p%3E");
+    TaiPage *fragment_page = tai_page_load(network, fragment_url,
+        "html {display:block} body {display:block} a {display:block} div {display:block} p {display:block}",
+        300.0, 50.0, false, &error);
+    assert(fragment_url && fragment_page && !error);
+    TaiNode *fragment_link = find(tai_page_root(fragment_page), "a");
+    assert(fragment_link);
+    changed = false;
+    assert(tai_page_activate_viewport(fragment_page, 14.0, 21.0,
+                                      &changed, &error));
+    assert(!error && changed);
+    assert(!strcmp(tai_url_fragment(tai_page_url(fragment_page)), "target"));
+    assert(tai_page_scroll_y(fragment_page) > 0.0);
+    intent = NULL;
+    assert(tai_page_take_navigation_intent(fragment_page, &intent));
+    assert(intent == NULL);
+    tai_page_destroy(fragment_page);
+    tai_url_destroy(fragment_url);
+
     tai_page_json(stdout, page);
     fputc('\n', stdout);
     tai_page_destroy(page);

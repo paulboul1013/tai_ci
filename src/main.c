@@ -15,6 +15,25 @@ enum { TAI_SCREENSHOT_WIDTH = 800 };
 /* Frozen Python rounds 600 - its rendered Chrome.bottom to 532 pixels. */
 enum { TAI_SCREENSHOT_HEIGHT = 532 };
 
+typedef struct {
+    TaiNetwork *network;
+    const char *default_css;
+    bool rtl;
+} NavigationContext;
+
+static bool navigate_page(void *opaque, TaiPage **current_page,
+                          const TaiNavigationIntent *intent, char **error) {
+    NavigationContext *context = opaque;
+    if (!tai_page_replace_from_intent(context->network, current_page, intent,
+                                      context->default_css, context->rtl,
+                                      error)) {
+        fprintf(stderr, "navigation failed: %s\n",
+                error && *error ? *error : "page load failed");
+        if (error) { free(*error); *error = NULL; }
+    }
+    return true;
+}
+
 static void usage(const char *program) {
     fprintf(stderr,
             "usage: %s [--headless|--window] [--rtl] [--screenshot OUTPUT.png] URL\n",
@@ -99,8 +118,14 @@ int main(int argc, char **argv) {
     bool success = page != NULL;
     if (!page) fprintf(stderr, "load failed: %s\n", error ? error : "allocation failed");
     else if (window) {
-        success = tai_present_window(page, TAI_SCREENSHOT_WIDTH,
-                                     TAI_SCREENSHOT_HEIGHT, &error);
+        NavigationContext navigation = {
+            .network = network,
+            .default_css = css,
+            .rtl = rtl,
+        };
+        success = tai_present_window_with_navigation(
+            &page, TAI_SCREENSHOT_WIDTH, TAI_SCREENSHOT_HEIGHT,
+            navigate_page, &navigation, &error);
         if (!success) fprintf(stderr, "window failed: %s\n",
                               error ? error : "presentation failed");
     } else if (screenshot_path) {

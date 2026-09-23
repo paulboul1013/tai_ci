@@ -122,6 +122,12 @@ if(BUILD_TESTING)
   target_link_libraries(test_browser PRIVATE tai_core)
   target_compile_options(test_browser PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME browser_headless COMMAND test_browser)
+  add_executable(test_navigation tests/test_navigation.c)
+  target_link_libraries(test_navigation PRIVATE tai_core)
+  target_compile_options(test_navigation PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME browser_navigation COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/navigation_integration.py"
+    $<TARGET_FILE:test_navigation>)
   add_executable(page_scroll_probe tests/page_scroll_probe.c)
   target_link_libraries(page_scroll_probe PRIVATE tai_core)
   target_compile_options(page_scroll_probe PRIVATE

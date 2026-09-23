@@ -7,13 +7,23 @@ typedef enum {
   TAI_LAYOUT_BLOCK,
   TAI_LAYOUT_LINE,
   TAI_LAYOUT_TEXT,
-  TAI_LAYOUT_IMAGE
+  TAI_LAYOUT_IMAGE,
+  TAI_LAYOUT_INPUT,
+  TAI_LAYOUT_BUTTON
 } TaiLayoutItemKind;
+typedef enum {
+  TAI_CONTROL_NONE,
+  TAI_CONTROL_TEXT,
+  TAI_CONTROL_PASSWORD,
+  TAI_CONTROL_CHECKBOX,
+  TAI_CONTROL_BUTTON
+} TaiControlKind;
 typedef struct {
   TaiLayoutItemKind kind;
+  TaiControlKind control;
   const TaiNode *node;
   const char *word;
-  double x, y, width, height, ascent, descent, space, font_size;
+  double x, y, width, height, ascent, descent, space, font_size, caret_x;
   double content_height, scroll_y;
   bool bold, italic, scrollable;
   /* Borrowed immutable premultiplied Cairo ARGB32 pixels, valid only during
@@ -43,4 +53,8 @@ bool tai_layout_visit(const TaiLayout *layout, TaiLayoutVisitor visitor,
  * coordinates; LEAVE closes any state opened for that same item. */
 bool tai_layout_walk(const TaiLayout *layout, TaiLayoutTreeVisitor visitor,
                      void *opaque, char **error);
+/* Resolves the Python strict-midpoint caret rule for a current text/password
+ * control. node_id is stable while its owning document lives. */
+bool tai_layout_control_caret_index(const TaiLayout *layout, size_t node_id,
+                                    double document_x, size_t *index);
 #endif
