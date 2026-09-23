@@ -31,6 +31,14 @@ TaiPage *tai_page_load_request(TaiNetwork *network, const TaiUrl *url,
  * the intent; accessors borrow them. GET has a NULL body, POST has a body. */
 bool tai_page_take_navigation_intent(TaiPage *page,
                                     TaiNavigationIntent **intent);
+/* Transfers the URL of a same-document fragment activation, if any. A caller
+ * must consume and finish it before the next fragment activation. */
+bool tai_page_take_fragment_change(TaiPage *page, char **url);
+/* True while a taken fragment change remains pending and changes URL text. */
+bool tai_page_fragment_url_changed(const TaiPage *page);
+/* Resolves the pending fragment transaction after session history recording.
+ * On failure restores the old URL and scroll without allocation. */
+void tai_page_finish_fragment_change(TaiPage *page, bool committed);
 const char *tai_navigation_intent_url(const TaiNavigationIntent *intent);
 bool tai_navigation_intent_is_post(const TaiNavigationIntent *intent);
 const char *tai_navigation_intent_body(const TaiNavigationIntent *intent);
@@ -69,6 +77,9 @@ TaiNode *tai_page_viewport_hit_test(const TaiPage *page, double x, double y,
  * layout and immutable display list before reporting *changed true. */
 bool tai_page_activate_viewport(TaiPage *page, double x, double y,
                                 bool *changed, char **error);
+/* Clear the currently focused page control, rebuilding its display list when
+ * focus styling changes. */
+bool tai_page_blur_input(TaiPage *page, bool *changed, char **error);
 /* Inserts sanitized UTF-8 text into the focused text/password control. Cursor
  * positions are Unicode code-point indexes, never byte indexes. */
 bool tai_page_text_input(TaiPage *page, const char *text, bool *changed,

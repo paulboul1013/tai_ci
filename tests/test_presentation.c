@@ -40,6 +40,10 @@ typedef enum {
   INPUT_BACKSPACE,
   INPUT_LEFT,
   INPUT_RIGHT,
+  INPUT_ALT_LEFT,
+  INPUT_ALT_RIGHT,
+  INPUT_OTHER_WINDOW_ALT_LEFT,
+  INPUT_UNFOCUSED_ALT_RIGHT,
   INPUT_RETURN,
   INPUT_WINDOW_FOCUS_LOST,
   INPUT_WINDOW_FOCUS_GAINED,
@@ -84,14 +88,22 @@ static SDL_Event make_input_event(InputKind kind, SDL_WindowID window_id) {
     }};
   }
   if (kind == INPUT_OTHER_WINDOW_BACKSPACE || kind == INPUT_BACKSPACE ||
-      kind == INPUT_LEFT || kind == INPUT_RIGHT) {
+      kind == INPUT_LEFT || kind == INPUT_RIGHT ||
+      kind == INPUT_ALT_LEFT || kind == INPUT_ALT_RIGHT ||
+      kind == INPUT_OTHER_WINDOW_ALT_LEFT ||
+      kind == INPUT_UNFOCUSED_ALT_RIGHT) {
     return (SDL_Event){.key = {
         .type = SDL_EVENT_KEY_DOWN,
-        .windowID = kind == INPUT_OTHER_WINDOW_BACKSPACE ? window_id + 1 :
+        .windowID = kind == INPUT_OTHER_WINDOW_BACKSPACE ||
+                    kind == INPUT_OTHER_WINDOW_ALT_LEFT ? window_id + 1 :
                                                          window_id,
         .key = kind == INPUT_BACKSPACE || kind == INPUT_OTHER_WINDOW_BACKSPACE
                    ? SDLK_BACKSPACE
-               : kind == INPUT_LEFT ? SDLK_LEFT : SDLK_RIGHT,
+               : kind == INPUT_LEFT || kind == INPUT_ALT_LEFT ||
+                 kind == INPUT_OTHER_WINDOW_ALT_LEFT ? SDLK_LEFT : SDLK_RIGHT,
+        .mod = kind == INPUT_ALT_LEFT || kind == INPUT_ALT_RIGHT ||
+               kind == INPUT_OTHER_WINDOW_ALT_LEFT ||
+               kind == INPUT_UNFOCUSED_ALT_RIGHT ? SDL_KMOD_ALT : 0,
         .down = true,
     }};
   }
@@ -177,6 +189,22 @@ typedef struct {
   const char *css;
   size_t calls;
 } NavigationFixture;
+
+typedef struct {
+  size_t back;
+  size_t forward;
+} HistoryFixture;
+
+static bool record_history(void *opaque, TaiPage **page, int direction,
+                           char **error) {
+  (void)error;
+  assert(page && *page);
+  HistoryFixture *fixture = opaque;
+  if (direction == -1) fixture->back++;
+  else if (direction == 1) fixture->forward++;
+  else assert(false);
+  return true;
+}
 
 static bool replace_page(void *opaque, TaiPage **current_page,
                          const TaiNavigationIntent *intent, char **error) {
@@ -525,6 +553,46 @@ int main(void) {
   assert(!strcmp(tai_map_get(&edit_input->attributes, "value"), "\303\251cat"));
   tai_page_destroy(edit_page);
   tai_url_destroy(edit_url);
+
+  /* Alt+arrows belong to the window history callback. Ordinary arrows keep
+   * editing the focused input; other-window and unfocused keys are ignored. */
+  TaiUrl *history_url = tai_url_parse("data:text/html,%3Cinput%20value%3Dcat%3E");
+  TaiPage *history_page = tai_page_load(network, history_url,
+      "html {display:block} body {display:block}", 300, 100, false, &error);
+  assert(history_url && history_page && !error);
+  static const InputKind history_inputs[] = {
+      INPUT_WINDOW_FOCUS_LOST,
+      INPUT_UNFOCUSED_ALT_RIGHT,
+      INPUT_WINDOW_FOCUS_GAINED,
+      INPUT_OTHER_WINDOW_ALT_LEFT,
+      INPUT_LEFT_CLICK,
+      INPUT_RIGHT,
+      INPUT_ALT_LEFT,
+      INPUT_ALT_LEFT,
+      INPUT_ALT_RIGHT,
+  };
+  InputEvents history_events = {
+      .kinds = history_inputs,
+      .count = sizeof(history_inputs) / sizeof(history_inputs[0]),
+  };
+  HistoryFixture history = {0};
+  assert(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
+  assert(SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software"));
+  input_injected = false;
+  input_events_queued = false;
+  SDL_SetEventFilter(inject_input, &history_events);
+  assert(pthread_create(&thread, NULL, request_quit, NULL) == 0);
+  assert(tai_present_window_with_history(&history_page, 300, 100,
+      NULL, record_history, NULL, &history, &error));
+  assert(pthread_join(thread, NULL) == 0);
+  assert(!error && input_injected && input_events_queued);
+  assert(history.back == 2 && history.forward == 1);
+  TaiNode *history_input = find(tai_page_root(history_page), "input");
+  assert(history_input && history_input->focused &&
+         history_input->cursor_index == 1);
+  assert(!strcmp(tai_map_get(&history_input->attributes, "value"), "cat"));
+  tai_page_destroy(history_page);
+  tai_url_destroy(history_url);
 
   /* SDL text reaches the JS keydown seam, and preventDefault suppresses the
    * insertion. The same-page click also demonstrates focus activation. */

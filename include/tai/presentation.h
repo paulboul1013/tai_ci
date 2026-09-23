@@ -9,6 +9,25 @@
 typedef bool (*TaiPresentNavigate)(void *userdata, TaiPage **page,
                                   const TaiNavigationIntent *intent,
                                   char **error);
+/* History/address callbacks abort the presentation loop if they return false.
+ * Recoverable navigation failures should retain the current page and return
+ * true; a successful replacement must leave *page nonnull. */
+typedef bool (*TaiPresentHistory)(void *userdata, TaiPage **page,
+                                  int direction, char **error);
+typedef bool (*TaiPresentFragment)(void *userdata, const char *url,
+                                   char **error);
+typedef bool (*TaiPresentAddress)(void *userdata, TaiPage **page,
+                                  const char *text, char **error);
+typedef bool (*TaiPresentHistoryAvailable)(void *userdata, int direction);
+
+typedef struct {
+  TaiPresentNavigate navigate;
+  TaiPresentHistory history;
+  TaiPresentFragment fragment;
+  TaiPresentAddress address;
+  TaiPresentHistoryAvailable history_available;
+  void *userdata;
+} TaiPresentWindowCallbacks;
 
 /* Compatibility display entry point. It blocks on the calling thread until the
  * window is closed and borrows page for the entire call. Resize events rebuild
@@ -22,5 +41,16 @@ bool tai_present_window(TaiPage *page, int width, int height, char **error);
 bool tai_present_window_with_navigation(TaiPage **page, int width, int height,
                                         TaiPresentNavigate navigate,
                                         void *userdata, char **error);
+/* direction -1/1 handles Alt+Left/Alt+Right; fragment URL is borrowed. */
+bool tai_present_window_with_history(TaiPage **page, int width, int height,
+                                     TaiPresentNavigate navigate,
+                                     TaiPresentHistory history,
+                                     TaiPresentFragment fragment,
+                                     void *userdata, char **error);
+/* Chrome-enabled window. The window dimensions include the toolbar; the page
+ * viewport excludes it. All callbacks and userdata are borrowed for the call. */
+bool tai_present_window_with_chrome(
+    TaiPage **page, int width, int height,
+    const TaiPresentWindowCallbacks *callbacks, char **error);
 
 #endif

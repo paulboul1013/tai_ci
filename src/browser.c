@@ -44,6 +44,9 @@ struct TaiPage {
     bool dirty;
     TaiNode *focused;
     TaiNavigationIntent *navigation;
+    char *fragment_change;
+    TaiUrl *fragment_previous_url;
+    double fragment_previous_scroll;
 };
 
 static bool diagnostic(char **error, const char *message) {
@@ -344,6 +347,8 @@ bool tai_page_replace_from_intent(TaiNetwork *network, TaiPage **page,
 void tai_page_destroy(TaiPage *page) {
     if (!page) return;
     tai_navigation_intent_destroy(page->navigation);
+    free(page->fragment_change);
+    tai_url_destroy(page->fragment_previous_url);
     tai_display_list_destroy(page->display);
     tai_layout_destroy(page->layout);
     tai_js_destroy(page->javascript);
@@ -359,6 +364,31 @@ bool tai_page_take_navigation_intent(TaiPage *page,
     *intent = page->navigation;
     page->navigation = NULL;
     return true;
+}
+
+bool tai_page_take_fragment_change(TaiPage *page, char **url) {
+    if (!page || !url) return false;
+    *url = page->fragment_change;
+    page->fragment_change = NULL;
+    return true;
+}
+
+bool tai_page_fragment_url_changed(const TaiPage *page) {
+    return page && page->fragment_previous_url &&
+        strcmp(tai_url_string(page->fragment_previous_url),
+               tai_url_string(page->url)) != 0;
+}
+
+void tai_page_finish_fragment_change(TaiPage *page, bool committed) {
+    if (!page || !page->fragment_previous_url) return;
+    if (!committed) {
+        tai_url_destroy(page->url);
+        page->url = page->fragment_previous_url;
+        page->scroll_y = page->fragment_previous_scroll;
+    } else {
+        tai_url_destroy(page->fragment_previous_url);
+    }
+    page->fragment_previous_url = NULL;
 }
 
 static bool set_navigation_intent(TaiPage *page, const TaiUrl *url,
@@ -858,12 +888,27 @@ static bool scroll_to_fragment(TaiPage *page, const char *fragment,
 
 static bool apply_fragment_url(TaiPage *page, TaiUrl *target,
                                bool *changed, char **error) {
+    if (page->fragment_previous_url) {
+        tai_url_destroy(target);
+        return diagnostic(error, "pending fragment change must be consumed");
+    }
+    char *signal = tai_strdup(tai_url_string(target));
+    if (!signal) {
+        tai_url_destroy(target);
+        return diagnostic(error, "fragment URL allocation failed");
+    }
+    double previous_scroll = page->scroll_y;
     const char *fragment = tai_url_fragment(target);
     if (!scroll_to_fragment(page, fragment, error)) {
+        free(signal);
         tai_url_destroy(target);
         return false;
     }
-    tai_url_destroy(page->url);
+    tai_url_destroy(page->fragment_previous_url);
+    page->fragment_previous_url = page->url;
+    page->fragment_previous_scroll = previous_scroll;
+    free(page->fragment_change);
+    page->fragment_change = signal;
     page->url = target;
     if (changed) *changed = true;
     return true;
@@ -971,6 +1016,24 @@ bool tai_page_activate_viewport(TaiPage *page, double x, double y,
     }
     if (!page->dirty && !frame_changed) return true;
     if (!rebuild_dirty_page(page, error)) return false;
+    if (changed) *changed = true;
+    return true;
+}
+
+bool tai_page_blur_input(TaiPage *page, bool *changed, char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (changed) *changed = false;
+    if (!page || !page->document || !page->display)
+        return diagnostic(error, "invalid page blur input");
+    if (!page->focused) return true;
+    TaiNode *previously_focused = page->focused;
+    previously_focused->focused = false;
+    page->focused = NULL;
+    if (!rebuild_dirty_page(page, error)) {
+        previously_focused->focused = true;
+        page->focused = previously_focused;
+        return false;
+    }
     if (changed) *changed = true;
     return true;
 }

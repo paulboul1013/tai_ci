@@ -29,6 +29,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/source":
             response = b'<html><body><a href="/fragment#target">next</a></body></html>'
+        elif self.path == "/history-source":
+            response = (b'<html><body><form action="/history-post" method="POST">'
+                        b'<button>send</button></form></body></html>')
         elif self.path == "/fragment":
             content = b"".join(b"<p>filler</p>" for _ in range(16))
             response = b"<html><body>" + content + b'<p id="target">target</p></body></html>'
@@ -51,29 +54,48 @@ worker = threading.Thread(target=server.serve_forever, daemon=True)
 worker.start()
 try:
     subprocess.run([sys.argv[1], str(server.server_port)], check=True)
+    original_requests = list(requests)
+    requests.clear()
+    subprocess.run([sys.argv[2], str(server.server_port)], check=True)
+    history_requests = list(requests)
 finally:
     server.shutdown()
     server.server_close()
     worker.join()
 
-assert [entry["method"] for entry in requests] == [
+assert [entry["method"] for entry in original_requests] == [
     "GET", "GET", "GET", "POST", "GET"
 ]
-assert [entry["path"] for entry in requests] == [
+assert [entry["path"] for entry in original_requests] == [
     "/get?old=1&a+b=hello+world&flag=on&empty=",
     "/source",
     "/fragment",
     "/post",
     "/drop",
 ]
-assert [entry["body"] for entry in requests] == [
+assert [entry["body"] for entry in original_requests] == [
     "", "", "", "q=%C3%A9+%26", ""
 ]
-assert requests[2]["headers"].get("referer") == (
+assert original_requests[2]["headers"].get("referer") == (
     f"http://127.0.0.1:{server.server_port}/source"
 )
-assert "content-type" not in requests[3]["headers"]
-assert requests[3]["headers"].get("content-length") == str(
+assert "content-type" not in original_requests[3]["headers"]
+assert original_requests[3]["headers"].get("content-length") == str(
     len("q=%C3%A9+%26".encode("utf-8"))
+)
+assert [(entry["method"], entry["path"]) for entry in history_requests] == [
+    ("GET", "/history-source"),
+    ("POST", "/history-post"),
+    ("GET", "/history-source"),
+    ("GET", "/history-post"),
+]
+assert history_requests[1]["headers"].get("referer") == (
+    f"http://127.0.0.1:{server.server_port}/history-source"
+)
+assert history_requests[2]["headers"].get("referer") == (
+    f"http://127.0.0.1:{server.server_port}/history-post"
+)
+assert history_requests[3]["headers"].get("referer") == (
+    f"http://127.0.0.1:{server.server_port}/history-source"
 )
 print("Browser navigation HTTP fixture: GET, POST, referrer load, and failed replacement passed")
