@@ -1,4 +1,6 @@
-# tai_gar runtime / orchestration 分析
+# tai_gar runtime / orchestration 分析（歷史資料）
+
+> 歷史來源分析，僅供按需查閱 runtime、事件與 JavaScript 脈絡；目前可觀察行為請以 [凍結 Python oracle](../tests/reference/browser.py) 與 [Python 參考架構](architecture/python-reference.md) 為準。
 
 來源：`/home/paulboul/tai_gar/browser.py`、`runtime.js`、`server.py`、`web_server.py`。本報告僅根據 source 閱讀，尚未執行 oracle。
 

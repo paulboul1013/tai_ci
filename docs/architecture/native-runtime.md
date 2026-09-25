@@ -3,9 +3,9 @@
 ## Dependency direction
 
 The native dependency direction is core → URL/DOM → network/CSS/JavaScript →
-layout → display list/raster → page orchestration → CLI or future window layer.
-The scheduler remains an explicit service until browser/window orchestration
-integrates it.
+layout → display list/raster → page orchestration → tab set / SDL presentation
+or CLI. The scheduler remains an explicit service until browser/window
+orchestration integrates it.
 
 Public headers expose subsystem contracts; opaque handles isolate internal
 state where practical. Subsystems that require direct DOM access share the one
@@ -32,9 +32,11 @@ private, incompatible node layouts.
   premultiplied image pixels, rounded
   clip radii, scroll offsets, blur sigma, opacity/blend scalars, and scalar DOM node IDs; it keeps no DOM or
   layout pointers and can outlive both. Raw hit results retain only copied ID,
-  kind, and bounds. `TaiPage` owns viewport dimensions and clamped page scroll,
-  converts viewport coordinates to document coordinates once, and resolves the
-  copied ID through its live document.
+  kind, and bounds. `TaiPage` owns viewport dimensions and the top-level page
+  scroll offset, converts viewport coordinates to document coordinates once,
+  and resolves the copied ID through its live document. Explicit scroll
+  changes clamp to current overflow; resize preserves the prior top-level
+  offset even when it exceeds the new maximum, matching Python `Tab.resize`.
 - Cairo contexts and surfaces are created and destroyed inside synchronous
   PNG or memory raster calls. The memory call returns an owned opaque ARGB32
   copy. The presentation adapter borrows `TaiPage`, owns SDL video/window,
@@ -92,7 +94,42 @@ private, incompatible node layouts.
   renderer/window/SDL resources during cleanup.
   The chrome adapter borrows the session/history callbacks and owns no page or
   network state. Its geometry, rendering, and event-routing contract is recorded
-  in [`docs/reference-render-contract.md`](../reference-render-contract.md).
+  in [`docs/reference-presentation.md`](../reference-presentation.md).
+
+- `--window` now enters through `tai_present_window_with_tabs`. The presentation
+  adapter creates the SDL window before starting the initial navigation and
+  keeps polling the tab set while waiting for SDL events. It owns the address
+  editor, chrome/page textures, and all SDL resources on the window thread.
+  The legacy `tai_present_window_with_chrome` remains available for the
+  synchronous single-session adapter.
+- `TaiTabSet` owns ordered tab slots, the active index, and one `TaiSession` per
+  slot. It borrows default CSS and owns the New Tab URL. Each session owns its
+  committed page and copied URL history; in-flight URL/history state is exposed
+  provisionally without changing the committed session. A successful document
+  commit replaces the provisional state. An initial transport failure commits
+  the visible Network Error page and requested URL; a later transport failure
+  discards its candidate and provisional history while preserving the prior
+  page and committed history, an intentional native difference recorded in
+  [`PORTING_PLAN.md`](../../PORTING_PLAN.md).
+- The tab set starts one loader thread. That thread creates, exclusively uses,
+  and destroys the shared `TaiNetwork`; document and external-resource requests
+  use its submit/poll API. It also owns a page candidate through parsing,
+  script/style application, layout, and display-list construction. Completion
+  carries the stable tab ID and navigation generation plus the candidate page.
+  The SDL thread rejects stale generations and takes page ownership only while
+  committing to the matching session. Replaced tasks are canceled by the
+  loader thread; tab-set shutdown marks pending work canceled, joins the loader,
+  drains completions, then destroys sessions. Destruction runs on the window
+  owner after it has stopped issuing tab-set operations. No loader path touches
+  SDL.
+- A navigation snapshots its Referer from the same tab's committed page URL;
+  if it supersedes a pending navigation, it uses that provisional URL, matching
+  Python's capture-before-assignment behavior. Other tabs never supply a
+  Referer to the request.
+- Window resize updates every committed session page on the SDL thread. A
+  pending candidate is resized to the latest viewport immediately before
+  commit. Tab selection changes only the active index; it does not move page,
+  history, pending task, or scroll ownership between sessions.
 
 ## Current native rendering boundary
 
@@ -113,7 +150,7 @@ owns the page/network/URL lifecycle and uses one
 cleanup path for screenshot success and failure. Observable dimensions,
 supported commands, coordinate semantics, test evidence, and missing paint
 features belong to
-[`docs/reference-render-contract.md`](../reference-render-contract.md).
+[`docs/reference-display-raster.md`](../reference-display-raster.md).
 
 ## Runtime resources
 

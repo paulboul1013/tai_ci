@@ -1,4 +1,6 @@
-# Python Browser 核心行為分析
+# Python Browser 核心行為分析（歷史資料）
+
+> 歷史來源分析，僅供按需查閱 URL、HTML、CSS 邊界；目前可觀察行為請以 [凍結 Python oracle](../tests/reference/browser.py) 與 [Python 參考架構](architecture/python-reference.md) 為準。
 
 來源 `/home/paulboul/tai_gar/browser.py`，唯讀分析；已以 AST 擷取原始 class definitions 實際執行 HTML/CSS edge cases，沒有重新實作 oracle。
 

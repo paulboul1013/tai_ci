@@ -34,10 +34,20 @@ display/raster differential 尚未移植。
 不以外網網站可用性作 deterministic acceptance；人工 test.md scenarios 改為本地 fixtures。
 Pixel-perfect 只在字型、版本、backend 與環境固定時使用；優先比較 DOM/layout/display 結構。
 
-截至 2026-09-23，原生瀏覽器另有仍屬 `VALIDATING` 的互動、history 與單視窗 chrome 切片。Focused presentation/session/browser tests 涵蓋 window input、地址列編輯、history/fragment、GET/POST/Referer 及失敗保留；幾何與 presentation case 清單見 [render contract](docs/reference-render-contract.md)。
+截至 2026-09-23，原生瀏覽器另有仍屬 `VALIDATING` 的互動、history 與 tabbed window/chrome 切片。Focused presentation/session/browser tests 涵蓋 window input、地址列編輯、history/fragment、GET/POST/Referer 及失敗保留；幾何與 presentation case 清單見 [presentation contract](docs/reference-presentation.md)。
 
-最新 release focused CTest `presentation_chrome`、`presentation_dummy`、`browser_address`、`browser_history`、`browser_navigation` 5/5 通過。完整 CTest 28/28 通過（207.97s）。前次與 sanitizer loopback 測試併跑時，`display_differential` subprocess 曾因 `PermissionError` 無法啟動 `build/tai-browser`（檔案 mode 確認為 755）；隔離完整重跑未重現，推測是併行造成的暫時執行限制，根因未確認。ASan/UBSan focused 5/5：`presentation_dummy`、`browser_history`、`presentation_chrome` 在 sandbox 內通過，`browser_address` 與 `browser_navigation` 在允許 loopback 的 elevated 執行下通過；均設 `ASAN_OPTIONS=detect_leaks=0`，LeakSanitizer 未執行。`presentation_chrome` 覆蓋 toolbar 寬度切換與小尺寸 resize 邊界；完整案例與幾何見 [render contract](docs/reference-render-contract.md)。800×600 原生視窗截圖 `/tmp/tai-chrome-window.png` 已擷取並目視確認 toolbar 與 page content 可見，尚未做 Python/native pixel diff；dummy SDL 狀態測試及目視檢查均不構成 raster parity 證據。以上結果不勾選任何整體 acceptance 條件。
+**Prior pre-tabs validation snapshot (2026-09-23; superseded by the tabs results below):** focused CTest `presentation_chrome`、`presentation_dummy`、`browser_address`、`browser_history`、`browser_navigation` 5/5 通過；完整 CTest 28/28 通過（207.97s）。前次與 sanitizer loopback 測試併跑時，`display_differential` subprocess 曾因 `PermissionError` 無法啟動 `build/tai-browser`（檔案 mode 確認為 755）；隔離完整重跑未重現，推測是併行造成的暫時執行限制，根因未確認。ASan/UBSan focused 5/5：`presentation_dummy`、`browser_history`、`presentation_chrome` 在 sandbox 內通過，`browser_address` 與 `browser_navigation` 在允許 loopback 的 elevated 執行下通過；均設 `ASAN_OPTIONS=detect_leaks=0`，LeakSanitizer 未執行。`presentation_chrome` 覆蓋 toolbar 寬度切換與小尺寸 resize 邊界；完整案例與幾何見 [presentation contract](docs/reference-presentation.md)。800×600 原生視窗截圖 `/tmp/tai-chrome-window.png` 已擷取並目視確認 toolbar 與 page content 可見，尚未做 Python/native pixel diff；dummy SDL 狀態測試及目視檢查均不構成 raster parity 證據。此舊 snapshot 不勾選任何整體 acceptance 條件。
 
 使用者於 2026-09-23 手動開啟 `https://browser.engineering/`，回報原生視窗中的基本 chrome／導覽測試成功。具體操作序列未記錄，因此此回報補充代表性手動 smoke evidence，不替代逐項自動化、Python 行為比對或 pixel diff。
 
-已知刻意差異、目前移植切片與剩餘功能缺口的唯一紀錄見 [PORTING_PLAN.md](PORTING_PLAN.md)。逐項原生視窗鍵盤輸入與事件順序仍未自動化驗證。
+已知刻意差異、目前移植切片與剩餘功能缺口的唯一紀錄見 [PORTING_PLAN.md](PORTING_PLAN.md)。SDL dummy automation 涵蓋程式輸入、地址列、history 和 tabs 操作；真實 X11/Wayland 鍵盤輸入與事件順序仍未自動化驗證。
+
+## Tabs slice verification — 2026-09-23
+
+目前 tabbed window 切片仍為 `VALIDATING`，不勾選任何整體 acceptance 條件。`cmake --build build -j 4` 成功；更新後完整 CTest `ctest --test-dir build --output-on-failure -j 4` 通過 30/30（54.25s）；`python3 tests/tabs_oracle_probe.py --check` 與凍結的 Python tabs oracle fixture 相符。
+
+Tabs local HTTP integration 覆蓋 delayed document/CSS 期間 New Tab 與 tab selection、SDL resize event、window close request；tabset cases 覆蓋初次與後續載入失敗、Back/Forward rollback、superseded response、late completion cancellation 與 per-route Referer。Dummy SDL presentation inputs 以後續提交 URL 驗證 New Tab 和 tab switch 會丟棄 dirty address draft。這些測試使用 local fixture，不依賴外網站點。
+
+Focused ASan/UBSan CTest `presentation_dummy`、`presentation_chrome`、`browser_tabs`、`browser_history`、`browser_headless` 5/5 通過。設 `ASAN_OPTIONS=detect_leaks=0`；LeakSanitizer 未執行。
+
+目前仍缺低寬度／大量 tabs 的 chrome clipping 驗證、兩個以上 tabs 的 native active/inactive 樣式 pixel comparison、真實 X11/Wayland 輸入事件順序，以及 allocation failure injection。SDL dummy window assertions 不能取代原生桌面 pixel comparison；此切片不宣稱 visual parity。

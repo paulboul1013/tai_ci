@@ -15,9 +15,8 @@ contracts unchanged.
 
 - Repository authority: [`AGENTS.md`](../../AGENTS.md)
 - Migration state and known discrepancy: [`PORTING_PLAN.md`](../../PORTING_PLAN.md)
-- Current SDL/output contract: [`docs/reference-render-contract.md`](../reference-render-contract.md)
+- Current SDL/output contract: [`docs/reference-presentation.md`](../reference-presentation.md)
 - Ownership and dependency direction: [`docs/architecture/native-runtime.md`](../architecture/native-runtime.md)
-- Prior SDL slice handoff: [`docs/handoffs/2026-09-18-sdl-presentation.md`](../handoffs/2026-09-18-sdl-presentation.md)
 - Frozen Python resize oracle: [`tests/reference/browser.py`](../../tests/reference/browser.py), `BrowserWindow.resize`
 
 This work matches the SDL/native-stack, architecture/ownership,

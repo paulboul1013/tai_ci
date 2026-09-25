@@ -1,4 +1,6 @@
-# tai_gar rendering、layout、window 原始行為分析
+# tai_gar rendering、layout、window 原始行為分析（歷史資料）
+
+> 歷史來源分析，僅供按需查閱排版與視窗細節；目前可觀察行為請以 [凍結 Python oracle](../tests/reference/browser.py) 與 [Python 參考架構](architecture/python-reference.md) 為準。
 
 分析來源：`/home/paulboul/tai_gar/browser.py`；已完整讀取 rendering/fonts/geometry 1471–2498、BrowserApp 2529–2902、display/layout 2902–4260、Chrome/CommitData 5163–5700、Tab rendering/scroll 6219–6555、Raster/Window 6845–8545，以及 README.md、test.md、tai_ci/AGENTS.md。這份報告描述現有行為，並非 Web 標準要求。沒有修改來源。
 
