@@ -168,6 +168,20 @@
     ]
   },
   "switching": {
+    "active_first_rects": [
+      [
+        34.0,
+        19.184,
+        84.0,
+        35.184
+      ],
+      [
+        88.0,
+        19.072,
+        125.0,
+        35.072
+      ]
+    ],
     "active_index_after_switch_back": 1,
     "active_styles_after_select": [
       "font-weight:bold;color:black",

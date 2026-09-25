@@ -25,7 +25,7 @@ is complete only when the focused test passes on the binary being checked.
 |---|---|---|
 | Wheel down/up | Direction, clamp, flipped and invalid input | Targeted X11 buttons `5`/`4` |
 | PageDown/PageUp, down/up arrows | 100px step and clamp | Requires real keyboard focus; see step 4 |
-| Text, Backspace/left/right/Return | Focused dummy SDL input and form navigation | Not covered by the standing X11 automation scope |
+| Text, Backspace/left/right/Return | Focused dummy SDL input and form navigation | Authorized for targeted tests; WSLg focus may prevent delivery (step 4) |
 
 ## 2. Start and identify one real window
 
@@ -42,29 +42,32 @@ xdotool search --name '^Tai Gar$'
 ```
 
 Resolve multiple matches to the process you started before sending input. If
-network or display access is denied by the sandbox, retry with the required
-approval and record the restriction separately from browser behavior. This
-step is complete when exactly one target window is identified and its initial
+network or display access is denied by the sandbox, retry through the tool's
+required escalation mechanism and record the restriction separately from
+browser behavior. This step is complete when exactly one target window is identified and its initial
 capture shows page content plus a right-edge blue thumb.
 
-### Elevated X11 authorization scope
+### Authorization and sandbox scope
 
-Desktop automation can require elevated sandbox permission. When the user has
-granted standing consent for native-window verification, invoke the scoped
-commands directly; do not pause for a second conversational confirmation. The
-permitted scope is limited to the `Tai Gar` window started in this procedure
-and its newly resolved X11 ID:
+The repository owner explicitly authorized all related visual and SDL
+verification on 2026-09-25 without further user confirmation. This covers
+focused builds/tests, local fixture servers, launching `Tai Gar`, scoped window
+screenshots, and targeted `xdotool` mouse, wheel, keyboard, and resize input.
+Run these validation actions directly. Resolve the current `Tai Gar` X11 ID
+after each launch; apply input and captures only to that window. Close only
+test windows started by the agent. Batch consecutive same-window actions when
+no intermediate capture is needed. Capture files belong in a temporary path
+unless the user requested a destination.
 
-- `xdotool search --name '^Tai Gar$'` to find the window;
-- `xdotool click --window <current-id> 4|5` for targeted wheel input;
-- `xdotool windowclose <current-id>` only to clean up that test window; and
-- `xwd -silent -id <current-id>` to capture that same window.
-
-Do not broaden this consent to whole-desktop captures, active-window lookup,
-general keyboard injection, or another application's window ID. Capture files
-belong in a temporary path unless the user requested a destination. If the
-execution platform still refuses a scoped elevated command, report that as an
-environment restriction rather than requesting browser code changes.
+Conversation authorization and sandbox execution approval are separate. If a
+scoped command fails under sandboxing, retry it with the tool's required
+escalation parameter and a concise justification; reuse a previously approved
+scoped command or prefix when available. A platform approval prompt may still
+appear for a new command shape. Do not add a separate conversational permission
+request or treat each new coordinate as a new user decision. If the execution
+platform rejects the scoped command, report that environment restriction.
+Whole-desktop captures and commands targeting another application are outside
+this browser verification procedure.
 
 ## 3. Inject movement and capture each state
 
@@ -131,8 +134,9 @@ WSLg session still lost keyboard focus and emitted an SDL key event with
 `windowID=0`; the browser correctly ignored that event. Use the focused dummy
 SDL test for PageUp/PageDown, arrow, and text/control behavior, and targeted
 wheel input for real-window visual evidence. Do not change the browser to
-accept unfocused `windowID=0` keys just to satisfy desktop automation. The
-standing native-window authorization does not include keyboard injection.
+accept unfocused `windowID=0` keys just to satisfy desktop automation. Targeted
+keyboard injection is authorized for validation, but delivery still needs
+matching before/after evidence before it counts as verified behavior.
 
 If a targeted wheel does not move the page, check the launch environment,
 window ID, overflow, and scroll clamp, then compare captures. A command that

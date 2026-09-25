@@ -10,11 +10,11 @@
 
 **State:** `VALIDATING`
 
-`tai-browser --window URL` 現在進入 tabbed window，提供可編輯地址列、Back/Forward、URL history、New Tab、Tab N selection，以及作用於 active tab 的 page click、表單輸入/提交、fragment 與 scroll。tab documents 和 CSS 在 loader thread 建構，SDL owner 持續處理輸入、resize 與 close。原有單頁 chrome APIs 仍保留供相容呼叫。本切片維持 `VALIDATING`；低寬度／多 tab 視覺排版、native chrome pixel comparison 與 native X11/Wayland 下完整事件順序仍待補足。SDL dummy integration 已在 delayed document/CSS 載入中注入 tab 操作及 close；TabSet tests 另覆蓋 resize、failure routes、Referer 與 late completion。精確幾何、viewport、事件路由與呈現契約見 [presentation contract](docs/reference-presentation.md)；page/session、SDL 資源與 callback ownership 見 [native runtime](docs/architecture/native-runtime.md)。整體驗收仍未完成。
+`tai-browser --window URL` 現在進入 tabbed window，提供可編輯地址列、Back/Forward、URL history、New Tab、Tab N selection，以及作用於 active tab 的 page click、表單輸入/提交、fragment 與 scroll。tab documents 和 CSS 在 loader thread 建構，SDL owner 持續處理輸入、resize 與 close。原有單頁 chrome APIs 仍保留供相容呼叫。本切片維持 `VALIDATING`；800px 真實視窗已驗證 25 個等寬 tabs 與首末格點擊，極窄寬度可讀性、完整 native chrome pixel comparison 與 native X11/Wayland 下完整事件順序仍待補足。SDL dummy integration 已在 delayed document/CSS 載入中注入 tab 操作及 close；TabSet tests 另覆蓋 resize、failure routes、Referer 與 late completion。精確幾何、viewport、事件路由與呈現契約見 [presentation contract](docs/reference-presentation.md)；page/session、SDL 資源與 callback ownership 見 [native runtime](docs/architecture/native-runtime.md)。整體驗收仍未完成。
 
 Python 參考實作另有 bookmark、新視窗及外部網址啟動，這些不屬於本切片。窄寬地址欄會被裁切且 bookmark row 尚未實作。
 
-**刻意差異與限制：** malformed/unsupported direct address 會被 native 拒絕；`mailto:` 不啟動外部程式；已有文件後續 navigation 載入失敗時 native 保留舊 page/history，而 Python 會先更新 URL/history 並顯示 Network Error。初次載入失敗時兩者都提交 Network Error page 與請求 URL/history。Back/Forward 只保存 URL 並以 GET 重載，不保存 POST body、舊 DOM 或 scroll。Native 支援地址列未聚焦時 Alt+Left/Alt+Right；沒有 Ctrl+N、新視窗或 Escape 專用操作。Frozen Python 對未知 wheel direction 與非有限 y 的處理和 native no-op 不同。低寬度控件可用性、chrome pixel diff、自动化原生視窗輸入順序仍是缺口；Python event dispatcher 未見 Escape 分支。行為細節見 [presentation contract](docs/reference-presentation.md)。
+**刻意差異與限制：** 使用者要求 native 同時最多 25 個 tabs；第 26 次 New Tab 不建立 session 或發出載入請求，視窗中的 New Tab 按鈕停用。Python 參考實作沒有此上限；這是產品指定的 native 限制，後續若移植 Python 的無上限行為須先移除此策略。當標籤自然寬度超過視窗且至少有三個 tabs 時，native 改用等寬編號方框，而非 Python 的 inline 文字換行。malformed/unsupported direct address 會被 native 拒絕；`mailto:` 不啟動外部程式；已有文件後續 navigation 載入失敗時 native 保留舊 page/history，而 Python 會先更新 URL/history 並顯示 Network Error。初次載入失敗時兩者都提交 Network Error page 與請求 URL/history。Back/Forward 只保存 URL 並以 GET 重載，不保存 POST body、舊 DOM 或 scroll。Native 支援地址列未聚焦時 Alt+Left/Alt+Right；沒有 Ctrl+N、新視窗或 Escape 專用操作。Frozen Python 對未知 wheel direction 與非有限 y 的處理和 native no-op 不同。低寬度控件可用性、chrome pixel diff、自动化原生視窗輸入順序仍是缺口；Python event dispatcher 未見 Escape 分支。行為細節見 [presentation contract](docs/reference-presentation.md)。
 
 `TaiPage` 提供 navigation intent；session/window owner 負責候選頁與 history 的提交。具體狀態、已知差異與下一個移植 seam 由本計畫追蹤；驗證結果只記錄於 [ACCEPTANCE.md](ACCEPTANCE.md)，chrome 幾何與測試案例清單記錄於 [presentation contract](docs/reference-presentation.md)。
 
@@ -27,6 +27,7 @@ Python oracle 是 `tests/reference/browser.py`。`BrowserWindow` 擁有有序 ta
 **本切片行為契約：**
 
 - New Tab 立即成為 active，並以 `https://browser.engineering/` 作為第一個 navigation/history entry。
+- 依使用者指定的 native 上限，同時最多 25 個 tabs；第 26 次 New Tab 失敗且不改變 active tab，停用按鈕不改變地址草稿／焦點。
 - Navigation 一開始就讓 pending URL/history 在其 tab 的網址列與 history state 可見；成功時轉為 committed entry。已有文件的後續載入失敗時，暫存 entry 回復，保持本專案延續的 page/history 失敗差異。
 - 頂層文件載入不得阻塞 SDL window event loop；以 `--window URL` 啟動時，初始文件尚未完成也要先顯示可操作的 window。載入期間仍可選取或建立 tabs、resize、close；完成結果交回發起該 navigation 的 tab，即使 active tab 改變也不得更新其他 tab。
 - 文件載入及其子資源請求不得在 SDL event loop 同步等待網路；所有完成通知須依已定義的 network owner/thread contract 安全送回 page/session owner。
@@ -89,7 +90,7 @@ Bookmark、新視窗和單 tab close 不擴入此切片，除非 oracle 顯示�
 | Paint / raster | display commands/raster → `src/render.c` | Cairo, layout | VALIDATING | structural differentials；scroll/blur/blend/image key-region tests；viewport PNG | general/remote images and WebP; exact scope → [`display/raster contract`](docs/reference-display-raster.md) |
 | JavaScript / events | JS runtime/context → `src/js.c` | QuickJS-NG, DOM, CSS, network | VALIDATING | bridge, cancellation, exception tests | bubbling, broad DOM mutation, timers/fetch, browser integration |
 | Scheduling | task runners/clocks → `src/scheduler.c` | threads, network | VALIDATING | priority/FIFO/aging/generation unit tests | browser/network/frame integration and close protocol |
-| Browser / window | app/window/tab/chrome → `src/browser.c`, `src/session.c`, `src/tabset.c`, `src/presentation.c`, `src/main.c` | page, threads, libcurl multi, Cairo, SDL3 | VALIDATING | verification record: [`ACCEPTANCE.md`](ACCEPTANCE.md); Python tabs oracle: [`tabs_oracle_probe.py`](tests/tabs_oracle_probe.py) + [`tabs_oracle.json`](tests/fixtures/tabs_oracle.json); native tabset/presentation tests | intentional later-navigation failure rollback; low-width/tab-count clipping, bookmark and new-window support, mailto external launch, native chrome pixel diff, real-window input sequence |
+| Browser / window | app/window/tab/chrome → `src/browser.c`, `src/session.c`, `src/tabset.c`, `src/presentation.c`, `src/main.c` | page, threads, libcurl multi, Cairo, SDL3 | VALIDATING | verification record: [`ACCEPTANCE.md`](ACCEPTANCE.md); Python tabs oracle: [`tabs_oracle_probe.py`](tests/tabs_oracle_probe.py) + [`tabs_oracle.json`](tests/fixtures/tabs_oracle.json); native tabset/presentation tests; 25-tab real-window capture | intentional later-navigation failure rollback; extreme-narrow tab readability, bookmark and new-window support, mailto external launch, full native chrome pixel diff, real-window keyboard sequence |
 
 ## Disclosure map
 

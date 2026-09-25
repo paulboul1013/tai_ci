@@ -433,6 +433,66 @@ static void tab_label(size_t index, size_t active, char *text,
     (void)snprintf(text, capacity, "Tab %zu", index);
 }
 
+/* The Python chrome lays the inline links out after styling the active label.
+ * Keep the link origin and its hit region in the same flow. */
+static double tab_link_width(size_t index, size_t active) {
+  size_t digits = 1;
+  for (size_t n = index; n >= 10; n /= 10) digits++;
+  return (index == active ? 42.0 : 29.0) + 8.0 * (double)digits;
+}
+
+static double tab_link_left(const TaiTabSetView *view, size_t index) {
+  double left = 34.0;
+  for (size_t previous = 0; previous < index; previous++)
+    left += tab_link_width(previous, view->active_index) + 4.0;
+  return left;
+}
+
+static bool compact_tab_slot(const TaiTabSetView *view, int width,
+                             double *slot_width) {
+  if (view->tab_count < 3 || width <= 34) return false;
+  size_t last = view->tab_count - 1;
+  double natural_right = tab_link_left(view, last) +
+                         tab_link_width(last, view->active_index);
+  if (natural_right <= (double)width) return false;
+  *slot_width = ((double)width - 34.0) / (double)view->tab_count;
+  return true;
+}
+
+static void draw_compact_tabs(cairo_t *context, const TaiTabSetView *view,
+                              double slot_width) {
+  for (size_t index = 0; index < view->tab_count; index++) {
+    double left = 34.0 + slot_width * (double)index;
+    bool active = index == view->active_index;
+    set_source(context, active ? 0.97 : 0.86,
+                        active ? 0.97 : 0.86,
+                        active ? 0.97 : 0.86);
+    cairo_rectangle(context, left, 6.0, slot_width, 24.0);
+    cairo_fill_preserve(context);
+    set_source(context, 0.50, 0.50, 0.50);
+    cairo_set_line_width(context, 1.0);
+    cairo_stroke(context);
+    if (slot_width < 12.0) continue;
+    char label[32];
+    (void)snprintf(label, sizeof(label), "%zu", index);
+    cairo_select_font_face(context, "Times New Roman", CAIRO_FONT_SLANT_NORMAL,
+                           active ? CAIRO_FONT_WEIGHT_BOLD
+                                  : CAIRO_FONT_WEIGHT_NORMAL);
+    cairo_set_font_size(context, slot_width < 24.0 ? 12.0 : 14.0);
+    cairo_text_extents_t extents;
+    cairo_text_extents(context, label, &extents);
+    cairo_save(context);
+    cairo_rectangle(context, left + 1.0, 7.0, slot_width - 2.0, 22.0);
+    cairo_clip(context);
+    if (active) set_source(context, 0.0, 0.0, 0.0);
+    else set_source(context, 0.0, 0.0, 0.75);
+    cairo_move_to(context, left + (slot_width - extents.x_advance) / 2.0,
+                  23.0);
+    cairo_show_text(context, label);
+    cairo_restore(context);
+  }
+}
+
 static bool render_tabs_chrome_texture(SDL_Renderer *renderer,
                                       SDL_Texture **texture,
                                       const TaiTabSetView *view, int width,
@@ -457,13 +517,17 @@ static bool render_tabs_chrome_texture(SDL_Renderer *renderer,
 
   /* The oracle's first chrome row places a 30x24 New Tab button at (0, 6),
    * followed by links beginning at x=34. */
-  set_source(context, 0.90, 0.90, 0.90);
+  set_source(context, view->tab_count >= TAI_MAX_TABS ? 0.83 : 0.90,
+                      view->tab_count >= TAI_MAX_TABS ? 0.83 : 0.90,
+                      view->tab_count >= TAI_MAX_TABS ? 0.83 : 0.90);
   cairo_rectangle(context, 0.0, 6.0, 30.0, 24.0);
   cairo_fill_preserve(context);
   set_source(context, 0.45, 0.45, 0.45);
   cairo_set_line_width(context, 1.0);
   cairo_stroke(context);
-  set_source(context, 0.12, 0.12, 0.12);
+  set_source(context, view->tab_count >= TAI_MAX_TABS ? 0.50 : 0.12,
+                      view->tab_count >= TAI_MAX_TABS ? 0.50 : 0.12,
+                      view->tab_count >= TAI_MAX_TABS ? 0.50 : 0.12);
   cairo_set_line_width(context, 1.8);
   cairo_move_to(context, 15.0, 12.0);
   cairo_line_to(context, 15.0, 24.0);
@@ -471,42 +535,47 @@ static bool render_tabs_chrome_texture(SDL_Renderer *renderer,
   cairo_line_to(context, 21.0, 18.0);
   cairo_stroke(context);
 
-  for (size_t index = 0; index < view->tab_count; index++) {
-    char label[64];
-    tab_label(index, view->active_index, label, sizeof(label));
-    cairo_select_font_face(context, "serif", CAIRO_FONT_SLANT_NORMAL,
-        index == view->active_index ? CAIRO_FONT_WEIGHT_BOLD
-                                    : CAIRO_FONT_WEIGHT_NORMAL);
-    cairo_set_font_size(context, 16.0);
-    cairo_text_extents_t extents;
-    cairo_text_extents(context, label, &extents);
-    if (width < 128 && index > 0) {
-      const char *space = strchr(label, ' ');
-      if (space) {
-        char first[64], second[64];
-        size_t first_length = (size_t)(space - label);
-        memcpy(first, label, first_length);
-        first[first_length] = '\0';
-        (void)snprintf(second, sizeof(second), "%s", space + 1);
-        if (index == view->active_index) set_source(context, 0.0, 0.0, 0.0);
-        else set_source(context, 0.0, 0.0, 0.75);
-        cairo_move_to(context, 75.0, 32.0);
-        cairo_show_text(context, first);
-        cairo_move_to(context, 0.0, 52.0);
-        cairo_show_text(context, second);
-        continue;
+  double compact_slot_width = 0.0;
+  if (compact_tab_slot(view, width, &compact_slot_width)) {
+    draw_compact_tabs(context, view, compact_slot_width);
+  } else {
+    for (size_t index = 0; index < view->tab_count; index++) {
+      char label[64];
+      tab_label(index, view->active_index, label, sizeof(label));
+      cairo_select_font_face(context, "Times New Roman", CAIRO_FONT_SLANT_NORMAL,
+          index == view->active_index ? CAIRO_FONT_WEIGHT_BOLD
+                                      : CAIRO_FONT_WEIGHT_NORMAL);
+      cairo_set_font_size(context, 16.0);
+      cairo_text_extents_t extents;
+      cairo_text_extents(context, label, &extents);
+      if (width < 128 && index > 0) {
+        const char *space = strchr(label, ' ');
+        if (space) {
+          char first[64], second[64];
+          size_t first_length = (size_t)(space - label);
+          memcpy(first, label, first_length);
+          first[first_length] = '\0';
+          (void)snprintf(second, sizeof(second), "%s", space + 1);
+          if (index == view->active_index) set_source(context, 0.0, 0.0, 0.0);
+          else set_source(context, 0.0, 0.0, 0.75);
+          cairo_move_to(context, tab_link_left(view, index), 32.0);
+          cairo_show_text(context, first);
+          cairo_move_to(context, 0.0, 52.0);
+          cairo_show_text(context, second);
+          continue;
+        }
       }
+      double tab_x = tab_link_left(view, index);
+      double tab_baseline = 32.0;
+      if (tab_x + extents.x_advance > width) {
+        tab_x = 0.0;
+        tab_baseline = 52.0;
+      }
+      if (index == view->active_index) set_source(context, 0.0, 0.0, 0.0);
+      else set_source(context, 0.0, 0.0, 0.75);
+      cairo_move_to(context, tab_x, tab_baseline);
+      cairo_show_text(context, label);
     }
-    double tab_x = index == 0 ? 34.0 : 75.0 + (index - 1) * 54.0;
-    double tab_baseline = 32.0;
-    if (tab_x + extents.x_advance > width) {
-      tab_x = 0.0;
-      tab_baseline = 52.0;
-    }
-    if (index == view->active_index) set_source(context, 0.0, 0.0, 0.0);
-    else set_source(context, 0.0, 0.0, 0.75);
-    cairo_move_to(context, tab_x, tab_baseline);
-    cairo_show_text(context, label);
   }
 
   draw_button(context, 0.0, 36.0, 45.0, 24.0,
@@ -852,9 +921,16 @@ static bool handle_chrome_click(TaiPage **page_slot, SDL_Event const *event,
 
 static bool tabs_tab_link_hit(const TaiTabSetView *view, int width,
                               double x, double y, size_t *index) {
+  double compact_slot_width = 0.0;
+  if (compact_tab_slot(view, width, &compact_slot_width)) {
+    if (x < 34.0 || x >= (double)width || y < 6.0 || y >= 30.0)
+      return false;
+    *index = (size_t)((x - 34.0) / compact_slot_width);
+    return *index < view->tab_count;
+  }
   for (size_t tab = 0; tab < view->tab_count; tab++) {
-    double left = tab == 0 ? 34.0 : 75.0 + (tab - 1) * 54.0;
-    double right = left + (tab == 0 ? 37.0 : 50.0);
+    double left = tab_link_left(view, tab);
+    double right = left + tab_link_width(tab, view->active_index);
     double top = 19.0, bottom = 35.0;
     if (width < 128 && tab > 0) {
       left = 0.0;
@@ -891,6 +967,10 @@ static bool handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
     set_error(error, "active tab snapshot unavailable");
     return false;
   }
+  double x = event->button.x, y = event->button.y;
+  if (view.tab_count >= TAI_MAX_TABS &&
+      x >= 0.0 && x < 30.0 && y >= 6.0 && y < 30.0)
+    return true;
   bool was_focused = editor->focused;
   bool was_dirty = editor->dirty;
   editor->focused = false;
@@ -901,7 +981,6 @@ static bool handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
   }
   *page_changed = blurred;
 
-  double x = event->button.x, y = event->button.y;
   if (x >= 0.0 && x < 30.0 && y >= 6.0 && y < 30.0) {
     if (!tai_tabset_new_tab(tabs, error)) return false;
     editor_discard(editor);

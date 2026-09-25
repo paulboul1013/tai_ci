@@ -5,6 +5,8 @@
 
 typedef struct TaiTabSet TaiTabSet;
 
+enum { TAI_MAX_TABS = 25 };
+
 /* Borrowed snapshot. page and url remain valid until the next tab-set mutation
  * or tai_tabset_pump(). page is NULL while the active tab has no committed
  * document; url then names its pending navigation when one exists. */
@@ -42,7 +44,8 @@ bool tai_tabset_start(TaiTabSet *tabs, const char *url, double width,
  * cancels and joins the loader, then releases sessions and queued completions. */
 void tai_tabset_destroy(TaiTabSet *tabs);
 
-/* New Tab creates and selects the default-home tab before its load completes. */
+/* New Tab creates and selects the default-home tab before its load completes.
+ * Returns false with an error once TAI_MAX_TABS tabs are open. */
 bool tai_tabset_new_tab(TaiTabSet *tabs, char **error);
 bool tai_tabset_select(TaiTabSet *tabs, size_t index);
 /* Copies the intent's URL/body and targets the active tab at call time. */

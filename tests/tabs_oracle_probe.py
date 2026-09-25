@@ -389,6 +389,10 @@ def run_probe():
             tab_anchor_info(browser, chrome, index)["style"]
             for index in range(2)
         ]
+        active_first_rects = [
+            tab_anchor_info(browser, chrome, index)["rect"]
+            for index in range(2)
+        ]
         second_anchor = tab_anchor_info(browser, chrome, 1)
         with contextlib.redirect_stdout(io.StringIO()):
             chrome.click(*second_anchor["center"])
@@ -521,6 +525,7 @@ def run_probe():
             },
             "switching": {
                 "active_styles_after_select": active_styles,
+                "active_first_rects": active_first_rects,
                 "active_index_after_switch_back": active_index_after_switch_back,
                 "draft_after_new_tab": draft_after_new_tab,
                 "draft_after_tab_switch": draft_after_tab_switch,

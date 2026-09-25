@@ -23,12 +23,23 @@ Forward 控制項在寬度 ≥94px 時位於 (49,36)，低於 94px 時位於 (0,
 Tabbed `--window` 的 tab Chrome bottom/address y 在寬度 ≥232px 時為 74.82/49.072；120px
 窄寬探針得到 138.48/119.212。800px 寬、兩個 tabs 時，New Tab button rect 為
 `[0,6,30,30]`，Tab 0 link text 為 `[34,19.072,71,35.072]`，Tab 1 為
-`[75,19.184,125,35.184]`。120px 寬、兩個 tabs 時，link rectangles 為
+`[75,19.184,125,35.184]`（Tab 1 作用中）。切到 Tab 0 後，粗體標籤擴大，兩個 link rect
+分別為 `[34,19.184,84,35.184]` 與 `[88,19.072,125,35.072]`；Tab 1 的起點隨前一個
+標籤寬度移動，`x=75` 仍命中 Tab 0。120px 寬、兩個 tabs 時，link rectangles 為
 `[34,19.072,71,35.072]` 和 `[0,19.184,108,55.184]`。Chrome fixture 固定左界命中、右界
 不命中；active link 標示為粗體黑字，其他 tab 為藍字。New Tab 建立並選取
 `https://browser.engineering/`；New Tab 與有效 Tab N 選取都清除 dirty address draft。
 完整 oracle 結果在 [`tabs_oracle.json`](../tests/fixtures/tabs_oracle.json)，可用
 `python3 tests/tabs_oracle_probe.py --check` 重跑。
+
+使用者指定 native 同時最多 25 個 tabs。至少三個 tabs 且自然文字列超出實體像素寬時，
+Chrome 轉成從 x=34 到右緣的等寬 tab 方框；每格寬 `(pixel_width - 34) / tab_count`，
+命中區使用同一格的半開 x 範圍與 `[6,30)` y 範圍。方框只顯示 tab 編號，作用中格為
+淺底粗體黑字，其他格為藍字。800px 寬、25 個 tabs 時格寬 30.64px，Tab 24 的
+命中區為 `[769.36,800)×[6,30)`。第 25 個 tab 建立後 New Tab 按鈕變灰且點擊
+不增加 tab，也不清除地址草稿或焦點；TabSet API 再建立會回傳明確的上限錯誤。兩個 tabs 的 Python oracle 幾何
+維持上述契約；等寬壓縮與 25 個上限是使用者指定的 native 差異，見
+[`PORTING_PLAN.md`](../PORTING_PLAN.md)。極窄視窗可能無法讀出每個編號，仍列為可用性缺口。
 
 Tabbed page viewport 高度使用 `max(1, window_height - tabs_chrome_bottom(width))`；800×600
 外框因此為 800×525.18，raster height 向上取整為 526px，page 從 y=74.82 開始。Page layout、

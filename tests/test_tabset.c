@@ -541,6 +541,30 @@ static void destroy_pending_scenario(const char *base) {
   fflush(stdout);
 }
 
+static void tab_limit_scenario(void) {
+  char *error = NULL;
+  TaiTabSet *tabs = tai_tabset_create_with_home_url(
+      default_css, false, "data:text/html,<p>home</p>", &error);
+  CHECK(tabs && error == NULL);
+  CHECK(tai_tabset_start(tabs, "data:text/html,<p>initial</p>",
+                         800.0, 525.0, &error));
+  CHECK(error == NULL);
+  for (size_t index = 1; index < 25; index++) {
+    CHECK(tai_tabset_new_tab(tabs, &error));
+    CHECK(error == NULL);
+    TaiTabSetView view = read_view(tabs);
+    CHECK(view.tab_count == index + 1 && view.active_index == index);
+  }
+  CHECK(!tai_tabset_new_tab(tabs, &error));
+  CHECK(error && strstr(error, "25"));
+  free(error);
+  TaiTabSetView view = read_view(tabs);
+  CHECK(view.tab_count == 25 && view.active_index == 24);
+  CHECK(tai_tabset_select(tabs, 0));
+  CHECK(tai_tabset_select(tabs, 24));
+  tai_tabset_destroy(tabs);
+}
+
 int main(int argc, char **argv) {
   CHECK(argc == 2);
   char base[256];
@@ -550,6 +574,7 @@ int main(int argc, char **argv) {
   new_tab_failure_scenario(base);
   history_failure_scenarios(base);
   destroy_pending_scenario(base);
+  tab_limit_scenario();
   puts("tab-set integration passed: pending routing, CSS, failures, history, "
        "resize/scroll isolation, and destroy cancellation");
   return EXIT_SUCCESS;

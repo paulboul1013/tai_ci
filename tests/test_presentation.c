@@ -644,6 +644,7 @@ int main(void) {
       INPUT_TABS_SECOND, INPUT_TABS_ADDRESS, INPUT_RETURN,
       INPUT_TABS_NEW_TAB, INPUT_TABS_NEW_TAB, INPUT_TABS_FIRST,
       INPUT_TABS_SECOND, INPUT_TABS_SECOND, INPUT_TABS_FIRST,
+      INPUT_TABS_FIRST, INPUT_TABS_SECOND,
   };
   static const SDL_FPoint tab_clicks[] = {
       {200.0f, 56.0f}, {0.0f, 0.0f}, {0.0f, 18.0f},
@@ -652,6 +653,7 @@ int main(void) {
       {75.0f, 27.0f}, {200.0f, 56.0f}, {0.0f, 0.0f},
       {15.0f, 18.0f}, {30.0f, 18.0f}, {34.0f, 27.0f},
       {125.0f, 27.0f}, {75.0f, 27.0f}, {71.0f, 27.0f},
+      {34.0f, 27.0f}, {75.0f, 27.0f},
   };
   InputEvents tab_events = {
       .kinds = tab_inputs,
@@ -674,13 +676,85 @@ int main(void) {
   assert(!error && input_injected && input_events_queued);
   TaiTabSetView tab_view;
   assert(tai_tabset_view(tabs, &tab_view));
-  assert(tab_view.tab_count == 3 && tab_view.active_index == 1 &&
-         !strcmp(tab_view.url, "data:text/html,<p>home</p>"));
+  assert(tab_view.tab_count == 3 && tab_view.active_index == 0 &&
+         !strcmp(tab_view.url, "data:text/html,<p>initial</p>"));
   assert(tai_tabset_select(tabs, 2));
   assert(tai_tabset_view(tabs, &tab_view));
   assert(tab_view.active_index == 2 &&
          !strcmp(tab_view.url, "data:text/html,<p>home</p>"));
   assert(tai_tabset_select(tabs, 0));
+  tai_tabset_destroy(tabs);
+
+  static const InputKind active_first_inputs[] = {
+      INPUT_TABS_NEW_TAB, INPUT_TABS_FIRST, INPUT_TABS_SECOND,
+  };
+  static const SDL_FPoint active_first_clicks[] = {
+      {15.0f, 18.0f}, {34.0f, 27.0f}, {88.0f, 27.0f},
+  };
+  InputEvents active_first_events = {
+      .kinds = active_first_inputs,
+      .count = sizeof(active_first_inputs) / sizeof(active_first_inputs[0]),
+      .click_positions = active_first_clicks,
+  };
+  tabs = tai_tabset_create_with_home_url(
+      "html {display:block} body {display:block} p {display:block}", false,
+      "data:text/html,<p>home</p>", &error);
+  assert(tabs && !error);
+  input_injected = false;
+  input_events_queued = false;
+  SDL_SetEventFilter(inject_input, &active_first_events);
+  assert(pthread_create(&thread, NULL, request_quit, NULL) == 0);
+  assert(tai_present_window_with_tabs(tabs,
+      "data:text/html,<p>initial</p>", 300, 100, &error));
+  assert(pthread_join(thread, NULL) == 0);
+  assert(!error && input_injected && input_events_queued);
+  assert(tai_tabset_view(tabs, &tab_view));
+  assert(tab_view.tab_count == 2 && tab_view.active_index == 1);
+  tai_tabset_destroy(tabs);
+
+  InputKind compact_inputs[96];
+  SDL_FPoint compact_clicks[96];
+  for (size_t index = 0; index < 25; index++) {
+    compact_inputs[index] = INPUT_TABS_NEW_TAB;
+    compact_clicks[index] = (SDL_FPoint){15.0f, 18.0f};
+  }
+  compact_inputs[25] = INPUT_TABS_FIRST;
+  compact_clicks[25] = (SDL_FPoint){49.0f, 18.0f};
+  compact_inputs[26] = INPUT_TABS_SECOND;
+  compact_clicks[26] = (SDL_FPoint){784.0f, 18.0f};
+  size_t compact_count = 27;
+  compact_inputs[compact_count] = INPUT_TABS_ADDRESS;
+  compact_clicks[compact_count++] = (SDL_FPoint){780.0f, 56.0f};
+  for (size_t index = 0; index < 64; index++)
+    compact_inputs[compact_count++] = INPUT_BACKSPACE;
+  compact_inputs[compact_count++] = INPUT_TABS_URL_TEXT;
+  compact_inputs[compact_count] = INPUT_TABS_NEW_TAB;
+  compact_clicks[compact_count++] = (SDL_FPoint){15.0f, 18.0f};
+  compact_inputs[compact_count++] = INPUT_RETURN;
+  compact_inputs[compact_count] = INPUT_TABS_SECOND;
+  compact_clicks[compact_count++] = (SDL_FPoint){417.0f, 18.0f};
+  InputEvents compact_events = {
+      .kinds = compact_inputs,
+      .count = compact_count,
+      .click_positions = compact_clicks,
+  };
+  tabs = tai_tabset_create_with_home_url(
+      "html {display:block} body {display:block} p {display:block}", false,
+      "data:text/html,<p>home</p>", &error);
+  assert(tabs && !error);
+  input_injected = false;
+  input_events_queued = false;
+  SDL_SetEventFilter(inject_input, &compact_events);
+  assert(pthread_create(&thread, NULL, request_quit, NULL) == 0);
+  assert(tai_present_window_with_tabs(tabs,
+      "data:text/html,<p>initial</p>", 800, 100, &error));
+  assert(pthread_join(thread, NULL) == 0);
+  assert(!error && input_injected && input_events_queued);
+  assert(tai_tabset_view(tabs, &tab_view));
+  assert(tab_view.tab_count == 25 && tab_view.active_index == 12);
+  assert(tai_tabset_select(tabs, 24));
+  assert(tai_tabset_view(tabs, &tab_view));
+  assert(!strcmp(tab_view.url, "data:text/html,<p>draft</p>"));
   tai_tabset_destroy(tabs);
 
   tai_page_destroy(click_page);

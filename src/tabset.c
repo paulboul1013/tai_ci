@@ -411,6 +411,8 @@ TaiTabSet *tai_tabset_create(const char *default_css, bool rtl, char **error) {
 
 static bool append_new_slot(TaiTabSet *tabs, const char *url,
                             char **error) {
+    if (tabs->count >= TAI_MAX_TABS)
+        return set_error(error, "maximum of 25 tabs reached");
     if (!reserve_slot(tabs, error)) return false;
     TaiSession *session = tai_session_create_empty(tabs->default_css,
                                                    tabs->rtl);
