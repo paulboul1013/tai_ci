@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -188,6 +189,73 @@ static void *request_quit(void *unused) {
   return NULL;
 }
 
+typedef struct {
+  bool injected;
+  bool queued;
+  int logical_width, logical_height;
+  int pixel_width, pixel_height;
+} HidpiProbe;
+
+static bool inject_hidpi_clicks(void *opaque, SDL_Event *event) {
+  HidpiProbe *probe = opaque;
+  if (event->type != SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || probe->injected)
+    return true;
+  SDL_Window *window = SDL_GetWindowFromID(event->window.windowID);
+  if (!window) return true;
+  probe->injected = true;
+  if (!SDL_GetWindowSize(window, &probe->logical_width, &probe->logical_height) ||
+      !SDL_GetWindowSizeInPixels(window, &probe->pixel_width,
+                                 &probe->pixel_height))
+    return false;
+  const SDL_FPoint logical_clicks[] = {
+      {7.5f, 9.0f},  /* Physical (15,18): New Tab. */
+      {20.0f, 13.0f}, /* Physical (40,26): first tab, not New Tab. */
+  };
+  for (size_t index = 0; index < sizeof(logical_clicks) / sizeof(logical_clicks[0]);
+       index++) {
+    SDL_Event click = {.button = {
+        .type = SDL_EVENT_MOUSE_BUTTON_DOWN,
+        .windowID = event->window.windowID,
+        .button = SDL_BUTTON_LEFT,
+        .down = true,
+        .x = logical_clicks[index].x,
+        .y = logical_clicks[index].y,
+    }};
+    if (!SDL_PushEvent(&click)) return false;
+  }
+  SDL_Event quit = {.type = SDL_EVENT_QUIT};
+  probe->queued = SDL_PushEvent(&quit);
+  return false;
+}
+
+static int run_hidpi_probe(void) {
+  char *error = NULL;
+  TaiTabSet *tabs = tai_tabset_create_with_home_url(
+      "html {display:block} body {display:block} p {display:block}", false,
+      "data:text/html,<p>home</p>", &error);
+  assert(tabs && !error);
+  HidpiProbe probe = {0};
+  SDL_SetEventFilter(inject_hidpi_clicks, &probe);
+  bool presented = tai_present_window_with_tabs(
+      tabs, "data:text/html,<p>initial</p>", 300, 100, &error);
+  TaiTabSetView view = {0};
+  bool viewed = tai_tabset_view(tabs, &view);
+  fprintf(stderr, "hidpi probe: logical=%dx%d physical=%dx%d "
+                  "injected=%d queued=%d presented=%d tabs=%zu active=%zu error=%s\n",
+          probe.logical_width, probe.logical_height,
+          probe.pixel_width, probe.pixel_height,
+          probe.injected, probe.queued, presented,
+          viewed ? view.tab_count : 0, viewed ? view.active_index : 0,
+          error ? error : "none");
+  assert(presented && !error && probe.injected && probe.queued && viewed);
+  assert(probe.logical_width > 0 && probe.logical_height > 0);
+  assert(probe.pixel_width > probe.logical_width &&
+         probe.pixel_height > probe.logical_height);
+  assert(view.tab_count == 2 && view.active_index == 0);
+  tai_tabset_destroy(tabs);
+  return 0;
+}
+
 static TaiNode *find(TaiNode *node, const char *tag) {
   if (node->kind == TAI_ELEMENT && !strcmp(node->tag, tag)) return node;
   for (size_t index = 0; index < node->child_count; index++) {
@@ -231,6 +299,8 @@ static bool replace_page(void *opaque, TaiPage **current_page,
 }
 
 int main(void) {
+  const char *hidpi_probe = getenv("TAI_PRESENTATION_HIDPI_PROBE");
+  if (hidpi_probe && !strcmp(hidpi_probe, "1")) return run_hidpi_probe();
   TaiScrollbarRect bar = {0};
   assert(!tai_scrollbar_geometry(100, 100, 0, 0, &bar));
   assert(tai_scrollbar_geometry(100, 100, 0, 300, &bar));
@@ -246,6 +316,23 @@ int main(void) {
   assert(!tai_scrollbar_geometry(100, 100, NAN, 300, &bar));
   assert(!tai_scrollbar_geometry(100, 100, 0, INFINITY, &bar));
   assert(!tai_scrollbar_geometry(0, 100, 0, 300, &bar));
+  /* SDL mouse events use window-logical coordinates, while this renderer
+   * draws and hit-tests in physical pixels. A 2x window maps both axes. */
+  double pixel_x = -1.0, pixel_y = -1.0;
+  assert(tai_presentation_pointer_to_pixels(14.25, 20.5, 300, 100,
+                                            600, 200, &pixel_x, &pixel_y));
+  assert(pixel_x == 28.5 && pixel_y == 41.0);
+  assert(tai_presentation_pointer_to_pixels(14.25, 20.5, 300, 100,
+                                            300, 100, &pixel_x, &pixel_y));
+  assert(pixel_x == 14.25 && pixel_y == 20.5);
+  assert(!tai_presentation_pointer_to_pixels(NAN, 20.5, 300, 100,
+                                             600, 200, &pixel_x, &pixel_y));
+  assert(!tai_presentation_pointer_to_pixels(14.25, INFINITY, 300, 100,
+                                             600, 200, &pixel_x, &pixel_y));
+  assert(!tai_presentation_pointer_to_pixels(14.25, 20.5, 0, 100,
+                                             600, 200, &pixel_x, &pixel_y));
+  assert(!tai_presentation_pointer_to_pixels(14.25, 20.5, 300, 100,
+                                             600, 0, &pixel_x, &pixel_y));
   char *error = NULL;
   assert(!tai_present_window(NULL, 800, 532, &error));
   assert(error);
@@ -700,12 +787,49 @@ int main(void) {
       "html {display:block} body {display:block} p {display:block}", false,
       "data:text/html,<p>home</p>", &error);
   assert(tabs && !error);
+  assert(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
+  assert(SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software"));
   input_injected = false;
   input_events_queued = false;
   SDL_SetEventFilter(inject_input, &active_first_events);
   assert(pthread_create(&thread, NULL, request_quit, NULL) == 0);
+  bool active_first_presented = tai_present_window_with_tabs(tabs,
+      "data:text/html,<p>initial</p>", 300, 100, &error);
+  if (!active_first_presented)
+    fprintf(stderr, "active-first presentation failed: %s\n",
+            error ? error : "unknown error");
+  assert(active_first_presented);
+  assert(pthread_join(thread, NULL) == 0);
+  assert(!error && input_injected && input_events_queued);
+  assert(tai_tabset_view(tabs, &tab_view));
+  assert(tab_view.tab_count == 2 && tab_view.active_index == 1);
+  tai_tabset_destroy(tabs);
+
+  /* Frozen 120px Python chrome keeps the wrapped, inactive Tab 1 link
+   * clickable through x=113 while its second line remains above toolbar. */
+  static const InputKind narrow_tab_inputs[] = {
+      INPUT_TABS_NEW_TAB, INPUT_TABS_FIRST, INPUT_TABS_SECOND,
+  };
+  static const SDL_FPoint narrow_tab_clicks[] = {
+      {15.0f, 18.0f}, {34.0f, 27.0f}, {110.0f, 45.0f},
+  };
+  InputEvents narrow_tab_events = {
+      .kinds = narrow_tab_inputs,
+      .count = sizeof(narrow_tab_inputs) / sizeof(narrow_tab_inputs[0]),
+      .click_positions = narrow_tab_clicks,
+  };
+  tabs = tai_tabset_create_with_home_url(
+      "html {display:block} body {display:block} p {display:block}", false,
+      "data:text/html,<p>home</p>", &error);
+  assert(tabs && !error);
+  assert(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
+  assert(SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software"));
+  input_injected = false;
+  input_events_queued = false;
+  SDL_SetEventFilter(inject_input, &narrow_tab_events);
+  assert(pthread_create(&thread, NULL, request_quit, NULL) == 0);
   assert(tai_present_window_with_tabs(tabs,
-      "data:text/html,<p>initial</p>", 300, 100, &error));
+      "data:text/html,<p>initial</p>", 120, 200, &error));
   assert(pthread_join(thread, NULL) == 0);
   assert(!error && input_injected && input_events_queued);
   assert(tai_tabset_view(tabs, &tab_view));
@@ -742,6 +866,8 @@ int main(void) {
       "html {display:block} body {display:block} p {display:block}", false,
       "data:text/html,<p>home</p>", &error);
   assert(tabs && !error);
+  assert(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
+  assert(SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software"));
   input_injected = false;
   input_events_queued = false;
   SDL_SetEventFilter(inject_input, &compact_events);

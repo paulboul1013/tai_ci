@@ -51,7 +51,19 @@
         100.0,
         135.212
       ],
+      "back_rect": [
+        0.0,
+        62.48,
+        45.0,
+        86.48
+      ],
       "chrome_bottom": 138.48,
+      "forward_rect": [
+        49.0,
+        62.48,
+        94.0,
+        86.48
+      ],
       "tab_row_rects": [
         [
           34.0,
@@ -68,7 +80,25 @@
       ]
     },
     "wide": {
+      "address_rect": [
+        132.0,
+        55.552,
+        782.0,
+        71.552
+      ],
+      "back_rect": [
+        0.0,
+        42.48,
+        45.0,
+        66.48
+      ],
       "chrome_bottom": 74.82,
+      "forward_rect": [
+        49.0,
+        42.48,
+        94.0,
+        66.48
+      ],
       "new_tab_hit_boundary": {
         "left": "button:new-tab",
         "right": null

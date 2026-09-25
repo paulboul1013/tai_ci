@@ -53,7 +53,10 @@ private, incompatible node layouts.
   and viewport values above the retained texture. The overlay owns no resource
   and never mutates the display list or Cairo pixels; expose recomposes it.
   The window adapter also accepts pointer, key, and text events only for its
-  own SDL window ID. SDL text input runs only while that window is focused and
+  own SDL window ID. It converts finite button coordinates from SDL window
+  units to physical pixels once before chrome/tab/page routing, using the
+  window's measured logical and pixel sizes. Invalid conversion is an ignored
+  click. SDL text input runs only while that window is focused and
   the current page has an active text/password control; focus loss and adapter
   cleanup stop it. Backspace, left/right, and Return go through the focused
   page-control seam, while PageUp/PageDown and up/down retain page-scroll

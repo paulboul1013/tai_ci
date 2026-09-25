@@ -333,6 +333,11 @@ def run_probe():
             (new_rect[1] + new_rect[3]) / 2,
         ]
         wide_tabs = [tab_anchor_info(browser, chrome, index) for index in range(2)]
+        wide_back = layout_rect(chrome.find_button_layout("back"))
+        wide_forward = layout_rect(chrome.find_button_layout("forward"))
+        wide_address = layout_rect(
+            chrome.find_address_layout(chrome.find_address_node())
+        )
         new_tab_boundary = {
             "left": target_at(browser, chrome, new_rect[0], new_center[1]),
             "right": target_at(browser, chrome, new_rect[2], new_center[1]),
@@ -410,6 +415,8 @@ def run_probe():
         narrow_geometry = {
             "chrome_bottom": round(float(chrome.bottom), 3),
             "tab_row_rects": [item["rect"] for item in narrow_tabs],
+            "back_rect": layout_rect(chrome.find_button_layout("back")),
+            "forward_rect": layout_rect(chrome.find_button_layout("forward")),
             "address_rect": layout_rect(
                 chrome.find_address_layout(chrome.find_address_node())
             ),
@@ -515,6 +522,9 @@ def run_probe():
                     "chrome_bottom": round(float(chrome.bottom), 3),
                     "new_tab_rect": new_rect,
                     "tab_rects": [item["rect"] for item in wide_tabs],
+                    "back_rect": wide_back,
+                    "forward_rect": wide_forward,
+                    "address_rect": wide_address,
                     "new_tab_hit_boundary": new_tab_boundary,
                     "tab_hit_boundary": tab_boundary,
                 },

@@ -3,6 +3,7 @@
 #include "presentation_geometry.h"
 #include <SDL3/SDL.h>
 #include <cairo.h>
+#include <float.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -29,13 +30,56 @@ static bool valid_pixel_dimensions(int width, int height) {
          (int64_t)width * height <= 25000000;
 }
 
+bool tai_presentation_pointer_to_pixels(double logical_x, double logical_y,
+                                        int logical_width, int logical_height,
+                                        int pixel_width, int pixel_height,
+                                        double *pixel_x, double *pixel_y) {
+  if (!pixel_x || !pixel_y || !isfinite(logical_x) || !isfinite(logical_y) ||
+      logical_width <= 0 || logical_height <= 0 ||
+      pixel_width <= 0 || pixel_height <= 0) return false;
+  double x = logical_x * ((double)pixel_width / logical_width);
+  double y = logical_y * ((double)pixel_height / logical_height);
+  if (!isfinite(x) || !isfinite(y)) return false;
+  *pixel_x = x;
+  *pixel_y = y;
+  return true;
+}
+
+/* SDL button positions are window coordinates. The page, chrome, and SDL
+ * renderer use physical pixels, so map each event once before routing it. */
+static void pointer_event_to_pixels(SDL_Window *window, SDL_WindowID window_id,
+                                    SDL_Event *event) {
+  if (event->type != SDL_EVENT_MOUSE_BUTTON_DOWN ||
+      event->button.windowID != window_id ||
+      !isfinite(event->button.x) || !isfinite(event->button.y)) return;
+  int logical_width = 0, logical_height = 0;
+  int pixel_width = 0, pixel_height = 0;
+  double x, y;
+  if (!SDL_GetWindowSize(window, &logical_width, &logical_height) ||
+      !SDL_GetWindowSizeInPixels(window, &pixel_width, &pixel_height) ||
+      !tai_presentation_pointer_to_pixels(event->button.x, event->button.y,
+          logical_width, logical_height, pixel_width, pixel_height, &x, &y) ||
+      fabs(x) > FLT_MAX || fabs(y) > FLT_MAX) {
+    event->button.x = NAN;
+    event->button.y = NAN;
+    return;
+  }
+  event->button.x = (float)x;
+  event->button.y = (float)y;
+}
+
 static double chrome_bottom(int width) {
   return width >= 232 ? 68.34 : width >= 128 ? 82.0 :
          width >= 79 ? 112.0 : 142.0;
 }
 
+static double tabs_toolbar_offset(int width) {
+  /* The second tab line wraps below 125px in the frozen Python chrome. */
+  return width >= 125 ? 6.48 : 26.48;
+}
+
 static double tabs_chrome_bottom(int width) {
-  return chrome_bottom(width) + (width >= 128 ? 6.48 : 26.48);
+  return chrome_bottom(width) + tabs_toolbar_offset(width);
 }
 
 static double address_x(int width) { return width >= 232 ? 132.0 : 0.0; }
@@ -45,13 +89,19 @@ static double address_y(int width) {
          width >= 79 ? 92.732 : 122.732;
 }
 static double tabs_address_y(int width) {
-  return address_y(width) + (width >= 128 ? 0.0 : 26.48);
+  return address_y(width) + tabs_toolbar_offset(width);
 }
 static double address_width(int width) {
   return width >= 232 ? fmax(100.0, width - 150.0) : 100.0;
 }
 static double forward_button_x(int width) { return width >= 94 ? 49.0 : 0.0; }
 static double forward_button_y(int width) { return width >= 94 ? 36.0 : 66.0; }
+static double tabs_back_button_y(int width) {
+  return 36.0 + tabs_toolbar_offset(width);
+}
+static double tabs_forward_button_y(int width) {
+  return forward_button_y(width) + tabs_toolbar_offset(width);
+}
 
 static double content_height(int width, int height, bool chrome_enabled) {
   return chrome_enabled ? fmax(1.0, (double)height - chrome_bottom(width))
@@ -503,7 +553,7 @@ static bool render_tabs_chrome_texture(SDL_Renderer *renderer,
   double field_y = tabs_address_y(width);
   double field_width = address_width(width);
   double forward_x = forward_button_x(width);
-  double forward_y = forward_button_y(width);
+  double forward_y = tabs_forward_button_y(width);
   int height = (int)ceil(bottom);
   if (!valid_pixel_dimensions(width, height)) {
     set_error(error, "unsupported tab chrome dimensions");
@@ -548,7 +598,7 @@ static bool render_tabs_chrome_texture(SDL_Renderer *renderer,
       cairo_set_font_size(context, 16.0);
       cairo_text_extents_t extents;
       cairo_text_extents(context, label, &extents);
-      if (width < 128 && index > 0) {
+      if (width < 125 && index > 0) {
         const char *space = strchr(label, ' ');
         if (space) {
           char first[64], second[64];
@@ -578,7 +628,7 @@ static bool render_tabs_chrome_texture(SDL_Renderer *renderer,
     }
   }
 
-  draw_button(context, 0.0, 36.0, 45.0, 24.0,
+  draw_button(context, 0.0, tabs_back_button_y(width), 45.0, 24.0,
               view->can_go_back, false);
   draw_button(context, forward_x, forward_y, 45.0, 24.0,
               view->can_go_forward, true);
@@ -932,9 +982,9 @@ static bool tabs_tab_link_hit(const TaiTabSetView *view, int width,
     double left = tab_link_left(view, tab);
     double right = left + tab_link_width(tab, view->active_index);
     double top = 19.0, bottom = 35.0;
-    if (width < 128 && tab > 0) {
+    if (width < 125 && tab > 0) {
       left = 0.0;
-      right = 108.0;
+      right = tab == view->active_index ? 108.0 : 113.0;
       top = 19.0;
       bottom = 55.0;
     } else if (right > width) {
@@ -1014,9 +1064,10 @@ static bool handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
     return true;
   }
 
-  bool back_hit = x >= 0.0 && x < 45.0 && y >= 36.0 && y < 60.0;
+  double back_y = tabs_back_button_y(width);
+  bool back_hit = x >= 0.0 && x < 45.0 && y >= back_y && y < back_y + 24.0;
   double forward_x = forward_button_x(width);
-  double forward_y = forward_button_y(width);
+  double forward_y = tabs_forward_button_y(width);
   bool forward_hit = x >= forward_x && x < forward_x + 45.0 &&
       y >= forward_y && y < forward_y + 24.0;
   editor_discard(editor);
@@ -1160,7 +1211,7 @@ static bool present_window_internal(
     return false;
   }
   SDL_Window *window = SDL_CreateWindow("Tai Gar", width, height,
-                                         SDL_WINDOW_RESIZABLE);
+      SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   SDL_Renderer *renderer = window ? SDL_CreateRenderer(window, NULL) : NULL;
   SDL_Texture *page_texture = NULL;
   SDL_Texture *chrome_texture = NULL;
@@ -1206,6 +1257,7 @@ static bool present_window_internal(
       ok = false;
       break;
     }
+    pointer_event_to_pixels(window, window_id, &event);
     if (event.type == SDL_EVENT_QUIT ||
         (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
          event.window.windowID == SDL_GetWindowID(window))) {
@@ -1422,7 +1474,7 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
     return false;
   }
   SDL_Window *window = SDL_CreateWindow("Tai Gar", width, height,
-                                         SDL_WINDOW_RESIZABLE);
+      SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   SDL_Renderer *renderer = window ? SDL_CreateRenderer(window, NULL) : NULL;
   SDL_Texture *page_texture = NULL;
   SDL_Texture *chrome_texture = NULL;
@@ -1466,6 +1518,7 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
     bool chrome_changed = false;
     bool force_present = false;
     if (has_event) {
+      pointer_event_to_pixels(window, window_id, &event);
       if (event.type == SDL_EVENT_QUIT ||
           (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
            event.window.windowID == window_id)) {
