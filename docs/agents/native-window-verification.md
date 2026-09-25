@@ -161,6 +161,11 @@ TEXT_INPUT per typed character, the expected request in the fixture server
 log, and `xwd -id` captures before and after. This verifies X server→SDL
 delivery; it does not verify the WSLg or Wayland compositor focus path.
 
+On WSLg, only physical keys typed by a person into the focused window
+reach SDL with its window ID. When that path must be verified, launch with
+`SDL_EVENT_LOGGING=1`, ask the user to type a scripted edit, and check the
+log, server request and capture with the same criteria.
+
 If a targeted wheel does not move the page, check the launch environment,
 window ID, overflow, and scroll clamp, then compare captures. A command that
 exits successfully without visible movement is not verification. Record which
