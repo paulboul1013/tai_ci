@@ -1,0 +1,21 @@
+From: Tai Gar maintainers
+Subject: [PATCH] Unlink JSContext from the GC list when class_proto allocation fails
+
+JS_NewContextRaw() registers the new context with add_gc_object() before
+allocating class_proto. When that allocation fails, the context is freed
+while still linked in rt->gc_obj_list, and the JS_RunGC() inside a later
+JS_FreeRuntime() reads the freed header (use-after-free).
+
+Upstream quickjs-ng df836d1 and 19dbe85 both contain the defect.
+Found by Tai's loader-thread allocation failure sweep.
+---
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -2863,6 +2863,7 @@
+     ctx->class_proto = js_malloc_rt(rt, sizeof(ctx->class_proto[0]) *
+                                     rt->class_count);
+     if (!ctx->class_proto) {
++        remove_gc_object(&ctx->header);
+         js_free_rt(rt, ctx);
+         return NULL;
+     }

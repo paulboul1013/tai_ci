@@ -30,5 +30,9 @@ Use the approved stack unless a demonstrated technical constraint requires a
 replacement. A replacement decision must document why the existing dependency
 fails, alternatives evaluated, architectural impact, and migration impact.
 
+Fix a defect inside a dependency with a tracked patch under `patches/<dependency>/`
+and a regression test, following [`patches/README.md`](../../patches/README.md);
+do not rely on edits to the untracked `deps/` checkout.
+
 New C code should compile under strict warnings. Treat warnings as defects.
 Measure non-trivial performance optimizations and preserve correctness.

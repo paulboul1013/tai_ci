@@ -39,7 +39,8 @@ tai_ci/
 | `tests/` | Executable evidence | C unit/integration tests、Python differential drivers、fixtures、reference snapshot |
 | `tests/reference/` | Frozen Python oracle | `browser.py`、`runtime.js`、CSS、manifest、reference server 與人工 scenarios |
 | `docs/` | On-demand project knowledge | historical Python analysis、topic-specific render contracts、agent rules、architecture details |
-| `deps/quickjs/` | JavaScript dependency | QuickJS-NG source integrated by CMake |
+| `patches/` | Tracked dependency fixes | configure 時套用至 `deps/` checkout 的 patches；規則見 [`patches/README.md`](patches/README.md) |
+| `deps/quickjs/` | JavaScript dependency | QuickJS-NG source integrated by CMake；套用 `patches/quickjs/` |
 | `deps/SDL/` | Window/presentation source | vendored SDL3 checkout；CMake 建置並連結靜態 SDL3 |
 | `deps/sysroot/` | Local dependency prefix | development headers and libraries such as utf8proc/cmocka |
 | `build*/` | Generated artifacts | Ninja files、CTest metadata、libraries、executables；不屬於 source of truth |
