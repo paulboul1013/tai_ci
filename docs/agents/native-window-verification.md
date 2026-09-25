@@ -49,14 +49,12 @@ capture shows page content plus a right-edge blue thumb.
 
 ### Authorization and sandbox scope
 
-The repository owner explicitly authorized all related visual and SDL
-verification on 2026-09-25 without further user confirmation. This covers
-focused builds/tests, local fixture servers, launching `Tai Gar`, scoped window
-screenshots, and targeted `xdotool` mouse, wheel, keyboard, and resize input.
-Run these validation actions directly. Resolve the current `Tai Gar` X11 ID
-after each launch; apply input and captures only to that window. Close only
-test windows started by the agent. Batch consecutive same-window actions when
-no intermediate capture is needed. Capture files belong in a temporary path
+The standing user authorization and reusable commands are in
+[`AGENTS.md`](../../AGENTS.md). Run those scoped
+validation actions directly. Resolve the current `Tai Gar` X11 ID after each
+launch; apply input and captures only to that window. Close only test windows
+started by the agent. Batch consecutive same-window actions when no
+intermediate capture is needed. Capture files belong in a temporary path
 unless the user requested a destination.
 
 Conversation authorization and sandbox execution approval are separate. If a
@@ -137,6 +135,31 @@ wheel input for real-window visual evidence. Do not change the browser to
 accept unfocused `windowID=0` keys just to satisfy desktop automation. Targeted
 keyboard injection is authorized for validation, but delivery still needs
 matching before/after evidence before it counts as verified behavior.
+
+WSLg revokes X11 focus about 1ms after `xdotool windowfocus`, so XTEST keys
+reach no SDL window there. For real X11 keyboard evidence, run the same binary
+on an isolated server without a window manager, where `XSetInputFocus` holds.
+Launch with SDL event logging so the delivered order and `windowid` are
+recorded:
+
+```bash
+Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
+DISPLAY=:99 SDL_EVENT_LOGGING=1 SDL_VIDEO_DRIVER=x11 \
+  ./build/tai-browser --window http://127.0.0.1:8765/index.html 2> /tmp/tai-xvfb-events.log
+DISPLAY=:99 xdotool search --name '^Tai Gar$'
+DISPLAY=:99 xdotool mousemove --window "$tai_window_id" 760 63 click 1
+DISPLAY=:99 xdotool key --repeat 80 --delay 5 BackSpace
+DISPLAY=:99 xdotool type --delay 30 'http://127.0.0.1:8765/second.html'
+DISPLAY=:99 xdotool key Return
+```
+
+Omit `--window` on `key`/`type` so XTEST uses the server's focus. The Python
+reference places the address cursor at the click x and ignores Ctrl+A, so
+click past the text end and clear it with BackSpace. Evidence requires
+`windowid` equal to the SDL window (not `0`) on every key and text event, one
+TEXT_INPUT per typed character, the expected request in the fixture server
+log, and `xwd -id` captures before and after. This verifies X server→SDL
+delivery; it does not verify the WSLg or Wayland compositor focus path.
 
 If a targeted wheel does not move the page, check the launch environment,
 window ID, overflow, and scroll clamp, then compare captures. A command that

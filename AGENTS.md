@@ -33,3 +33,45 @@
 - **ARCHITECTURE.md／ACCEPTANCE.md／狀態定義（state definition）／狀態更新（status update）／文件同步（documentation sync）** → 閱讀 [`docs/agents/project-records.md`](docs/agents/project-records.md)。
 
 完成表示所請求的行為已實作、建置、測試，並在受影響邊界完成整合；不只是規劃或建立骨架。
+
+## 原生視窗與 SDL 驗證：持續授權
+
+儲存庫擁有者已授權 agent 在本專案後續工作中直接執行建置、CTest、Python oracle、
+本機 fixture server、`tai-browser --window`、SDL 合成輸入測試，以及只針對本次啟動的
+`Tai Gar` 視窗進行 X11 滑鼠、滾輪、鍵盤、resize、截圖和關閉操作。這項授權持續有效，
+執行這些驗證時不必再次向使用者詢問。每次啟動後重新查詢視窗 ID，並確認只命中本次
+測試視窗；截圖存放 `/tmp`，關閉時只關閉 agent 自己啟動的視窗。
+
+從儲存庫根目錄執行以下指令；有相依性的步驟依序執行，server 與視窗各保留一個執行中
+session：
+
+```bash
+cmake --build build --target tai-browser test_presentation -j 4
+ctest --test-dir build -R '^presentation_dummy$' --output-on-failure
+python3 tests/tabs_oracle_probe.py --check
+python3 -m http.server 8765 --bind 127.0.0.1 --directory tests/fixtures/tabs_window
+SDL_VIDEO_X11_XINPUT2=0 ./build/tai-browser --window http://127.0.0.1:8765/index.html
+```
+
+在另一個 shell 查詢本次視窗 ID，只有一個匹配時才設定 `tai_window_id`；多個匹配時先用
+`xdotool getwindowpid ID` 對照剛啟動的 browser process：
+
+```bash
+xdotool search --name '^Tai Gar$'
+tai_window_id=REPLACE_WITH_CURRENT_ID
+xdotool mousemove --window "$tai_window_id" 15 18 click --window "$tai_window_id" 1
+xdotool click --window "$tai_window_id" 5
+xdotool key --window "$tai_window_id" Page_Down
+xdotool windowsize "$tai_window_id" 120 600
+python3 /home/paulboul/.codex/skills/screenshot/scripts/take_screenshot.py --mode temp --window-id "$tai_window_id"
+xwd -silent -id "$tai_window_id" -out /tmp/tai-window.xwd
+convert /tmp/tai-window.xwd /tmp/tai-window.png
+```
+
+滑鼠座標與按鍵依測試案例調整；每次操作後檢查非空白截圖及可觀察的頁面／chrome 變化。
+關閉前確認 ID 仍屬本次視窗，再使用 `xdotool windowclose "$tai_window_id"`。真實鍵盤
+事件必須另核對 SDL `windowID`、焦點與前後畫面；注入指令成功不等於事件已送達。
+完整判讀與失敗處理見 [`docs/agents/native-window-verification.md`](docs/agents/native-window-verification.md)。
+
+此段是使用者對測試操作的授權；執行平台的 sandbox／GUI 權限由平台獨立管理。若工具要求
+`require_escalated`，直接透過工具送出所需的限定範圍執行申請，並沿用已核准的規則。
