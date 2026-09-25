@@ -7,6 +7,7 @@
 #include "tai/render.h"
 
 typedef struct TaiPage TaiPage;
+typedef struct TaiPageLoad TaiPageLoad;
 typedef struct TaiNavigationIntent TaiNavigationIntent;
 typedef enum {
   TAI_PAGE_KEY_BACKSPACE,
@@ -14,6 +15,24 @@ typedef enum {
   TAI_PAGE_KEY_RIGHT,
   TAI_PAGE_KEY_RETURN
 } TaiPageKey;
+
+/* Async page construction is driven only by the TaiNetwork owner thread. The
+ * load borrows network until completion or cancellation; the network must
+ * outlive that operation.
+ * Completion transfers page and owned error to done. A non-NULL page with
+ * network_failure=true is a Python-compatible initial error document; callers
+ * may choose to commit it only when the target session has no prior page.
+ * The load handle expires immediately before completion. */
+typedef void (*TaiPageLoadDone)(void *userdata, TaiPage *page,
+                                bool network_failure, char *error);
+TaiPageLoad *tai_page_load_async(TaiNetwork *network, const TaiUrl *url,
+    const TaiUrl *referrer, const char *payload, const char *default_css,
+    double viewport_width, double viewport_height, bool rtl,
+    TaiPageLoadDone done, void *userdata, char **error);
+/* Cancels all outstanding document/subresource requests and destroys partial
+ * construction. Must run on the same thread that started the load, while the
+ * borrowed network is still alive. */
+void tai_page_load_async_cancel(TaiPageLoad *load);
 
 /* Loads a stable page state synchronously for headless use. Network ownership
  * remains with the caller. default_css is copied through the parsed stylesheet.
@@ -62,8 +81,9 @@ double tai_page_viewport_height(const TaiPage *page);
 /* Resolves a document-space display hit while the page owns its document. */
 TaiNode *tai_page_hit_test(const TaiPage *page, double x, double y,
                            TaiDisplayHit *hit);
-/* Page scroll is clamped to the document overflow. Non-finite values fail
- * without changing state. */
+/* Explicit page scroll changes clamp to document overflow. Resize preserves
+ * the existing top-level offset, which may then exceed the new maximum;
+ * non-finite explicit values fail without changing state. */
 double tai_page_scroll_y(const TaiPage *page);
 double tai_page_max_scroll_y(const TaiPage *page);
 bool tai_page_set_scroll_y(TaiPage *page, double scroll_y);

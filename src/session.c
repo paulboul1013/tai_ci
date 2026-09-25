@@ -39,6 +39,15 @@ TaiSession *tai_session_create(TaiNetwork *network, TaiPage *initial_page,
     return session;
 }
 
+TaiSession *tai_session_create_empty(const char *default_css, bool rtl) {
+    if (!default_css) return NULL;
+    TaiSession *session = calloc(1, sizeof(*session));
+    if (!session) return NULL;
+    session->default_css = default_css;
+    session->rtl = rtl;
+    return session;
+}
+
 void tai_session_destroy(TaiSession *session) {
     if (!session) return;
     tai_page_destroy(session->page);
@@ -49,23 +58,28 @@ void tai_session_destroy(TaiSession *session) {
 TaiPage *tai_session_page(const TaiSession *session) { return session ? session->page : NULL; }
 size_t tai_session_history_length(const TaiSession *session) { return session ? session->count : 0; }
 size_t tai_session_history_index(const TaiSession *session) { return session ? session->index : 0; }
+char *tai_session_history_url(const TaiSession *session, size_t index) {
+    return session && index < session->count
+        ? tai_strdup(session->urls[index]) : NULL;
+}
 
 static bool append_url(TaiSession *session, const char *url, TaiPage *candidate,
                        char **error) {
-    if (session->index >= (SIZE_MAX / sizeof(char *)) - 1)
+    size_t kept = session->count ? session->index + 1 : 0;
+    if (kept >= SIZE_MAX / sizeof(char *))
         return failure(error, "history capacity exceeded");
     char *copy = tai_strdup(url);
     if (!copy) return failure(error, "history URL allocation failed");
-    size_t next_count = session->index + 2;
+    size_t next_count = kept + 1;
     char **next = malloc(next_count * sizeof(*next));
     if (!next) { free(copy); return failure(error, "history allocation failed"); }
-    memcpy(next, session->urls, (session->index + 1) * sizeof(*next));
-    next[session->index + 1] = copy;
-    for (size_t i = session->index + 1; i < session->count; i++) free(session->urls[i]);
+    if (kept) memcpy(next, session->urls, kept * sizeof(*next));
+    next[kept] = copy;
+    for (size_t i = kept; i < session->count; i++) free(session->urls[i]);
     free(session->urls);
     session->urls = next;
     session->count = next_count;
-    session->index++;
+    session->index = kept;
     if (candidate) {
         TaiPage *old = session->page;
         session->page = candidate;
@@ -76,7 +90,8 @@ static bool append_url(TaiSession *session, const char *url, TaiPage *candidate,
 
 bool tai_session_navigate(TaiSession *session,
                           const TaiNavigationIntent *intent, char **error) {
-    if (!session || !intent) return failure(error, "invalid session navigation");
+    if (!session || !session->network || !session->page || !intent)
+        return failure(error, "invalid session navigation");
     const char *text = tai_navigation_intent_url(intent);
     TaiUrl *url = text ? tai_url_parse(text) : NULL;
     if (!url) return failure(error, "navigation URL allocation failed");
@@ -200,7 +215,7 @@ char *tai_session_normalize_address(const char *text) {
 
 bool tai_session_navigate_address(TaiSession *session, const char *text,
                                   char **error) {
-    if (!session || !text)
+    if (!session || !session->network || !session->page || !text)
         return failure(error, "invalid address navigation");
     char *normalized = tai_session_normalize_address(text);
     if (!normalized)
@@ -227,13 +242,53 @@ bool tai_session_navigate_address(TaiSession *session, const char *text,
 
 bool tai_session_record_fragment(TaiSession *session, const char *url,
                                   char **error) {
-    if (!session || !url ||
+    if (!session || !session->page || !url ||
         strcmp(url, tai_url_string(tai_page_url(session->page))))
         return failure(error, "invalid fragment history URL");
     return append_url(session, url, NULL, error);
 }
 
+bool tai_session_history_target(const TaiSession *session, int direction,
+                                char **url, size_t *target_index) {
+    if (url) *url = NULL;
+    if (!session || !url || !target_index || !session->count ||
+        (direction != -1 && direction != 1))
+        return false;
+    size_t target = direction < 0
+        ? (session->index ? session->index - 1 : session->index)
+        : session->index + 1;
+    if ((direction < 0 && session->index == 0) || target >= session->count)
+        return false;
+    *url = tai_strdup(session->urls[target]);
+    if (!*url) return false;
+    *target_index = target;
+    return true;
+}
+
+bool tai_session_commit_navigation(TaiSession *session, TaiPage *candidate,
+                                   char **error) {
+    const TaiUrl *url = candidate ? tai_page_url(candidate) : NULL;
+    if (!session || !url)
+        return failure(error, "invalid loaded-page commit");
+    return append_url(session, tai_url_string(url), candidate, error);
+}
+
+bool tai_session_commit_history(TaiSession *session, TaiPage *candidate,
+                                size_t target_index, char **error) {
+    const TaiUrl *url = candidate ? tai_page_url(candidate) : NULL;
+    if (!session || !session->count || !url || target_index >= session->count ||
+        strcmp(tai_url_string(url), session->urls[target_index]))
+        return failure(error, "invalid history-page commit");
+    TaiPage *old = session->page;
+    session->page = candidate;
+    session->index = target_index;
+    tai_page_destroy(old);
+    return true;
+}
+
 static bool traverse(TaiSession *session, size_t target, char **error) {
+    if (!session->network || !session->page)
+        return failure(error, "session has no loaded page");
     TaiUrl *url = tai_url_parse(session->urls[target]);
     if (!url) return failure(error, "history URL allocation failed");
     TaiPage *candidate = tai_page_load_request(

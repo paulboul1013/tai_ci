@@ -16,6 +16,7 @@ typedef struct {
     TaiUrl *url;
     char *body;
     const char *source;
+    TaiResponse *response;
 } Resource;
 
 typedef struct {
@@ -160,6 +161,7 @@ static void resources_destroy(Resource *resources, size_t count) {
     for (size_t i = 0; i < count; i++) {
         tai_url_destroy(resources[i].url);
         free(resources[i].body);
+        tai_response_destroy(resources[i].response);
     }
     free(resources);
 }
@@ -221,98 +223,402 @@ static void invalidated(void *opaque) {
 static bool scroll_to_fragment(TaiPage *page, const char *fragment,
                               char **error);
 
+static TaiPage *page_create(const TaiUrl *url, double viewport_width,
+                            double viewport_height, bool rtl, char **error) {
+    if (!url || !isfinite(viewport_width) || !isfinite(viewport_height) ||
+        viewport_width <= 0.0 || viewport_height <= 0.0 ||
+        viewport_width > INT_MAX || viewport_height > INT_MAX) {
+        diagnostic(error, "invalid page load input");
+        return NULL;
+    }
+    TaiPage *page = calloc(1, sizeof(*page));
+    if (!page) {
+        diagnostic(error, "page allocation failed");
+        return NULL;
+    }
+    page->viewport_width = viewport_width;
+    page->viewport_height = viewport_height;
+    page->rtl = rtl;
+    page->url = tai_url_parse(tai_url_string(url));
+    if (!page->url) {
+        diagnostic(error, "page URL allocation failed");
+        tai_page_destroy(page);
+        return NULL;
+    }
+    return page;
+}
+
+static bool page_prepare_document(TaiPage *page, const TaiUrl *url,
+                                  const TaiResponse *response,
+                                  const char *default_css,
+                                  Resource **resources,
+                                  size_t *resource_count, char **error) {
+    page->secure = !response->error &&
+                   !strcmp(tai_url_scheme(url), "https");
+    char *body = NULL;
+    if (tai_url_view_source(url)) body = tai_view_source(response->body, error);
+    page->document = tai_html_parse(body ? body : response->body, error);
+    free(body);
+    if (!page->document) return false;
+    page->styles = tai_css_parse(default_css, error);
+    if (!page->styles) return false;
+
+    const char *csp = tai_map_get(&response->headers, "content-security-policy");
+    TaiMap *origins = parse_csp(csp);
+    if (csp && !origins && !strncmp(csp, "default-src", 11)) {
+        diagnostic(error, "content security policy allocation failed");
+        return false;
+    }
+    bool collected = collect_resources(tai_document_root(page->document), url,
+                                       origins, resources, resource_count);
+    if (origins) { tai_map_clear(origins); free(origins); }
+    if (!collected) {
+        diagnostic(error, "page resource allocation failed");
+        return false;
+    }
+    page->javascript = tai_js_create(tai_document_root(page->document),
+                                     invalidated, page, error);
+    return page->javascript != NULL;
+}
+
+static bool page_apply_resources(TaiPage *page, Resource *resources,
+                                 size_t resource_count, char **error) {
+    for (size_t index = 0; index < resource_count; index++) {
+        Resource *resource = &resources[index];
+        const char *content = resource->body;
+        if (resource->url) {
+            if (!resource->response || resource->response->error) continue;
+            content = resource->response->body;
+        }
+        if (resource->kind == RESOURCE_STYLE) {
+            if (!tai_css_extend(page->styles, content ? content : "", error))
+                return false;
+        } else {
+            char *script_error = NULL;
+            tai_js_eval(page->javascript, resource->source,
+                        content ? content : "", &script_error);
+            free(script_error); /* Python reports and continues after script errors. */
+        }
+    }
+    return true;
+}
+
+static bool page_finish_visual(TaiPage *page, char **error) {
+    if (!tai_css_style(tai_document_root(page->document), page->styles, error))
+        return false;
+    page->layout = tai_layout_create(tai_document_root(page->document),
+                                     page->viewport_width, page->rtl, error);
+    if (!page->layout) return false;
+    if (!scroll_to_fragment(page, tai_url_fragment(page->url), error))
+        return false;
+    page->display = tai_display_list_create(page->layout, error);
+    return page->display != NULL;
+}
+
 TaiPage *tai_page_load_request(TaiNetwork *network, const TaiUrl *url,
                                const TaiUrl *referrer, const char *payload,
                                const char *default_css, double viewport_width,
                                double viewport_height, bool rtl, char **error) {
     if (error) { free(*error); *error = NULL; }
-    if (!network || !url || !default_css || !isfinite(viewport_width) ||
-        !isfinite(viewport_height) || viewport_width <= 0.0 ||
-        viewport_height <= 0.0 || viewport_width > INT_MAX ||
-        viewport_height > INT_MAX) {
+    if (!network || !url || !default_css) {
         diagnostic(error, "invalid page load input");
         return NULL;
     }
-    TaiPage *page = calloc(1, sizeof(*page));
+    TaiPage *page = page_create(url, viewport_width, viewport_height, rtl, error);
     TaiResponse *response = NULL;
-    TaiMap *origins = NULL;
     Resource *resources = NULL;
     size_t resource_count = 0;
-    if (!page) goto oom;
-    page->viewport_width = viewport_width;
-    page->viewport_height = viewport_height;
-    page->rtl = rtl;
-    page->url = tai_url_parse(tai_url_string(url));
-    if (!page->url) goto oom;
+    if (!page) goto fail;
     response = tai_network_request(network, url, referrer, payload, NULL, NULL);
-    if (!response) goto oom;
+    if (!response) {
+        diagnostic(error, "network response allocation failed");
+        goto fail;
+    }
     if (response->error) {
         diagnostic(error, response->error);
         goto fail;
     }
-    page->secure = !strcmp(tai_url_scheme(url), "https");
-    char *body = NULL;
-    if (tai_url_view_source(url)) body = tai_view_source(response->body, error);
-    page->document = tai_html_parse(body ? body : response->body, error);
-    free(body);
-    if (!page->document) goto fail;
-    page->styles = tai_css_parse(default_css, error);
-    if (!page->styles) goto fail;
-    const char *csp = tai_map_get(&response->headers, "content-security-policy");
-    origins = parse_csp(csp);
-    if (csp && !origins && !strncmp(csp, "default-src", 11)) goto oom;
-    if (!collect_resources(tai_document_root(page->document), url, origins,
-                           &resources, &resource_count)) goto oom;
-    page->javascript = tai_js_create(tai_document_root(page->document),
-                                     invalidated, page, error);
-    if (!page->javascript) goto fail;
+    if (!page_prepare_document(page, url, response, default_css, &resources,
+                               &resource_count, error)) goto fail;
     for (size_t i = 0; i < resource_count; i++) {
         Resource *resource = &resources[i];
-        TaiResponse *loaded = NULL;
-        const char *content = resource->body;
-        if (resource->url) {
-            loaded = tai_network_request(network, resource->url, url, NULL, NULL,
-                                         NULL);
-            if (!loaded || loaded->error) {
-                tai_response_destroy(loaded);
-                continue;
-            }
-            content = loaded->body;
-        }
-        if (resource->kind == RESOURCE_STYLE) {
-            if (!tai_css_extend(page->styles, content ? content : "", error)) {
-                tai_response_destroy(loaded);
-                goto fail;
-            }
-        } else {
-            char *script_error = NULL;
-            tai_js_eval(page->javascript, resource->source, content ? content : "",
-                        &script_error);
-            free(script_error); /* Python reports and continues after script errors. */
-        }
-        tai_response_destroy(loaded);
+        if (resource->url)
+            resource->response = tai_network_request(
+                network, resource->url, url, NULL, NULL, NULL);
     }
-    if (!tai_css_style(tai_document_root(page->document), page->styles, error))
-        goto fail;
-    page->layout = tai_layout_create(tai_document_root(page->document),
-                                     viewport_width, rtl, error);
-    if (!page->layout) goto fail;
-    if (!scroll_to_fragment(page, tai_url_fragment(page->url), error))
-        goto fail;
-    page->display = tai_display_list_create(page->layout, error);
-    if (!page->display) goto fail;
+    if (!page_apply_resources(page, resources, resource_count, error) ||
+        !page_finish_visual(page, error)) goto fail;
     resources_destroy(resources, resource_count);
-    if (origins) { tai_map_clear(origins); free(origins); }
     tai_response_destroy(response);
     return page;
-oom:
-    diagnostic(error, "page allocation failed");
 fail:
     resources_destroy(resources, resource_count);
-    if (origins) { tai_map_clear(origins); free(origins); }
     tai_response_destroy(response);
     tai_page_destroy(page);
     return NULL;
+}
+
+typedef struct TaiPageLoadRequest TaiPageLoadRequest;
+struct TaiPageLoadRequest {
+    TaiPageLoad *load;
+    TaiRequest *request;
+    size_t resource_index;
+    bool document;
+    TaiPageLoadRequest *next;
+};
+
+struct TaiPageLoad {
+    TaiNetwork *network;
+    TaiPage *page;
+    TaiUrl *url;
+    TaiUrl *referrer;
+    char *payload;
+    char *default_css;
+    double viewport_width;
+    double viewport_height;
+    bool rtl;
+    bool network_failure;
+    Resource *resources;
+    size_t resource_count;
+    size_t pending_resources;
+    TaiPageLoadRequest *requests;
+    TaiPageLoadDone done;
+    void *userdata;
+};
+
+static void page_load_destroy(TaiPageLoad *load) {
+    if (!load) return;
+    resources_destroy(load->resources, load->resource_count);
+    tai_page_destroy(load->page);
+    tai_url_destroy(load->url);
+    tai_url_destroy(load->referrer);
+    free(load->payload);
+    free(load->default_css);
+    free(load);
+}
+
+static void page_load_complete(TaiPageLoad *load, char *error) {
+    TaiPageLoadDone done = load->done;
+    void *userdata = load->userdata;
+    TaiPage *page = load->page;
+    bool network_failure = load->network_failure;
+    load->page = NULL;
+    page_load_destroy(load);
+    done(userdata, page, network_failure, error);
+}
+
+static void page_load_fail(TaiPageLoad *load, const char *message) {
+    char *error = message ? tai_strdup(message) : NULL;
+    if (message && !error) error = tai_strdup("page load failed");
+    tai_page_destroy(load->page);
+    load->page = NULL;
+    page_load_complete(load, error);
+}
+
+static bool append_html_escape(char **text, size_t *length,
+                               const char *value) {
+    for (const unsigned char *p = (const unsigned char *)value; *p; p++) {
+        const char *replacement = NULL;
+        switch (*p) {
+            case '&': replacement = "&amp;"; break;
+            case '<': replacement = "&lt;"; break;
+            case '>': replacement = "&gt;"; break;
+            case '\"': replacement = "&quot;"; break;
+            case '\'': replacement = "&#x27;"; break;
+            default: break;
+        }
+        char byte[2] = {(char)*p, '\0'};
+        if (!append(text, length, replacement ? replacement : byte))
+            return false;
+    }
+    return true;
+}
+
+static char *network_error_markup(const TaiUrl *url, const char *message,
+                                  bool certificate_error) {
+    char *body = NULL;
+    size_t length = 0;
+    const char *heading = certificate_error ? "Certificate Error" : "Network Error";
+    if (!append(&body, &length, "<html><body><h1>") ||
+        !append(&body, &length, heading) ||
+        !append(&body, &length, "</h1><p>") ||
+        !append_html_escape(&body, &length, tai_url_string(url)) ||
+        !append(&body, &length, "</p><pre>") ||
+        !append_html_escape(&body, &length, message ? message : "") ||
+        !append(&body, &length, "</pre></body></html>")) {
+        free(body);
+        return NULL;
+    }
+    return body;
+}
+
+static void page_load_request_done(void *opaque, TaiResponse *response);
+
+static bool page_load_submit_resource(TaiPageLoad *load, size_t index) {
+    TaiPageLoadRequest *request = calloc(1, sizeof(*request));
+    if (!request) return false;
+    request->load = load;
+    request->resource_index = index;
+    Resource *resource = &load->resources[index];
+    request->request = tai_network_submit(
+        load->network, resource->url, load->url, NULL, NULL, NULL,
+        page_load_request_done, request);
+    if (!request->request) {
+        free(request);
+        return false;
+    }
+    request->next = load->requests;
+    load->requests = request;
+    load->pending_resources++;
+    return true;
+}
+
+static void page_load_finish_resources(TaiPageLoad *load) {
+    char *error = NULL;
+    if (!page_apply_resources(load->page, load->resources,
+                              load->resource_count, &error) ||
+        !page_finish_visual(load->page, &error)) {
+        if (!error) error = tai_strdup("page rendering failed");
+        tai_page_destroy(load->page);
+        load->page = NULL;
+        page_load_complete(load, error);
+        return;
+    }
+    page_load_complete(load, NULL);
+}
+
+static void page_load_request_done(void *opaque, TaiResponse *response) {
+    TaiPageLoadRequest *request = opaque;
+    TaiPageLoad *load = request->load;
+    TaiPageLoadRequest **slot = &load->requests;
+    while (*slot && *slot != request) slot = &(*slot)->next;
+    if (*slot) *slot = request->next;
+    bool document = request->document;
+    size_t resource_index = request->resource_index;
+    free(request);
+
+    if (document) {
+        if (!response) {
+            page_load_fail(load, "network response allocation failed");
+            return;
+        }
+        char *transport_error = response->error
+            ? tai_strdup(response->error) : NULL;
+        load->network_failure = response->error != NULL;
+        if (response->error) {
+            char *markup = network_error_markup(load->url, response->error,
+                                                 response->certificate_error);
+            if (!markup) {
+                tai_response_destroy(response);
+                free(transport_error);
+                page_load_fail(load, "network error page allocation failed");
+                return;
+            }
+            free(response->body);
+            response->body = markup;
+            response->length = strlen(markup);
+        }
+        char *setup_error = NULL;
+        bool prepared = page_prepare_document(
+            load->page, load->url, response, load->default_css,
+            &load->resources, &load->resource_count, &setup_error);
+        tai_response_destroy(response);
+        if (!prepared) {
+            free(transport_error);
+            tai_page_destroy(load->page);
+            load->page = NULL;
+            page_load_complete(load, setup_error);
+            return;
+        }
+        for (size_t index = 0; index < load->resource_count; index++) {
+            if (load->resources[index].url)
+                (void)page_load_submit_resource(load, index);
+        }
+        if (!load->pending_resources) {
+            free(transport_error);
+            page_load_finish_resources(load);
+            return;
+        }
+        /* The error detail is intentionally not exposed as a window-fatal
+         * condition; the first-load error page itself is the visible result. */
+        free(transport_error);
+        return;
+    }
+
+    Resource *resource = &load->resources[resource_index];
+    resource->response = response;
+    if (load->pending_resources) load->pending_resources--;
+    if (!load->pending_resources) page_load_finish_resources(load);
+}
+
+TaiPageLoad *tai_page_load_async(TaiNetwork *network, const TaiUrl *url,
+    const TaiUrl *referrer, const char *payload, const char *default_css,
+    double viewport_width, double viewport_height, bool rtl,
+    TaiPageLoadDone done, void *userdata, char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (!network || !url || !default_css || !done) {
+        diagnostic(error, "invalid asynchronous page load input");
+        return NULL;
+    }
+    TaiPageLoad *load = calloc(1, sizeof(*load));
+    if (!load) {
+        diagnostic(error, "page load allocation failed");
+        return NULL;
+    }
+    load->network = network;
+    load->url = tai_url_parse(tai_url_string(url));
+    if (referrer) load->referrer = tai_url_parse(tai_url_string(referrer));
+    if (payload) load->payload = tai_strdup(payload);
+    load->default_css = tai_strdup(default_css);
+    load->viewport_width = viewport_width;
+    load->viewport_height = viewport_height;
+    load->rtl = rtl;
+    load->done = done;
+    load->userdata = userdata;
+    if (!load->url || (referrer && !load->referrer) ||
+        (payload && !load->payload) || !load->default_css) {
+        page_load_destroy(load);
+        diagnostic(error, "page load input allocation failed");
+        return NULL;
+    }
+    load->page = page_create(load->url, viewport_width, viewport_height,
+                             rtl, error);
+    if (!load->page) {
+        page_load_destroy(load);
+        return NULL;
+    }
+    TaiPageLoadRequest *request = calloc(1, sizeof(*request));
+    if (!request) {
+        page_load_destroy(load);
+        diagnostic(error, "page request allocation failed");
+        return NULL;
+    }
+    request->load = load;
+    request->document = true;
+    request->request = tai_network_submit(
+        network, load->url, load->referrer, load->payload, NULL, NULL,
+        page_load_request_done, request);
+    if (!request->request) {
+        free(request);
+        page_load_destroy(load);
+        diagnostic(error, "page request submission failed");
+        return NULL;
+    }
+    load->requests = request;
+    return load;
+}
+
+void tai_page_load_async_cancel(TaiPageLoad *load) {
+    if (!load) return;
+    TaiPageLoadRequest *request = load->requests;
+    load->requests = NULL;
+    while (request) {
+        TaiPageLoadRequest *next = request->next;
+        tai_network_cancel(load->network, request->request);
+        free(request);
+        request = next;
+    }
+    page_load_destroy(load);
 }
 
 TaiPage *tai_page_load(TaiNetwork *network, const TaiUrl *url,
@@ -460,7 +766,6 @@ bool tai_page_resize(TaiPage *page, double viewport_width,
     page->display = replacement_display;
     page->viewport_width = viewport_width;
     page->viewport_height = viewport_height;
-    page->scroll_y = fmax(0.0, fmin(page->scroll_y, tai_page_max_scroll_y(page)));
     tai_display_list_destroy(old_display);
     tai_layout_destroy(old_layout);
     snapshot_destroy(&snapshot);

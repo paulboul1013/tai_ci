@@ -1,0 +1,68 @@
+#ifndef TAI_TABSET_H
+#define TAI_TABSET_H
+
+#include "tai/session.h"
+
+typedef struct TaiTabSet TaiTabSet;
+
+/* Borrowed snapshot. page and url remain valid until the next tab-set mutation
+ * or tai_tabset_pump(). page is NULL while the active tab has no committed
+ * document; url then names its pending navigation when one exists. */
+typedef struct {
+    TaiPage *page;
+    const char *url;
+    size_t tab_count;
+    size_t active_index;
+    /* Includes an in-flight navigation's provisional history entry. */
+    size_t history_count;
+    size_t history_index;
+    bool loading;
+    bool can_go_back;
+    bool can_go_forward;
+} TaiTabSetView;
+
+/* The caller owns the tab set and default_css must outlive it. Creation starts
+ * one loader thread; that thread creates, exclusively uses, and destroys the
+ * shared TaiNetwork. All public operations except destroy are called by the
+ * SDL/window owner thread. Loaded pages transfer from the loader to sessions
+ * only when tai_tabset_pump() commits a matching tab ID and generation. */
+TaiTabSet *tai_tabset_create(const char *default_css, bool rtl, char **error);
+/* Embedders and deterministic integration tests can supply the home URL used
+ * by New Tab. The ordinary constructor uses browser.engineering. */
+TaiTabSet *tai_tabset_create_with_home_url(const char *default_css, bool rtl,
+                                          const char *home_url,
+                                          char **error);
+/* Starts the initial tab and navigation. width/height are page viewport pixels,
+ * not outer window dimensions. The window may be presented before this
+ * navigation completes. */
+bool tai_tabset_start(TaiTabSet *tabs, const char *url, double width,
+                      double height,
+                      char **error);
+/* Call after the window owner has stopped issuing other operations. Destroy
+ * cancels and joins the loader, then releases sessions and queued completions. */
+void tai_tabset_destroy(TaiTabSet *tabs);
+
+/* New Tab creates and selects the default-home tab before its load completes. */
+bool tai_tabset_new_tab(TaiTabSet *tabs, char **error);
+bool tai_tabset_select(TaiTabSet *tabs, size_t index);
+/* Copies the intent's URL/body and targets the active tab at call time. */
+bool tai_tabset_navigate(TaiTabSet *tabs,
+                         const TaiNavigationIntent *intent, char **error);
+bool tai_tabset_navigate_address(TaiTabSet *tabs, const char *text,
+                                 char **error);
+/* direction is -1 for Back and 1 for Forward. Failed loads leave the current
+ * page and history index unchanged. */
+bool tai_tabset_history_available(const TaiTabSet *tabs, int direction);
+bool tai_tabset_history(TaiTabSet *tabs, int direction, char **error);
+bool tai_tabset_record_fragment(TaiTabSet *tabs, const char *url,
+                                char **error);
+/* Resizes every committed tab page; pending candidates use the latest size
+ * when their completion is committed. */
+bool tai_tabset_resize(TaiTabSet *tabs, double width, double height,
+                       char **error);
+/* Drains completed work on the window owner thread. changed reports whether a
+ * page, URL/history, or loading state changed and needs repainting. */
+bool tai_tabset_pump(TaiTabSet *tabs, bool *changed, char **error);
+bool tai_tabset_view(const TaiTabSet *tabs, TaiTabSetView *view);
+
+#endif

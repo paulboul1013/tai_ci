@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tai/browser.h"
 #include "tai/presentation.h"
-#include "tai/session.h"
+#include "tai/tabset.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -16,63 +16,6 @@ enum { TAI_SCREENSHOT_WIDTH = 800 };
 /* Frozen Python rounds 600 - its rendered Chrome.bottom to 532 pixels. */
 enum { TAI_SCREENSHOT_HEIGHT = 532 };
 enum { TAI_WINDOW_HEIGHT = 600 };
-
-typedef struct {
-    TaiSession *session;
-} NavigationContext;
-
-static bool navigate_page(void *opaque, TaiPage **current_page,
-                          const TaiNavigationIntent *intent, char **error) {
-    NavigationContext *context = opaque;
-    if (!tai_session_navigate(context->session, intent, error)) {
-        fprintf(stderr, "navigation failed: %s\n",
-                error && *error ? *error : "page load failed");
-        if (error) { free(*error); *error = NULL; }
-    }
-    *current_page = tai_session_page(context->session);
-    return true;
-}
-
-static bool traverse_history(void *opaque, TaiPage **page, int direction,
-                             char **error) {
-    NavigationContext *context = opaque;
-    bool result = direction < 0 ? tai_session_back(context->session, error)
-                                : tai_session_forward(context->session, error);
-    if (!result) {
-        fprintf(stderr, "history navigation failed: %s\n",
-                error && *error ? *error : "page load failed");
-        if (error) { free(*error); *error = NULL; }
-    }
-    *page = tai_session_page(context->session);
-    return true;
-}
-
-static bool record_fragment(void *opaque, const char *url, char **error) {
-    NavigationContext *context = opaque;
-    if (tai_session_record_fragment(context->session, url, error)) return true;
-    fprintf(stderr, "fragment history failed: %s\n",
-            error && *error ? *error : "allocation failed");
-    return false;
-}
-
-static bool navigate_address(void *opaque, TaiPage **page,
-                             const char *text, char **error) {
-    NavigationContext *context = opaque;
-    if (!tai_session_navigate_address(context->session, text, error)) {
-        fprintf(stderr, "address navigation failed: %s\n",
-                error && *error ? *error : "page load failed");
-        if (error) { free(*error); *error = NULL; }
-    }
-    *page = tai_session_page(context->session);
-    return true;
-}
-
-static bool history_available(void *opaque, int direction) {
-    NavigationContext *context = opaque;
-    size_t index = tai_session_history_index(context->session);
-    size_t count = tai_session_history_length(context->session);
-    return direction < 0 ? index > 0 : index + 1 < count;
-}
 
 static void usage(const char *program) {
     fprintf(stderr,
@@ -148,40 +91,28 @@ int main(int argc, char **argv) {
     size_t css_length = 0;
     char *css = read_default_css(argv[0], &css_length);
     (void)css_length;
+    char *error = NULL;
+    if (window) {
+        TaiTabSet *tabs = css ? tai_tabset_create(css, rtl, &error) : NULL;
+        bool success = tabs && tai_present_window_with_tabs(
+            tabs, url_text, TAI_SCREENSHOT_WIDTH, TAI_WINDOW_HEIGHT, &error);
+        if (!success)
+            fprintf(stderr, "window failed: %s\n",
+                    error ? error : "tabbed window initialization failed");
+        tai_tabset_destroy(tabs);
+        free(css);
+        free(error);
+        return success ? 0 : 1;
+    }
     TaiUrl *url = tai_url_parse(url_text);
     TaiNetwork *network = tai_network_create();
-    char *error = NULL;
     TaiPage *page = css && url && network
         ? tai_page_load(network, url, css, TAI_SCREENSHOT_WIDTH,
                         TAI_SCREENSHOT_HEIGHT, rtl, &error)
         : NULL;
     bool success = page != NULL;
     if (!page) fprintf(stderr, "load failed: %s\n", error ? error : "allocation failed");
-    else if (window) {
-        TaiSession *session = tai_session_create(network, page, css, rtl);
-        if (session) {
-            page = NULL;
-            TaiPage *current = tai_session_page(session);
-            NavigationContext navigation = {.session = session};
-            TaiPresentWindowCallbacks callbacks = {
-                .navigate = navigate_page,
-                .history = traverse_history,
-                .fragment = record_fragment,
-                .address = navigate_address,
-                .history_available = history_available,
-                .userdata = &navigation,
-            };
-            success = tai_present_window_with_chrome(
-                &current, TAI_SCREENSHOT_WIDTH, TAI_WINDOW_HEIGHT,
-                &callbacks, &error);
-            tai_session_destroy(session);
-        } else {
-            success = false;
-            if (!error) error = tai_strdup("history allocation failed");
-        }
-        if (!success) fprintf(stderr, "window failed: %s\n",
-                              error ? error : "presentation failed");
-    } else if (screenshot_path) {
+    else if (screenshot_path) {
         success = tai_page_write_viewport_png(page, screenshot_path, &error);
         if (!success)
             fprintf(stderr, "screenshot failed: %s\n",

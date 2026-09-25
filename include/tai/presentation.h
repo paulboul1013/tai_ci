@@ -3,6 +3,8 @@
 
 #include "tai/browser.h"
 
+typedef struct TaiTabSet TaiTabSet;
+
 /* The caller owns *page and may replace it after loading a candidate page. The
  * intent is borrowed for the callback; failed loads should return true with the
  * old page intact so the window remains usable. */
@@ -52,5 +54,9 @@ bool tai_present_window_with_history(TaiPage **page, int width, int height,
 bool tai_present_window_with_chrome(
     TaiPage **page, int width, int height,
     const TaiPresentWindowCallbacks *callbacks, char **error);
+/* Starts an asynchronous, tabbed window after the native window exists. The
+ * tab set remains owned by the caller and is pumped on the SDL thread. */
+bool tai_present_window_with_tabs(TaiTabSet *tabs, const char *initial_url,
+                                  int width, int height, char **error);
 
 #endif

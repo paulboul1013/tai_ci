@@ -104,6 +104,53 @@ static void http_history(int port) {
   tai_network_destroy(network);
 }
 
+static void pending_session_commits(void) {
+  char *error = NULL;
+  TaiNetwork *network = tai_network_create();
+  assert(network);
+  TaiSession *session = tai_session_create_empty(css, false);
+  assert(session && !tai_session_page(session));
+  assert(tai_session_history_length(session) == 0);
+
+  TaiUrl *first_url = tai_url_parse("data:text/html,first");
+  TaiPage *first = tai_page_load(network, first_url, css, 320, 160, false,
+                                 &error);
+  assert(first && !error);
+  assert(tai_session_commit_navigation(session, first, &error));
+  assert(!error && tai_session_page(session) == first);
+  assert_page(session, "data:text/html,first", 1, 0);
+
+  TaiUrl *second_url = tai_url_parse("data:text/html,second");
+  TaiPage *second = tai_page_load(network, second_url, css, 320, 160, false,
+                                  &error);
+  assert(second && !error);
+  assert(tai_session_commit_navigation(session, second, &error));
+  assert(!error && tai_session_page(session) == second);
+  assert_page(session, "data:text/html,second", 2, 1);
+
+  char *target_url = NULL;
+  size_t target_index = 0;
+  assert(tai_session_history_target(session, -1, &target_url, &target_index));
+  assert(target_index == 0 && !strcmp(target_url, "data:text/html,first"));
+  TaiPage *back_page = tai_page_load(network, first_url, css, 320, 160, false,
+                                     &error);
+  assert(back_page && !error);
+  assert(tai_session_commit_history(session, back_page, target_index, &error));
+  assert(!error && tai_session_page(session) == back_page);
+  assert_page(session, "data:text/html,first", 2, 0);
+  free(target_url);
+  target_url = NULL;
+  assert(tai_session_history_target(session, 1, &target_url, &target_index));
+  assert(target_index == 1 && !strcmp(target_url, "data:text/html,second"));
+
+  free(target_url);
+  tai_url_destroy(first_url);
+  tai_url_destroy(second_url);
+  tai_session_destroy(session);
+  tai_network_destroy(network);
+  free(error);
+}
+
 static void assert_page(TaiSession *session, const char *url,
                         size_t length, size_t index) {
   assert(!strcmp(tai_url_string(tai_page_url(tai_session_page(session))), url));
@@ -113,6 +160,7 @@ static void assert_page(TaiSession *session, const char *url,
 
 int main(int argc, char **argv) {
   assert(argc == 1 || argc == 2);
+  pending_session_commits();
   if (argc == 2) {
     int port = atoi(argv[1]);
     assert(port > 0 && port <= 65535);

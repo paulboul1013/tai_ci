@@ -26,7 +26,8 @@ set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(deps/SDL EXCLUDE_FROM_ALL)
 
 add_library(tai_core src/core.c src/url.c src/dom.c src/css.c src/scheduler.c
-  src/js.c src/layout.c src/render.c src/network.c src/browser.c src/session.c)
+  src/js.c src/layout.c src/render.c src/network.c src/browser.c src/session.c
+  src/tabset.c)
 target_include_directories(tai_core PUBLIC include)
 target_include_directories(tai_core PRIVATE "${UTF8PROC_INCLUDE_DIR}")
 target_link_libraries(tai_core PUBLIC "${UTF8PROC_LIBRARY}")
@@ -126,6 +127,17 @@ if(BUILD_TESTING)
   target_link_libraries(test_history PRIVATE tai_core)
   target_compile_options(test_history PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME browser_history COMMAND test_history)
+  add_executable(test_tabset tests/test_tabset.c)
+  target_link_libraries(test_tabset PRIVATE tai_core)
+  target_compile_options(test_tabset PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_executable(test_tabs_window tests/test_tabs_window.c)
+  target_link_libraries(test_tabs_window PRIVATE tai_presentation)
+  target_compile_options(test_tabs_window PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME browser_tabs COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/tabset_integration.py"
+    $<TARGET_FILE:test_tabset> $<TARGET_FILE:test_tabs_window>)
+  add_test(NAME tabs_oracle_probe COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/tabs_oracle_probe.py" --check)
   add_executable(test_address tests/test_address.c)
   target_link_libraries(test_address PRIVATE tai_core)
   target_compile_options(test_address PRIVATE -Wall -Wextra -Wpedantic -Werror)

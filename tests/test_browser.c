@@ -87,7 +87,7 @@ int main(void) {
         "data:text/html,<p>one%20two%20three%20four%20five%20six</p>");
     TaiPage *resize_page = tai_page_load(network, resize_url,
         "html {display:block} body {display:block} p {display:block}",
-        300.0, 100.0, false, &error);
+        300.0, 40.0, false, &error);
     assert(resize_page && !error);
     const TaiDisplayList *wide_display = tai_page_display_list(resize_page);
     const TaiDisplayCommand *wide_six = text_command(wide_display, "six");
@@ -103,6 +103,12 @@ int main(void) {
     assert(narrow_six && narrow_six->y > wide_six_y);
     assert(tai_page_scroll_y(resize_page) <= tai_page_max_scroll_y(resize_page));
     assert(tai_page_scroll_y(resize_page) <= old_scroll);
+    assert(old_scroll > 0.0);
+    assert(tai_page_resize(resize_page, 80.0, 10000.0, &error));
+    assert(!error && tai_page_max_scroll_y(resize_page) == 0.0 &&
+           tai_page_scroll_y(resize_page) == old_scroll);
+    assert(tai_page_set_scroll_y(resize_page, 0.0));
+    assert(tai_page_scroll_y(resize_page) == 0.0);
     const TaiDisplayList *before_invalid = tai_page_display_list(resize_page);
     double before_width = tai_page_viewport_width(resize_page);
     double before_height = tai_page_viewport_height(resize_page);

@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tai/presentation.h"
+#include "tai/tabset.h"
 #include "../src/presentation_geometry.h"
 #include <SDL3/SDL.h>
 #include <assert.h>
@@ -47,6 +48,12 @@ typedef enum {
   INPUT_RETURN,
   INPUT_WINDOW_FOCUS_LOST,
   INPUT_WINDOW_FOCUS_GAINED,
+  INPUT_TABS_ADDRESS,
+  INPUT_TABS_TEXT,
+  INPUT_TABS_URL_TEXT,
+  INPUT_TABS_NEW_TAB,
+  INPUT_TABS_FIRST,
+  INPUT_TABS_SECOND,
 } InputKind;
 
 typedef struct {
@@ -79,12 +86,16 @@ static SDL_Event make_input_event(InputKind kind, SDL_WindowID window_id) {
     }};
   }
   if (kind == INPUT_UNFOCUSED_TEXT || kind == INPUT_OTHER_WINDOW_TEXT ||
-      kind == INPUT_CURRENT_TEXT) {
+      kind == INPUT_CURRENT_TEXT || kind == INPUT_TABS_TEXT ||
+      kind == INPUT_TABS_URL_TEXT) {
     return (SDL_Event){.text = {
         .type = SDL_EVENT_TEXT_INPUT,
         .windowID = kind == INPUT_OTHER_WINDOW_TEXT ? window_id + 1 :
                                                      window_id,
-        .text = kind == INPUT_UNFOCUSED_TEXT ? "ignored-before-focus" : "\303\251x",
+        .text = kind == INPUT_UNFOCUSED_TEXT ? "ignored-before-focus" :
+                kind == INPUT_TABS_URL_TEXT
+                    ? "data:text/html,<p>draft</p>"
+                    : kind == INPUT_TABS_TEXT ? "draft" : "\303\251x",
     }};
   }
   if (kind == INPUT_OTHER_WINDOW_BACKSPACE || kind == INPUT_BACKSPACE ||
@@ -109,7 +120,9 @@ static SDL_Event make_input_event(InputKind kind, SDL_WindowID window_id) {
   }
   if (kind == INPUT_UNRELATED_LEFT_CLICK || kind == INPUT_NONLEFT_CLICK ||
       kind == INPUT_NONFINITE_CLICK || kind == INPUT_MISS_CLICK ||
-      kind == INPUT_LEFT_CLICK) {
+      kind == INPUT_LEFT_CLICK || kind == INPUT_TABS_ADDRESS ||
+      kind == INPUT_TABS_NEW_TAB || kind == INPUT_TABS_FIRST ||
+      kind == INPUT_TABS_SECOND) {
     return (SDL_Event){.button = {
         .type = SDL_EVENT_MOUSE_BUTTON_DOWN,
         .windowID = kind == INPUT_UNRELATED_LEFT_CLICK ? window_id + 1 :
@@ -623,6 +636,52 @@ int main(void) {
   assert(!strcmp(tai_map_get(&prevent_input->attributes, "value"), "cat"));
   tai_page_destroy(prevent_page);
   tai_url_destroy(prevent_url);
+
+  static const InputKind tab_inputs[] = {
+      INPUT_TABS_ADDRESS, INPUT_TABS_URL_TEXT, INPUT_TABS_NEW_TAB,
+      INPUT_TABS_ADDRESS, INPUT_RETURN,
+      INPUT_TABS_ADDRESS, INPUT_TABS_URL_TEXT, INPUT_TABS_FIRST,
+      INPUT_TABS_SECOND, INPUT_TABS_ADDRESS, INPUT_RETURN,
+      INPUT_TABS_NEW_TAB, INPUT_TABS_NEW_TAB, INPUT_TABS_FIRST,
+      INPUT_TABS_SECOND, INPUT_TABS_SECOND, INPUT_TABS_FIRST,
+  };
+  static const SDL_FPoint tab_clicks[] = {
+      {200.0f, 56.0f}, {0.0f, 0.0f}, {0.0f, 18.0f},
+      {200.0f, 56.0f}, {0.0f, 0.0f},
+      {200.0f, 56.0f}, {0.0f, 0.0f}, {34.0f, 27.0f},
+      {75.0f, 27.0f}, {200.0f, 56.0f}, {0.0f, 0.0f},
+      {15.0f, 18.0f}, {30.0f, 18.0f}, {34.0f, 27.0f},
+      {125.0f, 27.0f}, {75.0f, 27.0f}, {71.0f, 27.0f},
+  };
+  InputEvents tab_events = {
+      .kinds = tab_inputs,
+      .count = sizeof(tab_inputs) / sizeof(tab_inputs[0]),
+      .click_positions = tab_clicks,
+  };
+  TaiTabSet *tabs = tai_tabset_create_with_home_url(
+      "html {display:block} body {display:block} p {display:block}", false,
+      "data:text/html,<p>home</p>", &error);
+  assert(tabs && !error);
+  assert(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
+  assert(SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software"));
+  input_injected = false;
+  input_events_queued = false;
+  SDL_SetEventFilter(inject_input, &tab_events);
+  assert(pthread_create(&thread, NULL, request_quit, NULL) == 0);
+  assert(tai_present_window_with_tabs(tabs,
+      "data:text/html,<p>initial</p>", 300, 100, &error));
+  assert(pthread_join(thread, NULL) == 0);
+  assert(!error && input_injected && input_events_queued);
+  TaiTabSetView tab_view;
+  assert(tai_tabset_view(tabs, &tab_view));
+  assert(tab_view.tab_count == 3 && tab_view.active_index == 1 &&
+         !strcmp(tab_view.url, "data:text/html,<p>home</p>"));
+  assert(tai_tabset_select(tabs, 2));
+  assert(tai_tabset_view(tabs, &tab_view));
+  assert(tab_view.active_index == 2 &&
+         !strcmp(tab_view.url, "data:text/html,<p>home</p>"));
+  assert(tai_tabset_select(tabs, 0));
+  tai_tabset_destroy(tabs);
 
   tai_page_destroy(click_page);
   tai_url_destroy(click_url);

@@ -1,0 +1,187 @@
+{
+  "delayed_subresource": {
+    "computed_probe_color_after_release": "red",
+    "while_pending": {
+      "active_index": 1,
+      "document_heading": "subresource-document",
+      "tab_heights": [
+        625.18,
+        625.18
+      ],
+      "tab_widths": [
+        900,
+        900
+      ]
+    }
+  },
+  "failures": {
+    "initial_navigation": {
+      "heading": "Network Error",
+      "history": [
+        "http://127.0.0.1:<PORT>/initial-fail"
+      ],
+      "history_index": 0,
+      "url": "http://127.0.0.1:<PORT>/initial-fail"
+    },
+    "secondary_navigation": {
+      "after_failure": {
+        "heading": "Network Error",
+        "history": [
+          "http://127.0.0.1:<PORT>/secondary-delay",
+          "http://127.0.0.1:<PORT>/secondary-fail"
+        ],
+        "history_index": 1,
+        "url": "http://127.0.0.1:<PORT>/secondary-fail"
+      },
+      "before_failure": {
+        "heading": "secondary-loaded",
+        "history": [
+          "http://127.0.0.1:<PORT>/secondary-delay"
+        ],
+        "history_index": 0,
+        "url": "http://127.0.0.1:<PORT>/secondary-delay"
+      }
+    }
+  },
+  "geometry": {
+    "narrow": {
+      "address_rect": [
+        0.0,
+        119.212,
+        100.0,
+        135.212
+      ],
+      "chrome_bottom": 138.48,
+      "tab_row_rects": [
+        [
+          34.0,
+          19.072,
+          71.0,
+          35.072
+        ],
+        [
+          0.0,
+          19.184,
+          108.0,
+          55.184
+        ]
+      ]
+    },
+    "wide": {
+      "chrome_bottom": 74.82,
+      "new_tab_hit_boundary": {
+        "left": "button:new-tab",
+        "right": null
+      },
+      "new_tab_rect": [
+        0.0,
+        6.0,
+        30.0,
+        30.0
+      ],
+      "tab_hit_boundary": {
+        "left": "link:tab-0",
+        "right": null
+      },
+      "tab_rects": [
+        [
+          34.0,
+          19.072,
+          71.0,
+          35.072
+        ],
+        [
+          75.0,
+          19.184,
+          125.0,
+          35.184
+        ]
+      ]
+    }
+  },
+  "new_tab": {
+    "requested_url": "https://browser.engineering/"
+  },
+  "pending_documents": {
+    "active_index_after_initial_completion": 1,
+    "active_index_after_secondary_completion": 1,
+    "before_release": {
+      "active_index": 1,
+      "initial_tab": {
+        "heading": null,
+        "history": [
+          "http://127.0.0.1:<PORT>/initial-delay"
+        ],
+        "history_index": 0,
+        "url": "http://127.0.0.1:<PORT>/initial-delay"
+      },
+      "secondary_tab": {
+        "heading": null,
+        "history": [
+          "http://127.0.0.1:<PORT>/secondary-delay"
+        ],
+        "history_index": 0,
+        "url": "http://127.0.0.1:<PORT>/secondary-delay"
+      },
+      "tab_count": 2,
+      "window_exists": true
+    },
+    "initial_tab": {
+      "heading": "initial-loaded",
+      "history": [
+        "http://127.0.0.1:<PORT>/initial-delay"
+      ],
+      "history_index": 0,
+      "url": "http://127.0.0.1:<PORT>/initial-delay"
+    },
+    "secondary_tab": {
+      "heading": "secondary-loaded",
+      "history": [
+        "http://127.0.0.1:<PORT>/secondary-delay"
+      ],
+      "history_index": 0,
+      "url": "http://127.0.0.1:<PORT>/secondary-delay"
+    }
+  },
+  "resize_and_scroll": {
+    "large_tab_height": 825.18,
+    "max_scroll_after": [
+      130.82,
+      630.82
+    ],
+    "scroll_after": [
+      730.82,
+      1230.82
+    ],
+    "scroll_before": [
+      730.82,
+      1230.82
+    ],
+    "small_tab_height": 225.18,
+    "tab_heights_after_resize": [
+      625.18,
+      625.18
+    ],
+    "tab_widths_after_resize": [
+      900,
+      900
+    ]
+  },
+  "switching": {
+    "active_index_after_switch_back": 1,
+    "active_styles_after_select": [
+      "font-weight:bold;color:black",
+      "color:blue"
+    ],
+    "draft_after_new_tab": {
+      "address": "",
+      "dirty": false,
+      "focus": null
+    },
+    "draft_after_tab_switch": {
+      "address": "",
+      "dirty": false,
+      "focus": null
+    }
+  }
+}
