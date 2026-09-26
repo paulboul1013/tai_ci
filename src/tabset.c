@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tai/tabset.h"
+#include "tai/bookmarks.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -30,6 +31,7 @@ struct LoadTask {
     char *url;
     char *body;
     char *referrer;
+    char *internal_markup;
     LoadKind kind;
     size_t history_target;
     double width;
@@ -52,6 +54,7 @@ struct TabSlot {
 struct TaiTabSet {
     const char *default_css;
     char *home_url;
+    TaiBookmarks *bookmarks;
     bool rtl;
     double width;
     double height;
@@ -88,6 +91,7 @@ static void task_destroy(LoadTask *task) {
     free(task->url);
     free(task->body);
     free(task->referrer);
+    free(task->internal_markup);
     free(task);
 }
 
@@ -179,11 +183,20 @@ static void load_task_start(TaiTabSet *tabs, LoadTask *task,
         return;
     }
     char *error = NULL;
-    TaiPageLoad *load = tai_page_load_async(
-        network, url, referrer, task->body, tabs->default_css,
-        task->width, task->height, tabs->rtl, page_load_done, task, &error);
+    TaiPageLoad *load = task->internal_markup
+        ? tai_page_load_async_markup(network, url, task->internal_markup,
+            tabs->default_css, task->width, task->height, tabs->rtl,
+            page_load_done, task, &error)
+        : tai_page_load_async(network, url, referrer, task->body,
+            tabs->default_css, task->width, task->height, tabs->rtl,
+            page_load_done, task, &error);
     tai_url_destroy(url);
     tai_url_destroy(referrer);
+    if (task->completed) {
+        completion_publish(tabs, task);
+        free(error);
+        return;
+    }
     if (!load) {
         completion_append(tabs, task, NULL, false, error);
         return;
@@ -260,6 +273,70 @@ static void *loader_main(void *opaque) {
     return NULL;
 }
 
+typedef struct {
+    char *text;
+    size_t length;
+    size_t capacity;
+} Markup;
+
+static bool markup_append(Markup *markup, const char *text) {
+    size_t length = strlen(text);
+    if (length > SIZE_MAX - markup->length - 1) return false;
+    size_t needed = markup->length + length + 1;
+    if (needed > markup->capacity) {
+        size_t capacity = markup->capacity ? markup->capacity : 128;
+        while (capacity < needed) {
+            if (capacity > SIZE_MAX / 2) { capacity = needed; break; }
+            capacity *= 2;
+        }
+        char *next = realloc(markup->text, capacity);
+        if (!next) return false;
+        markup->text = next;
+        markup->capacity = capacity;
+    }
+    memcpy(markup->text + markup->length, text, length + 1);
+    markup->length += length;
+    return true;
+}
+
+static bool markup_append_escaped(Markup *markup, const char *url) {
+    for (const unsigned char *p = (const unsigned char *)url; *p; p++) {
+        const char *escape = *p == '&' ? "&amp;" : *p == '<' ? "&lt;"
+            : *p == '>' ? "&gt;" : *p == '"' ? "&quot;"
+            : *p == '\'' ? "&#x27;" : NULL;
+        if (escape) {
+            if (!markup_append(markup, escape)) return false;
+        } else {
+            char byte[2] = {(char)*p, '\0'};
+            if (!markup_append(markup, byte)) return false;
+        }
+    }
+    return true;
+}
+
+static char *bookmarks_markup(const TaiBookmarks *bookmarks) {
+    TaiBookmarkSnapshot snapshot = {0};
+    if (!tai_bookmarks_snapshot(bookmarks, &snapshot)) return NULL;
+    Markup markup = {0};
+    bool ok = markup_append(&markup,
+        "<html><head><title>Bookmarks</title></head><body><h1>Bookmarks</h1>");
+    if (ok && !snapshot.count)
+        ok = markup_append(&markup, "<p>No bookmarks yet.</p>");
+    if (ok && snapshot.count) ok = markup_append(&markup, "<ul>");
+    for (size_t i = 0; ok && i < snapshot.count; i++) {
+        ok = markup_append(&markup, "<li><a href=\"") &&
+             markup_append_escaped(&markup, snapshot.urls[i]) &&
+             markup_append(&markup, "\">") &&
+             markup_append_escaped(&markup, snapshot.urls[i]) &&
+             markup_append(&markup, "</a></li>");
+    }
+    if (ok && snapshot.count) ok = markup_append(&markup, "</ul>");
+    if (ok) ok = markup_append(&markup, "</body></html>");
+    tai_bookmark_snapshot_destroy(&snapshot);
+    if (!ok) { free(markup.text); return NULL; }
+    return markup.text;
+}
+
 static LoadTask *task_create(TaiTabSet *tabs, TabSlot *slot, const char *url,
                              const char *body, LoadKind kind,
                              size_t history_target, char **error) {
@@ -282,6 +359,8 @@ static LoadTask *task_create(TaiTabSet *tabs, TabSlot *slot, const char *url,
     task->tab_id = slot->id;
     task->generation = slot->generation + 1;
     task->url = tai_strdup(url);
+    if (!strcmp(url, "about:bookmarks"))
+        task->internal_markup = bookmarks_markup(tabs->bookmarks);
     if (body) task->body = tai_strdup(body);
     const TaiPage *page = tai_session_page(slot->session);
     /* Python captures the tab's current URL before replacing it. While a
@@ -295,7 +374,8 @@ static LoadTask *task_create(TaiTabSet *tabs, TabSlot *slot, const char *url,
     task->width = tabs->width;
     task->height = tabs->height;
     atomic_init(&task->cancelled, false);
-    if (!task->url || (body && !task->body) ||
+    if (!task->url || (!strcmp(url, "about:bookmarks") &&
+                       !task->internal_markup) || (body && !task->body) ||
         (referrer && !task->referrer)) {
         task_destroy(task);
         set_error(error, "navigation task input allocation failed");
@@ -360,15 +440,19 @@ TaiTabSet *tai_tabset_create_with_home_url(const char *default_css, bool rtl,
     }
     tabs->default_css = default_css;
     tabs->home_url = tai_strdup(home_url);
+    tabs->bookmarks = tai_bookmarks_create();
     tabs->rtl = rtl;
     tabs->next_tab_id = 1;
-    if (!tabs->home_url) {
-        set_error(error, "New Tab URL allocation failed");
+    if (!tabs->home_url || !tabs->bookmarks) {
+        set_error(error, "tab set state allocation failed");
+        tai_bookmarks_destroy(tabs->bookmarks);
+        free(tabs->home_url);
         free(tabs);
         return NULL;
     }
     if (pthread_mutex_init(&tabs->mutex, NULL) != 0) {
         set_error(error, "tab set mutex initialization failed");
+        tai_bookmarks_destroy(tabs->bookmarks);
         free(tabs->home_url);
         free(tabs);
         return NULL;
@@ -377,6 +461,7 @@ TaiTabSet *tai_tabset_create_with_home_url(const char *default_css, bool rtl,
     if (pthread_cond_init(&tabs->condition, NULL) != 0) {
         set_error(error, "tab set condition initialization failed");
         pthread_mutex_destroy(&tabs->mutex);
+        tai_bookmarks_destroy(tabs->bookmarks);
         free(tabs->home_url);
         free(tabs);
         return NULL;
@@ -386,6 +471,7 @@ TaiTabSet *tai_tabset_create_with_home_url(const char *default_css, bool rtl,
         set_error(error, "page loader thread creation failed");
         pthread_cond_destroy(&tabs->condition);
         pthread_mutex_destroy(&tabs->mutex);
+        tai_bookmarks_destroy(tabs->bookmarks);
         free(tabs->home_url);
         free(tabs);
         return NULL;
@@ -405,8 +491,22 @@ TaiTabSet *tai_tabset_create_with_home_url(const char *default_css, bool rtl,
 }
 
 TaiTabSet *tai_tabset_create(const char *default_css, bool rtl, char **error) {
-    return tai_tabset_create_with_home_url(default_css, rtl,
+    TaiTabSet *tabs = tai_tabset_create_with_home_url(default_css, rtl,
         "https://browser.engineering/", error);
+    if (!tabs) return NULL;
+    /* An unusable bookmarks file must not keep the browser from starting.
+     * The file is left untouched and this run keeps favorites in memory. */
+    char *store_error = NULL;
+    TaiBookmarks *bookmarks = tai_bookmarks_open_default(&store_error);
+    if (bookmarks) {
+        tai_bookmarks_destroy(tabs->bookmarks);
+        tabs->bookmarks = bookmarks;
+    } else {
+        fprintf(stderr, "bookmarks will not be saved this session: %s\n",
+                store_error ? store_error : "cannot open bookmarks file");
+    }
+    free(store_error);
+    return tabs;
 }
 
 static bool append_new_slot(TaiTabSet *tabs, const char *url,
@@ -516,6 +616,24 @@ bool tai_tabset_navigate_address(TaiTabSet *tabs, const char *text,
     bool ok = navigate_url(tabs, url, NULL, error);
     free(url);
     return ok;
+}
+
+bool tai_tabset_toggle_bookmark(TaiTabSet *tabs, bool *bookmarked,
+                                char **error) {
+    if (error) { free(*error); *error = NULL; }
+    TabSlot *slot = active_slot(tabs);
+    if (!slot || slot->active_task || !tai_session_page(slot->session))
+        return set_error(error, "no committed bookmarkable page");
+    const char *url = tai_url_string(tai_page_url(
+        tai_session_page(slot->session)));
+    if (!tai_bookmarks_toggle(tabs->bookmarks, url, bookmarked))
+        return set_error(error, "bookmark toggle failed");
+    return true;
+}
+
+bool tai_tabset_open_bookmarks(TaiTabSet *tabs, char **error) {
+    if (error) { free(*error); *error = NULL; }
+    return navigate_url(tabs, "about:bookmarks", NULL, error);
 }
 
 bool tai_tabset_history_available(const TaiTabSet *tabs, int direction) {
@@ -637,6 +755,10 @@ bool tai_tabset_view(const TaiTabSet *tabs, TaiTabSetView *view) {
         return false;
     const TabSlot *slot = &tabs->slots[tabs->active];
     TaiPage *page = tai_session_page(slot->session);
+    const char *committed_url = page ? tai_url_string(tai_page_url(page)) : NULL;
+    bool bookmarkable = !slot->active_task && committed_url &&
+        *committed_url && strcmp(committed_url, "about:blank") &&
+        strcmp(committed_url, "about:bookmarks");
     size_t history_count = 0, history_index = 0;
     virtual_history(slot->session, slot->active_task, &history_count,
                     &history_index);
@@ -651,6 +773,9 @@ bool tai_tabset_view(const TaiTabSet *tabs, TaiTabSetView *view) {
         .loading = slot->active_task != NULL,
         .can_go_back = tai_tabset_history_available(tabs, -1),
         .can_go_forward = tai_tabset_history_available(tabs, 1),
+        .bookmarkable = bookmarkable,
+        .bookmarked = bookmarkable &&
+            tai_bookmarks_contains(tabs->bookmarks, committed_url),
     };
     return true;
 }
@@ -687,6 +812,7 @@ void tai_tabset_destroy(TaiTabSet *tabs) {
     for (size_t index = 0; index < tabs->count; index++)
         tai_session_destroy(tabs->slots[index].session);
     free(tabs->slots);
+    tai_bookmarks_destroy(tabs->bookmarks);
     free(tabs->home_url);
     if (tabs->condition_ready) pthread_cond_destroy(&tabs->condition);
     if (tabs->mutex_ready) pthread_mutex_destroy(&tabs->mutex);

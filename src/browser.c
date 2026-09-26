@@ -608,6 +608,93 @@ TaiPageLoad *tai_page_load_async(TaiNetwork *network, const TaiUrl *url,
     return load;
 }
 
+/* The general HTML parser preserves entities in attribute values. Internal
+ * bookmark links are generated from exact serialized URLs; decode their href
+ * after parsing so activation requests the saved URL rather than "&amp;". */
+static char *decode_internal_href(const char *source) {
+    size_t length = strlen(source);
+    char *decoded = malloc(length + 1);
+    if (!decoded) return NULL;
+    size_t out = 0;
+    for (size_t i = 0; i < length;) {
+        static const struct { const char *entity; char value; } entities[] = {
+            {"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'},
+            {"&quot;", '"'}, {"&#x27;", '\''},
+        };
+        bool matched = false;
+        for (size_t e = 0; e < sizeof(entities) / sizeof(entities[0]); e++) {
+            size_t entity_length = strlen(entities[e].entity);
+            if (entity_length <= length - i &&
+                !memcmp(source + i, entities[e].entity, entity_length)) {
+                decoded[out++] = entities[e].value;
+                i += entity_length;
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) decoded[out++] = source[i++];
+    }
+    decoded[out] = '\0';
+    return decoded;
+}
+
+static bool decode_internal_links(TaiNode *node) {
+    if (node->kind == TAI_ELEMENT && !strcmp(node->tag, "a")) {
+        const char *href = tai_map_get(&node->attributes, "href");
+        if (href) {
+            char *decoded = decode_internal_href(href);
+            if (!decoded) return false;
+            int priority = tai_map_priority(&node->attributes, "href");
+            bool ok = tai_map_set(&node->attributes, "href", decoded, priority);
+            free(decoded);
+            if (!ok) return false;
+        }
+    }
+    for (size_t i = 0; i < node->child_count; i++)
+        if (!decode_internal_links(node->children[i])) return false;
+    return true;
+}
+
+TaiPageLoad *tai_page_load_async_markup(TaiNetwork *network, const TaiUrl *url,
+    const char *markup, const char *default_css, double viewport_width,
+    double viewport_height, bool rtl, TaiPageLoadDone done, void *userdata,
+    char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (!network || !url || strcmp(tai_url_scheme(url), "about") ||
+        tai_url_view_source(url) || !markup || !default_css || !done) {
+        diagnostic(error, "invalid internal page load input");
+        return NULL;
+    }
+    TaiPage *page = page_create(url, viewport_width, viewport_height, rtl,
+                                error);
+    if (!page) return NULL;
+
+    TaiResponse response = {.body = (char *)markup, .length = strlen(markup),
+                            .status = 200};
+    Resource *resources = NULL;
+    size_t resource_count = 0;
+    char *load_error = NULL;
+    bool prepared = page_prepare_document(page, url, &response, default_css,
+                                          &resources, &resource_count,
+                                          &load_error);
+    if (prepared && !decode_internal_links(tai_document_root(page->document))) {
+        diagnostic(&load_error, "internal link allocation failed");
+        prepared = false;
+    }
+    if (prepared)
+        prepared = page_apply_resources(page, resources, resource_count,
+                                        &load_error) &&
+                   page_finish_visual(page, &load_error);
+    resources_destroy(resources, resource_count);
+    if (!prepared) {
+        tai_page_destroy(page);
+        page = NULL;
+        if (!load_error) load_error = tai_strdup("internal page rendering failed");
+    }
+    done(userdata, page, false, load_error);
+    return NULL;
+}
+
 void tai_page_load_async_cancel(TaiPageLoad *load) {
     if (!load) return;
     TaiPageLoadRequest *request = load->requests;

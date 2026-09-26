@@ -52,6 +52,7 @@ set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(deps/SDL EXCLUDE_FROM_ALL)
 
 add_library(tai_core src/core.c src/url.c src/dom.c src/css.c src/scheduler.c
+  src/bookmarks.c
   src/js.c src/layout.c src/render.c src/network.c src/browser.c src/session.c
   src/tabset.c)
 target_include_directories(tai_core PUBLIC include)
@@ -157,6 +158,21 @@ if(BUILD_TESTING)
   target_link_libraries(test_history PRIVATE tai_core)
   target_compile_options(test_history PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME browser_history COMMAND test_history)
+  add_executable(test_bookmarks tests/test_bookmarks.c)
+  target_link_libraries(test_bookmarks PRIVATE tai_core)
+  target_compile_options(test_bookmarks PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  target_link_options(test_bookmarks PRIVATE
+    "LINKER:--wrap=malloc,--wrap=realloc,--wrap=fsync,--wrap=rename")
+  add_test(NAME bookmarks COMMAND test_bookmarks)
+  add_executable(test_tabset_bookmarks tests/test_tabset_bookmarks.c)
+  target_link_libraries(test_tabset_bookmarks PRIVATE tai_core)
+  target_compile_options(test_tabset_bookmarks PRIVATE
+    -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME bookmarks_integration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/bookmarks_integration.py"
+    $<TARGET_FILE:test_tabset_bookmarks>)
+  add_test(NAME bookmarks_oracle_probe COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/bookmarks_oracle_probe.py" --check)
   add_executable(test_tabset tests/test_tabset.c)
   target_link_libraries(test_tabset PRIVATE tai_core)
   target_compile_options(test_tabset PRIVATE -Wall -Wextra -Wpedantic -Werror)

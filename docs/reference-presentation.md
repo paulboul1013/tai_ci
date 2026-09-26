@@ -17,7 +17,7 @@ surface 繪製並上傳至獨立 texture；page 與 chrome texture 在 SDL scene
 Headless `--screenshot` 仍是 page-only 800×532，不包含 Chrome。
 Forward 控制項在寬度 ≥94px 時位於 (49,36)，低於 94px 時位於 (0,66)，與 Python probe 的
 位置一致。Window resize event 若任一維 ≤10px 會忽略並保留上一有效畫面；dummy 測試
-覆蓋 0×0、10×10、10×200、200×10 resize no-op。低寬度控件限制及尚未實作的 bookmark row
+覆蓋 0×0、10×10、10×200、200×10 resize no-op。低寬度控件限制
 由 [migration plan](../PORTING_PLAN.md) 追蹤；最新視窗檢查及 acceptance evidence 見
 [`ACCEPTANCE.md`](../ACCEPTANCE.md)。
 
@@ -45,6 +45,17 @@ Chrome 轉成從 x=34 到右緣的等寬 tab 方框；每格寬 `(pixel_width - 
 不增加 tab，也不清除地址草稿或焦點；TabSet API 再建立會回傳明確的上限錯誤。兩個 tabs 的 Python oracle 幾何
 維持上述契約；等寬壓縮與 25 個上限是使用者指定的 native 差異，見
 [`PORTING_PLAN.md`](../PORTING_PLAN.md)。極窄視窗可能無法讀出每個編號，仍列為可用性缺口。
+
+Tabbed Chrome 有兩個書籤控制，只存在於 tabbed `--window`，是使用者指定的 native UX。
+書籤清單按鈕是 26×24 的獨立方框（灰星加三條清單線），寬度 ≥128px 時位於
+(98, Back y)；94–127px 時位於 (0, Back y+30)；79–93px 時位於 (49, Forward y)；
+<79px 時位於 (0, Forward y+30)。點擊會丟棄地址草稿，並在 active tab 以一般 navigation
+開啟 `about:bookmarks`。收藏星畫在地址欄內右側，中心 (field right−12, field 中線)，
+外半徑 7px；未收藏為灰色，已收藏為金色。命中區是地址欄最右 23px，並先於地址欄判定；
+地址文字裁切寬度為 field−28，避免文字壓到星星。只有已提交、未 pending、且不是
+`about:blank`／`about:bookmarks` 的頁面可切換收藏；不可收藏時點擊只丟棄地址草稿。
+Tabbed 地址欄寬度另夾限為不超過視窗寬度，讓 <100px 視窗仍看得到星星；單頁 Chrome
+維持 Python 的最小 100px。各寬度下兩個控制與 Back/Forward、地址欄都不重疊。
 
 Tabbed page viewport 高度使用 `max(1, window_height - tabs_chrome_bottom(width))`；800×600
 外框因此為 800×525.18，raster height 向上取整為 526px，page 從 y=74.82 開始。Page layout、

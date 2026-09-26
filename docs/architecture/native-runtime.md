@@ -129,6 +129,18 @@ private, incompatible node layouts.
   if it supersedes a pending navigation, it uses that provisional URL, matching
   Python's capture-before-assignment behavior. Other tabs never supply a
   Referer to the request.
+- `TaiTabSet` owns one `TaiBookmarks` collection shared by all tabs; chrome
+  reads it only through `TaiTabSetView.bookmarkable/bookmarked`. Toggle,
+  lookup, and the `about:bookmarks` snapshot run on the SDL thread. Starting an
+  `about:bookmarks` navigation copies a sorted snapshot into generated HTML
+  owned by the load task, so the loader thread never reads the mutable
+  collection. `tai_tabset_create` opens the per-user file
+  (`$XDG_DATA_HOME/tai-browser/bookmarks`, else
+  `~/.local/share/tai-browser/bookmarks`); each toggle writes a temporary file,
+  fsyncs, and renames it before changing memory, so a failed write leaves both
+  unchanged. If the file cannot be opened or parsed, the tab set warns on
+  stderr, keeps the file untouched, and uses a memory-only collection.
+  `tai_tabset_create_with_home_url` is always memory-only.
 - Window resize updates every committed session page on the SDL thread. A
   pending candidate is resized to the latest viewport immediately before
   commit. Tab selection changes only the active index; it does not move page,
