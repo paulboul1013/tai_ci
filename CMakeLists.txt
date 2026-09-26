@@ -142,6 +142,12 @@ if(BUILD_TESTING)
   target_link_libraries(test_presentation PRIVATE tai_presentation)
   target_compile_options(test_presentation PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME presentation_dummy COMMAND test_presentation)
+  add_executable(tab_strip_probe tests/tab_strip_probe.c)
+  target_link_libraries(tab_strip_probe PRIVATE tai_presentation)
+  target_compile_options(tab_strip_probe PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME tab_strip_differential COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/tab_strip_differential.py"
+    $<TARGET_FILE:tab_strip_probe>)
   add_executable(hit_probe tests/hit_probe.c)
   target_link_libraries(hit_probe PRIVATE tai_core)
   target_compile_options(hit_probe PRIVATE -Wall -Wextra -Wpedantic -Werror)

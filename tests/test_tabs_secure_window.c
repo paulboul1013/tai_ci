@@ -44,6 +44,12 @@ static const char *css =
     "html {display:block} body {display:block} h1 {display:block} "
     "p {display:block}";
 static const int breakpoints[] = {800, 232, 231, 120, 70};
+/* Every scenario here has one tab, like the oracle probe. */
+static const TaiTabSetView one_tab = {.tab_count = 1};
+
+static double single_tab_address_y(int width) {
+  return tabs_address_y(width, tai_pres_tab_row_wraps(&one_tab, width));
+}
 
 static void print_geometry(void) {
   putchar('{');
@@ -51,7 +57,7 @@ static void print_geometry(void) {
     int width = breakpoints[i];
     for (int secure = 1; secure >= 0; secure--) {
       TaiAddressField field = tai_tabs_address_field(width, secure);
-      double y = tabs_address_y(width);
+      double y = single_tab_address_y(width);
       printf("%s\"%s_%d\":{\"address_rect\":[%.3f,%.3f,%.3f,%.3f],"
              "\"lock_rect\":",
              i || !secure ? "," : "", secure ? "secure" : "insecure", width,
@@ -171,7 +177,7 @@ static TaiTabSetView run_window(const char *url, const char *ca_file,
                                                &error);
   CHECK(tabs && !error);
   Script script = {.steps = steps, .count = count,
-                   .y = (float)(tabs_address_y(width) +
+                   .y = (float)(single_tab_address_y(width) +
                                 TAI_ADDRESS_HEIGHT / 2.0)};
   atomic_init(&script.window_id, 0);
   CHECK(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));

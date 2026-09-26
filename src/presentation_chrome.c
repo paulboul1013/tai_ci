@@ -84,8 +84,8 @@ static void draw_lock(cairo_t *context, double center_x, double center_y) {
   cairo_stroke(context);
 }
 
-static void draw_bookmarks_button(cairo_t *context, int width) {
-  double x = bookmarks_button_x(width), y = bookmarks_button_y(width);
+static void draw_bookmarks_button(cairo_t *context, int width, bool wraps) {
+  double x = bookmarks_button_x(width), y = bookmarks_button_y(width, wraps);
   set_source(context, 0.92, 0.92, 0.92);
   cairo_rectangle(context, x, y, 26.0, 24.0);
   cairo_fill_preserve(context);
@@ -308,13 +308,14 @@ bool tai_pres_render_tabs_chrome_texture(SDL_Renderer *renderer,
                                       const TaiTabSetView *view, int width,
                                       const AddressEditor *editor,
                                       char **error) {
-  double bottom = tabs_chrome_bottom(width);
+  bool wraps = tai_pres_tab_row_wraps(view, width);
+  double bottom = tabs_chrome_bottom(width, wraps);
   TaiAddressField field = tai_tabs_address_field(width, view->secure);
   double field_x = field.x;
-  double field_y = tabs_address_y(width);
+  double field_y = tabs_address_y(width, wraps);
   double field_width = field.width;
   double forward_x = forward_button_x(width);
-  double forward_y = tabs_forward_button_y(width);
+  double forward_y = tabs_forward_button_y(width, wraps);
   int height = (int)ceil(bottom);
   if (!valid_pixel_dimensions(width, height)) {
     set_error(error, "unsupported tab chrome dimensions");
@@ -389,11 +390,11 @@ bool tai_pres_render_tabs_chrome_texture(SDL_Renderer *renderer,
     }
   }
 
-  draw_button(context, 0.0, tabs_back_button_y(width), 45.0, 24.0,
+  draw_button(context, 0.0, tabs_back_button_y(wraps), 45.0, 24.0,
               view->can_go_back, false);
   draw_button(context, forward_x, forward_y, 45.0, 24.0,
               view->can_go_forward, true);
-  draw_bookmarks_button(context, width);
+  draw_bookmarks_button(context, width, wraps);
   if (view->secure)
     draw_lock(context, field.slot_x + TAI_SECURITY_ICON_SLOT / 2.0,
               field_y + TAI_ADDRESS_HEIGHT / 2.0);
@@ -468,6 +469,16 @@ bool tai_pres_render_tabs_chrome_texture(SDL_Renderer *renderer,
   SDL_DestroyTexture(*texture);
   *texture = next;
   return true;
+}
+
+bool tai_pres_tab_row_wraps(const TaiTabSetView *view, int width) {
+  double compact_slot_width = 0.0;
+  if (!view || !view->tab_count ||
+      compact_tab_slot(view, width, &compact_slot_width))
+    return false;
+  size_t last = view->tab_count - 1;
+  return tab_link_left(view, last) +
+             tab_link_width(last, view->active_index) > (double)width;
 }
 
 bool tai_pres_tabs_tab_link_hit(const TaiTabSetView *view, int width,

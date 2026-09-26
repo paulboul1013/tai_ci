@@ -196,13 +196,14 @@ bool tai_pres_handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
   *chrome_changed = false;
   if (event->button.windowID != window_id ||
       event->button.button != SDL_BUTTON_LEFT ||
-      !isfinite(event->button.x) || !isfinite(event->button.y) ||
-      event->button.y >= tabs_chrome_bottom(width)) return true;
+      !isfinite(event->button.x) || !isfinite(event->button.y)) return true;
   TaiTabSetView view;
   if (!tai_tabset_view(tabs, &view)) {
     set_error(error, "active tab snapshot unavailable");
     return false;
   }
+  bool wraps = tai_pres_tab_row_wraps(&view, width);
+  if (event->button.y >= tabs_chrome_bottom(width, wraps)) return true;
   double x = event->button.x, y = event->button.y;
   if (view.tab_count >= TAI_MAX_TABS &&
       x >= 0.0 && x < 30.0 && y >= 6.0 && y < 30.0)
@@ -236,10 +237,10 @@ bool tai_pres_handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
   /* A click in the lock slot misses every target and falls through to the
    * blank-chrome path below, as in Python. */
   TaiAddressField field = tai_tabs_address_field(width, view.secure);
-  double field_x = field.x, field_y = tabs_address_y(width);
+  double field_x = field.x, field_y = tabs_address_y(width, wraps);
   double field_width = field.width;
   double bookmarks_x = bookmarks_button_x(width);
-  double bookmarks_y = bookmarks_button_y(width);
+  double bookmarks_y = bookmarks_button_y(width, wraps);
   if (x >= bookmarks_x && x < bookmarks_x + 26.0 &&
       y >= bookmarks_y && y < bookmarks_y + 24.0) {
     tai_pres_editor_discard(editor);
@@ -284,10 +285,10 @@ bool tai_pres_handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
     return true;
   }
 
-  double back_y = tabs_back_button_y(width);
+  double back_y = tabs_back_button_y(wraps);
   bool back_hit = x >= 0.0 && x < 45.0 && y >= back_y && y < back_y + 24.0;
   double forward_x = forward_button_x(width);
-  double forward_y = tabs_forward_button_y(width);
+  double forward_y = tabs_forward_button_y(width, wraps);
   bool forward_hit = x >= forward_x && x < forward_x + 45.0 &&
       y >= forward_y && y < forward_y + 24.0;
   tai_pres_editor_discard(editor);

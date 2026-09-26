@@ -296,17 +296,22 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
   else if (!editor.text) set_error(error, "address editor allocation failed");
 
   int pixel_width = 0, pixel_height = 0;
+  /* Page viewports end at the chrome bottom, which moves when the tab strip
+   * wraps; track the state the committed viewports were sized for. */
+  bool row_wraps = false;
   if (ok) {
+    const TaiTabSetView first_tab = {.tab_count = 1};
     if (!SDL_GetWindowSizeInPixels(window, &pixel_width, &pixel_height)) {
       set_error(error, SDL_GetError());
       ok = false;
-    } else if (!valid_pixel_dimensions(pixel_width, pixel_height) ||
-               tabs_content_height(pixel_width, pixel_height) <= 0.0) {
+    } else if (!valid_pixel_dimensions(pixel_width, pixel_height)) {
       set_error(error, "unsupported tabbed window pixel dimensions");
       ok = false;
     } else {
+      row_wraps = tai_pres_tab_row_wraps(&first_tab, pixel_width);
       ok = tai_tabset_start(tabs, initial_url, pixel_width,
-                            tabs_content_height(pixel_width, pixel_height),
+                            tabs_content_height(pixel_width, pixel_height,
+                                                row_wraps),
                             error);
     }
   }
@@ -357,12 +362,12 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
         bool toolbar_click = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
             event.button.windowID == window_id &&
             isfinite(event.button.y) &&
-            event.button.y < tabs_chrome_bottom(pixel_width);
+            event.button.y < tabs_chrome_bottom(pixel_width, row_wraps);
         bool content_click = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
             event.button.windowID == window_id &&
             event.button.button == SDL_BUTTON_LEFT &&
             isfinite(event.button.y) &&
-            event.button.y >= tabs_chrome_bottom(pixel_width);
+            event.button.y >= tabs_chrome_bottom(pixel_width, row_wraps);
         if (toolbar_click) {
           if (!tai_pres_handle_tabs_chrome_click(tabs, &event, window_id,
                                                  pixel_width, &editor,
@@ -417,7 +422,8 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
         if (!handled && view.page) {
           bool changed = false;
           if (!tai_pres_handle_page_event(view.page, &event, window_id,
-                  window_focused, tabs_chrome_bottom(pixel_width), &changed,
+                  window_focused, tabs_chrome_bottom(pixel_width, row_wraps),
+                  &changed,
                   error)) {
             if (!error || !*error) set_error(error, SDL_GetError());
             ok = false;
@@ -475,8 +481,10 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
           int resized_width = event.window.data1;
           int resized_height = event.window.data2;
           if (resized_width > 10 && resized_height > 10) {
+            bool resized_wraps = tai_pres_tab_row_wraps(&view, resized_width);
             double view_height = tabs_content_height(resized_width,
-                                                      resized_height);
+                                                      resized_height,
+                                                      resized_wraps);
             if (!valid_pixel_dimensions(resized_width, resized_height) ||
                 !tai_tabset_resize(tabs, resized_width, view_height, error)) {
               if (!error || !*error)
@@ -486,6 +494,7 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
             }
             pixel_width = resized_width;
             pixel_height = resized_height;
+            row_wraps = resized_wraps;
             page_changed = true;
             chrome_changed = true;
           }
@@ -520,6 +529,26 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
       chrome_changed = true;
     }
     if (!running) break;
+    if (!tai_tabset_view(tabs, &view)) {
+      set_error(error, "active tab snapshot unavailable");
+      ok = false;
+      break;
+    }
+    /* New Tab (or switching which label is bold) can wrap or unwrap the tab
+     * strip; keep every page viewport equal to the area below the chrome. */
+    bool wraps_now = tai_pres_tab_row_wraps(&view, pixel_width);
+    if (wraps_now != row_wraps) {
+      if (!tai_tabset_resize(tabs, pixel_width,
+                             tabs_content_height(pixel_width, pixel_height,
+                                                 wraps_now),
+                             error)) {
+        ok = false;
+        break;
+      }
+      row_wraps = wraps_now;
+      page_changed = true;
+      chrome_changed = true;
+    }
     if (page_changed || chrome_changed || force_present) {
       if (!tai_tabset_view(tabs, &view) ||
           !tai_pres_repaint_tabs_scene(renderer, &page_texture,

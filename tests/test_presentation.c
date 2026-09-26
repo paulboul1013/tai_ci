@@ -1074,9 +1074,11 @@ int main(void) {
   tai_tabset_destroy(tabs);
 
   /* At 120px the list button moves above the address field and the star
-   * remains in the field's rightmost 23px. */
+   * remains in the field's rightmost 23px. With one tab the tab strip does
+   * not wrap, so the rows sit where tests/fixtures/https_oracle.json puts
+   * them: list button y 72.48-96.48, address field y 99.212-115.212. */
   static const SDL_FPoint narrow_bookmark_positions[] = {
-      {90.0f, 130.0f}, {12.0f, 103.0f},
+      {90.0f, 107.0f}, {12.0f, 84.0f},
   };
   tabs = tai_tabset_create_with_home_url(
       "html {display:block} body {display:block} p {display:block}", false,
@@ -1091,6 +1093,35 @@ int main(void) {
   saved_link = find(tai_page_root(tab_view.page), "a");
   assert(saved_link && !strcmp(tai_map_get(&saved_link->attributes, "href"),
                                "data:text/html,<p>initial</p>"));
+  tai_tabset_destroy(tabs);
+
+  /* One tab at 120px leaves the tab strip on one line; New Tab wraps it,
+   * which moves the chrome bottom from 118.48 to 138.48 (Python oracle), so
+   * both tabs' viewports shrink to the area below it. */
+  static const InputKind wrap_kinds[] = {INPUT_TABS_NEW_TAB};
+  static const SDL_FPoint wrap_positions[] = {{15.0f, 18.0f}};
+  tabs = tai_tabset_create_with_home_url(
+      "html {display:block} body {display:block} p {display:block}", false,
+      "data:text/html,<p>home</p>", &error);
+  assert(tabs && !error);
+  present_delayed_bookmark_inputs(tabs, "data:text/html,<p>initial</p>",
+      120, 300, wrap_kinds, wrap_positions, 1, true);
+  for (int attempt = 0; attempt < 2000; attempt++) {
+    bool pumped = false;
+    assert(tai_tabset_pump(tabs, &pumped, &error) && !error);
+    assert(tai_tabset_view(tabs, &tab_view));
+    if (!tab_view.loading && tab_view.page) break;
+    struct timespec pause = {.tv_nsec = 1000000};
+    nanosleep(&pause, NULL);
+  }
+  assert(tab_view.tab_count == 2 && tab_view.active_index == 1 &&
+         tab_view.page && !tab_view.loading);
+  assert(fabs(tai_page_viewport_height(tab_view.page) - (300.0 - 138.48)) <
+         0.001);
+  assert(tai_tabset_select(tabs, 0) && tai_tabset_view(tabs, &tab_view));
+  assert(tab_view.page &&
+         fabs(tai_page_viewport_height(tab_view.page) - (300.0 - 138.48)) <
+             0.001);
   tai_tabset_destroy(tabs);
 
   tai_page_destroy(click_page);

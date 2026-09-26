@@ -46,13 +46,15 @@ static inline double chrome_bottom(int width) {
          width >= 79 ? 112.0 : 142.0;
 }
 
-static inline double tabs_toolbar_offset(int width) {
-  /* The second tab line wraps below 125px in the frozen Python chrome. */
-  return width >= 125 ? 6.48 : 26.48;
+/* Tabbed toolbar rows sit below the tab strip. In the frozen Python chrome
+ * they move down one 20px line exactly when a tab label wraps, which depends
+ * on the tab labels, not the width alone; tai_pres_tab_row_wraps() decides. */
+static inline double tabs_toolbar_offset(bool wraps) {
+  return wraps ? 26.48 : 6.48;
 }
 
-static inline double tabs_chrome_bottom(int width) {
-  return chrome_bottom(width) + tabs_toolbar_offset(width);
+static inline double tabs_chrome_bottom(int width, bool wraps) {
+  return chrome_bottom(width) + tabs_toolbar_offset(wraps);
 }
 
 static inline double address_x(int width) { return width >= 232 ? 132.0 : 0.0; }
@@ -61,30 +63,30 @@ static inline double address_y(int width) {
          width >= 128 ? TAI_ADDRESS_NARROW_Y :
          width >= 79 ? 92.732 : 122.732;
 }
-static inline double tabs_address_y(int width) {
-  return address_y(width) + tabs_toolbar_offset(width);
+static inline double tabs_address_y(int width, bool wraps) {
+  return address_y(width) + tabs_toolbar_offset(wraps);
 }
 static inline double address_width(int width) {
   return width >= 232 ? fmax(100.0, width - 150.0) : 100.0;
 }
 static inline double forward_button_x(int width) { return width >= 94 ? 49.0 : 0.0; }
 static inline double forward_button_y(int width) { return width >= 94 ? 36.0 : 66.0; }
-static inline double tabs_back_button_y(int width) {
-  return 36.0 + tabs_toolbar_offset(width);
+static inline double tabs_back_button_y(bool wraps) {
+  return 36.0 + tabs_toolbar_offset(wraps);
 }
-static inline double tabs_forward_button_y(int width) {
-  return forward_button_y(width) + tabs_toolbar_offset(width);
+static inline double tabs_forward_button_y(int width, bool wraps) {
+  return forward_button_y(width) + tabs_toolbar_offset(wraps);
 }
 
 static inline double bookmarks_button_x(int width) {
   return width >= 128 ? 98.0 : width >= 79 && width < 94 ? 49.0 : 0.0;
 }
 
-static inline double bookmarks_button_y(int width) {
-  if (width >= 128) return tabs_back_button_y(width);
-  if (width >= 94) return tabs_back_button_y(width) + 30.0;
-  if (width >= 79) return tabs_forward_button_y(width);
-  return tabs_forward_button_y(width) + 30.0;
+static inline double bookmarks_button_y(int width, bool wraps) {
+  if (width >= 128) return tabs_back_button_y(wraps);
+  if (width >= 94) return tabs_back_button_y(wraps) + 30.0;
+  if (width >= 79) return tabs_forward_button_y(width, wraps);
+  return tabs_forward_button_y(width, wraps) + 30.0;
 }
 
 static inline double content_height(int width, int height, bool chrome_enabled) {
@@ -96,12 +98,13 @@ static inline int content_pixel_height(int width, int height, bool chrome_enable
   return (int)ceil(content_height(width, height, chrome_enabled));
 }
 
-static inline double tabs_content_height(int width, int height) {
-  return fmax(1.0, (double)height - tabs_chrome_bottom(width));
+static inline double tabs_content_height(int width, int height, bool wraps) {
+  return fmax(1.0, (double)height - tabs_chrome_bottom(width, wraps));
 }
 
-static inline int tabs_content_pixel_height(int width, int height) {
-  return (int)ceil(tabs_content_height(width, height));
+static inline int tabs_content_pixel_height(int width, int height,
+                                            bool wraps) {
+  return (int)ceil(tabs_content_height(width, height, wraps));
 }
 
 /* presentation_events.c */
@@ -154,6 +157,10 @@ bool tai_pres_render_tabs_chrome_texture(SDL_Renderer *renderer,
                                          char **error);
 bool tai_pres_tabs_tab_link_hit(const TaiTabSetView *view, int width,
                                 double x, double y, size_t *index);
+/* True when the last tab label ends past the window, so Python wraps the tab
+ * strip onto a second line (84px for one tab, 125px for two). Three or more
+ * overflowing tabs use native's one-row numbered boxes and never wrap. */
+bool tai_pres_tab_row_wraps(const TaiTabSetView *view, int width);
 
 /* presentation_address.c */
 size_t tai_pres_utf8_width(const char *text, size_t length, size_t offset,

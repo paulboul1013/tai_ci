@@ -21,9 +21,15 @@ Forward 控制項在寬度 ≥94px 時位於 (49,36)，低於 94px 時位於 (0,
 由 [migration plan](../PORTING_PLAN.md) 追蹤；最新視窗檢查及 acceptance evidence 見
 [`ACCEPTANCE.md`](../ACCEPTANCE.md)。
 
-Tabbed `--window` 的 tab Chrome bottom/address y 在寬度 ≥232px 時為 74.82/55.552；120px
-窄寬探針得到 138.48/119.212。兩個 tabs 在 125px 寬開始保持單行；127px 的
-bottom/address y 為 118.48/99.212。800px 寬、兩個 tabs 時，New Tab button rect 為
+Tabbed `--window` 的 tab Chrome bottom/address y 在寬度 ≥232px 時為 74.82/55.552。
+Toolbar 各列（Back/Forward、書籤按鈕、地址欄）與 chrome bottom 只在 tab 列換行時下移
+20px，而是否換行取決於最後一個 tab 標籤的右緣（`tai_pres_tab_row_wraps()`，用
+`tab_link_left/width`）：一個 tab 右緣 84，<84px 換行；兩個 tab 右緣 125，<125px 換行；
+≥3 個超寬時使用 native 單行編號格，不換行。因此 120px 時一個 tab 為 118.48/99.212，
+兩個 tab 為 138.48/119.212；127px 為 118.48/99.212。換行狀態改變（例如 New Tab）時，
+所有 tab 的 page viewport 立即改為新 chrome bottom 以下的高度。
+`tests/tab_strip_differential.py` 以 live Python oracle 比對一／兩個 tab、各 active、
+17 個寬度的 chrome bottom、地址欄 y 與 Back y（容差 0.15px，見 PORTING_PLAN）。800px 寬、兩個 tabs 時，New Tab button rect 為
 `[0,6,30,30]`，Tab 0 link text 為 `[34,19.072,71,35.072]`，Tab 1 為
 `[75,19.184,125,35.184]`（Tab 1 作用中）。切到 Tab 0 後，粗體標籤擴大，兩個 link rect
 分別為 `[34,19.184,84,35.184]` 與 `[88,19.072,125,35.072]`；Tab 1 的起點隨前一個

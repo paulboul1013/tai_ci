@@ -22,7 +22,8 @@
 | 地址與外部開啟 | Native 拒絕 malformed/unsupported 直接網址，尚未啟動 `mailto:` 外部程式；Python 的 URL 解析與外部啟動不同。一般文字仍轉為 DuckDuckGo 查詢。 |
 | 快捷鍵與 wheel | Native 在地址欄未聚焦時支援 Alt+Left/Alt+Right；尚無 Ctrl+N／新視窗／Escape 專用操作。未知 wheel direction 或非有限 y 為 no-op，與 frozen Python 不同。 |
 | History 保存 | 兩者均保存 URL，Back/Forward 以 GET 重載；不保存 POST body、舊 DOM 或 scroll snapshot。此項是既有契約，下一切片驗證跨 tab 與 pending 狀態。 |
-| Chrome 缺口 | 完整 chrome 視覺比對尚待完成。單一 tab 且寬度 79–124px 時，native 的地址列 y 仍假設第二個 tab 已換行（120px：native 119.212，Python 99.212；`tests/https_integration.py` 暫以已知差異略過該 y）。 |
+| Chrome 缺口 | 完整 chrome 視覺比對尚待完成。窄寬 tab 標籤本身的排版仍是近似：Python 逐字換行（例如 84–119px、Tab 0 作用中時 Tab 1 整個移到第二行 `[0,39.2,37,55.2]`，<84px 時 `[Tab` 與 `0]` 分兩行），native 以固定規則放置標籤與命中區；<70px 的 Python 列高也未建模。 |
+| Tab 列換行時的 viewport | Python 只在視窗 resize 或建立新 tab 時以當下 chrome bottom 計算 tab 高度，New Tab 造成換行後，既有 tab 的 viewport 仍是舊高度（下緣超出視窗 20px）；native 在換行狀態改變時立即把所有 tab 的 viewport 調成新 chrome bottom 以下的高度，讓捲動範圍與可見區一致。Python 依粗體／一般標籤混合，換行後列高另有 ≤0.14px 的差異，native 使用單一行高。 |
 | HTTPS 鎖頭時機 | Python 導覽一開始就清除 `secure`，pending 期間沒有鎖頭；native 在新頁面 commit 前保留舊頁面的鎖頭（使用者於 2026-09-26 決定），延伸既有「pending 時顯示舊頁面」策略。之後的載入失敗（含憑證錯誤）回滾到舊 HTTPS 頁面時鎖頭跟著恢復；Python 顯示錯誤頁、沒有鎖頭。首次失敗兩者都沒有鎖頭。 |
 | 測試信任根 | 本機 HTTPS 測試需要信任每次產生的 CA。Python oracle 以 `SSL_CERT_FILE` 設定；native 只透過測試用 `tai_network_set_ca_file()`／`tai_tabset_create_for_test()`，不讀環境變數，`tai-browser` 從不呼叫（使用者於 2026-09-26 決定）。 |
 | 書籤控制 | Python 以單一 toolbar 星星（黃／白底）切換收藏，須手動輸入 `about:bookmarks` 看清單。Native 以地址欄內灰／金星切換收藏，並以地址欄左側獨立按鈕開啟清單；`about:bookmarks` 仍可直接輸入。可收藏條件、排序與逸出與 Python 相同。幾何見 [presentation 契約](docs/reference-presentation.md)。 |

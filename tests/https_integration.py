@@ -24,12 +24,6 @@ import threading
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ORACLE = ROOT / "tests" / "fixtures" / "https_oracle.json"
-# Widths where the native address row sits at a different y than the oracle
-# for reasons outside this slice: below 125px native always reserves the
-# second tab-strip row that Python adds only once a second tab wraps
-# (docs/reference-presentation.md). x extents and the lock's offset from the
-# field are still compared there.
-KNOWN_Y_DIFFERENCES = {120}
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import https_fixture  # noqa: E402
@@ -74,17 +68,13 @@ def check_geometry(test_window):
         gx, gy, gr, gb = got["address_rect"]
         # Native keeps the field inside the window (PORTING_PLAN.md).
         want = [ex, ey, min(er, width), eb]
-        if width in KNOWN_Y_DIFFERENCES:
-            want[1], want[3] = gy, gb
         assert [gx, gy, gr, gb] == want, (key, got, expected)
         if expected["lock_rect"] is None:
             assert got["lock_rect"] is None, (key, got)
             continue
         lx, ly, lr, lb = expected["lock_rect"]
         glx, gly, glr, glb = got["lock_rect"]
-        assert [glx, glr] == [lx, lr], (key, got, expected)
-        assert [round(gly - gy, 3), round(glb - gy, 3)] == \
-            [round(ly - ey, 3), round(lb - ey, 3)], (key, got, expected)
+        assert [glx, gly, glr, glb] == [lx, ly, lr, lb], (key, got, expected)
 
 
 def check_window(test_window, servers, ca):

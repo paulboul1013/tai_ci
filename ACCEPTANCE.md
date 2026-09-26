@@ -28,6 +28,7 @@ Pixel-perfect 只在字型、版本、backend 與環境固定時使用；優先�
 
 | Slice | Date | State | Summary (proven / main gap) | Detail |
 | --- | --- | --- | --- | --- |
+| Tab 列換行與 toolbar 列位置 | 2026-09-26 | VALIDATING | toolbar 只在 tab 標籤真的換行時下移，51 個一／兩 tab 案例與 live oracle 相符，New Tab 換行時 viewport 跟著調整；dummy SDL、ASan-UBSan-LSan、Xvfb 120px 真實視窗已驗證；窄寬標籤逐字排版未處理 | [detail](docs/acceptance/2026-09-26-tab-strip-wrap-rows.md) |
 | HTTPS 鎖頭與地址欄寬度 | 2026-09-26 | VALIDATING | 本機 HTTPS oracle（成功／pending／憑證與傳輸錯誤／redirect／history／跨 tab）與 5 個寬度的幾何凍結；native 整合、dummy SDL 命中、ASan-UBSan-LSan 與 Xvfb 真實視窗鎖頭都已驗證；chrome 像素比對與單 tab 窄寬 y 差異未處理 | [detail](docs/acceptance/2026-09-26-https-lock.md) |
 | 兩顆星書籤 | 2026-09-26 | VALIDATING | oracle/integration/ASan-UBSan-LSan（fontconfig/cairo suppression）全過，重啟後持久化、多寬度真實視窗星星與清單導覽已驗證；79–231px dummy SDL 命中與 WSLg/Wayland 點擊未覆蓋 | [detail](docs/acceptance/2026-09-26-two-star-bookmarks.md) |
 | 原生 Wayland 地址列鍵盤輸入 | 2026-09-26 | VALIDATING | 隔離 Weston（X11 backend）驗證 XTEST→Wayland seat→SDL3→地址列真實鍵盤輸入；WSLg 自身 Wayland seat 未覆蓋 | [detail](docs/acceptance/2026-09-26-native-wayland-keyboard.md) |

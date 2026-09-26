@@ -7,24 +7,27 @@ static bool present_tabs_scene(SDL_Renderer *renderer,
                                int height) {
   if (!SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255) ||
       !SDL_RenderClear(renderer)) return false;
+  bool wraps = tai_pres_tab_row_wraps(view, width);
+  double bottom = tabs_chrome_bottom(width, wraps);
   if (view->page && page_texture) {
-    SDL_FRect page_rect = {0.0f, (float)tabs_chrome_bottom(width),
-                           (float)width,
-                           (float)tabs_content_pixel_height(width, height)};
+    SDL_FRect page_rect = {0.0f, (float)bottom, (float)width,
+                           (float)tabs_content_pixel_height(width, height,
+                                                            wraps)};
     if (!SDL_RenderTexture(renderer, page_texture, NULL, &page_rect))
       return false;
     TaiScrollbarRect bar;
-    if (tai_scrollbar_geometry(width, tabs_content_height(width, height),
+    if (tai_scrollbar_geometry(width,
+                               tabs_content_height(width, height, wraps),
                                tai_page_scroll_y(view->page),
                                tai_page_max_scroll_y(view->page), &bar)) {
-      SDL_FRect rect = {bar.x, (float)(bar.y + tabs_chrome_bottom(width)),
+      SDL_FRect rect = {bar.x, (float)(bar.y + bottom),
                         bar.w, bar.h};
       if (!SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255) ||
           !SDL_RenderFillRect(renderer, &rect)) return false;
     }
   }
   SDL_FRect chrome_rect = {0.0f, 0.0f, (float)width,
-                           (float)ceil(tabs_chrome_bottom(width))};
+                           (float)ceil(bottom)};
   if (!SDL_RenderTexture(renderer, chrome_texture, NULL, &chrome_rect))
     return false;
   return SDL_RenderPresent(renderer);
@@ -101,14 +104,16 @@ static bool update_page_texture(SDL_Renderer *renderer,
 
 static bool update_tabs_page_texture(SDL_Renderer *renderer,
                                      SDL_Texture **texture,
-                                     const TaiPage *page, int width,
+                                     const TaiTabSetView *view, int width,
                                      int window_height, char **error) {
+  const TaiPage *page = view->page;
   if (!page) {
     SDL_DestroyTexture(*texture);
     *texture = NULL;
     return true;
   }
-  int height = tabs_content_pixel_height(width, window_height);
+  int height = tabs_content_pixel_height(width, window_height,
+                                         tai_pres_tab_row_wraps(view, width));
   if (!valid_pixel_dimensions(width, window_height) || height <= 0 ||
       !valid_pixel_dimensions(width, height)) {
     set_error(error, "unsupported tab window pixel dimensions");
@@ -164,7 +169,7 @@ bool tai_pres_repaint_tabs_scene(SDL_Renderer *renderer,
                               bool update_chrome,
                               const AddressEditor *editor, char **error) {
   if (update_page && !update_tabs_page_texture(renderer, page_texture,
-          view->page, width, height, error)) return false;
+          view, width, height, error)) return false;
   if (update_chrome && !tai_pres_render_tabs_chrome_texture(renderer,
           chrome_texture, view, width, editor, error)) return false;
   if (!present_tabs_scene(renderer, *page_texture, *chrome_texture, view,

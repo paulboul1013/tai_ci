@@ -142,6 +142,9 @@ single-page presentation APIs remain available to callers.
   geometry; `https_integration.py` drives `test_network --ca`,
   `test_tabset_secure.c`, and `test_tabs_secure_window.c` (whose `--window`
   mode is the real-window harness for HTTPS fixtures).
+- `tab_strip_differential.py` measures the live Python chrome for one and two
+  tabs across widths and compares `tab_strip_probe.c`'s toolbar row positions,
+  which move only when the tab strip actually wraps.
 - `url_probe.c` exposes the native URL result to its Python differential driver.
 - `fixtures/basic.html` is the current minimal layout input.
 - `reference/` stores `browser.py`, `runtime.js`, `browser.css`, `web_server.py`,
