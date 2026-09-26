@@ -66,7 +66,12 @@ Public interfaces generally share a name with their implementation; internal fil
 | `js.h` / `js.c` | QuickJS-NG context、DOM bridge、event dispatch |
 | `layout.h` / `layout.c` | block/line/text geometry and font measurement |
 | `render.h` / `render.c` | self-contained display list and Cairo PNG raster |
-| `presentation.h` / `presentation.c` | SDL3 window, texture and resize/quit presentation |
+| `presentation.h` / `presentation.c` | SDL3 window lifecycle, event loops and public entry points |
+| `presentation_chrome.c` | internal Cairo toolbar, tab strip, buttons and bookmark stars; tab-link hit test |
+| `presentation_address.c` | internal address editor, UTF-8 helpers, chrome click and address key/text handling |
+| `presentation_scene.c` | internal page/chrome textures, scene composition and scrollbar overlay |
+| `presentation_events.c` | internal pointer→pixel mapping and SDL→page event adapter |
+| `presentation_internal.h` | internal header shared by the presentation units (`tai_pres_*`); under `src/` |
 | `presentation_geometry.h` / `presentation_geometry.c` | internal Chrome/tab geometry and hit boundaries; header is under `src/` |
 | `scheduler.h` / `scheduler.c` | priority tasks、generation cancellation、frame deadlines |
 | `browser.h` / `browser.c` | `TaiPage` navigation and subsystem orchestration |

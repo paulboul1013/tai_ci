@@ -41,7 +41,7 @@
 | Paint / raster | display/raster → `src/render.c` | Cairo, layout | VALIDATING | render differential、PNG/key-region tests | remote/general images、WebP；見 [raster 契約](docs/reference-display-raster.md) |
 | JavaScript / events | JS runtime → `src/js.c` | QuickJS-NG, DOM, network | VALIDATING | bridge、cancellation、OOM tests | bubbling、mutation、timers/fetch；QuickJS OOM UAF 由 [tracked patch](patches/quickjs/0001-unlink-context-on-class-proto-oom.patch) 修補，待上游整合 |
 | Scheduling | tasks/clocks → `src/scheduler.c` | threads, network | VALIDATING | priority/FIFO/aging/generation tests | browser/network/frame integration |
-| Browser / window | app/tab/chrome → `src/browser.c`, `src/session.c`, `src/tabset.c`, `src/presentation.c`, `src/main.c` | page, threads, network, Cairo, SDL3 | VALIDATING | [acceptance](ACCEPTANCE.md)、[tabs oracle](tests/tabs_oracle_probe.py)、native tab/window tests | 目前 Chrome 與 History 切片；之後新視窗、外部開啟及剩餘視覺差異 |
+| Browser / window | app/tab/chrome → `src/browser.c`, `src/session.c`, `src/tabset.c`, `src/presentation*.c`, `src/main.c` | page, threads, network, Cairo, SDL3 | VALIDATING | [acceptance](ACCEPTANCE.md)、[tabs oracle](tests/tabs_oracle_probe.py)、native tab/window tests | 目前 Chrome 與 History 切片；之後新視窗、外部開啟及剩餘視覺差異 |
 
 ## 依工作分支讀取
 
