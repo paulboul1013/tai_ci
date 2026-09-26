@@ -29,6 +29,16 @@ TaiPageLoad *tai_page_load_async(TaiNetwork *network, const TaiUrl *url,
     const TaiUrl *referrer, const char *payload, const char *default_css,
     double viewport_width, double viewport_height, bool rtl,
     TaiPageLoadDone done, void *userdata, char **error);
+/* Builds generated HTML at an about: URL through the normal document, inline
+ * resource, style, layout and display paths. The markup is borrowed only for
+ * this call. External resource references are not fetched. Valid input always
+ * invokes done synchronously and returns NULL (the handle has expired);
+ * ownership of page and error transfers to done. Invalid input or failure to
+ * create the page invokes no callback and sets *error. */
+TaiPageLoad *tai_page_load_async_markup(TaiNetwork *network, const TaiUrl *url,
+    const char *markup, const char *default_css, double viewport_width,
+    double viewport_height, bool rtl, TaiPageLoadDone done, void *userdata,
+    char **error);
 /* Cancels all outstanding document/subresource requests and destroys partial
  * construction. Must run on the same thread that started the load, while the
  * borrowed network is still alive. */

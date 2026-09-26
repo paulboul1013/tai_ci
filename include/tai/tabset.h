@@ -21,16 +21,22 @@ typedef struct {
     bool loading;
     bool can_go_back;
     bool can_go_forward;
+    bool bookmarkable;
+    bool bookmarked;
 } TaiTabSetView;
 
 /* The caller owns the tab set and default_css must outlive it. Creation starts
  * one loader thread; that thread creates, exclusively uses, and destroys the
  * shared TaiNetwork. All public operations except destroy are called by the
  * SDL/window owner thread. Loaded pages transfer from the loader to sessions
- * only when tai_tabset_pump() commits a matching tab ID and generation. */
+ * only when tai_tabset_pump() commits a matching tab ID and generation.
+ * Bookmarks persist in the per-user data file; if it cannot be opened or
+ * parsed, a warning goes to stderr, the file is left untouched, and this tab
+ * set keeps bookmarks in memory only. */
 TaiTabSet *tai_tabset_create(const char *default_css, bool rtl, char **error);
 /* Embedders and deterministic integration tests can supply the home URL used
- * by New Tab. The ordinary constructor uses browser.engineering. */
+ * by New Tab. The ordinary constructor uses browser.engineering. Bookmarks are
+ * memory-only. */
 TaiTabSet *tai_tabset_create_with_home_url(const char *default_css, bool rtl,
                                           const char *home_url,
                                           char **error);
@@ -53,6 +59,12 @@ bool tai_tabset_navigate(TaiTabSet *tabs,
                          const TaiNavigationIntent *intent, char **error);
 bool tai_tabset_navigate_address(TaiTabSet *tabs, const char *text,
                                  char **error);
+/* The active committed page alone may be toggled. Pending navigation disables
+ * the control; all tabs share one collection owned by the tab set. */
+bool tai_tabset_toggle_bookmark(TaiTabSet *tabs, bool *bookmarked,
+                                char **error);
+/* Opens the internal list in the active tab through normal navigation/history. */
+bool tai_tabset_open_bookmarks(TaiTabSet *tabs, char **error);
 /* direction is -1 for Back and 1 for Forward. Failed loads leave the current
  * page and history index unchanged. */
 bool tai_tabset_history_available(const TaiTabSet *tabs, int direction);

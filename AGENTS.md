@@ -33,3 +33,49 @@
 - **ARCHITECTURE.md／ACCEPTANCE.md／狀態定義（state definition）／狀態更新（status update）／文件同步（documentation sync）** → 閱讀 [`docs/agents/project-records.md`](docs/agents/project-records.md)。
 
 完成表示所請求的行為已實作、建置、測試，並在受影響邊界完成整合；不只是規劃或建立骨架。
+
+## 原生視窗與 SDL 驗證：持續授權
+
+**直接執行已授權的驗證。** 儲存庫擁有者對本專案後續 session 的授權涵蓋：建置、CTest、
+Python oracle、僅綁定 `127.0.0.1` 的 fixture server、`tai-browser --window`、SDL 合成輸入
+測試，以及對 agent 本次啟動的 `Tai Gar` 視窗進行 X11 滑鼠、滾輪、鍵盤、焦點、resize、
+截圖與關閉操作。這些操作不需要逐次或逐座標向使用者徵求同意，也不要因此暫停驗證。
+
+從儲存庫根目錄依序完成建置、相關 CTest 與 Python oracle；需要真實視窗證據時，保留
+fixture server 和 browser 各自的執行中 session。以下是近期已使用的 tabs 驗證組合，
+測試目標與 fixture 應隨受影響功能調整：
+
+```bash
+cmake --build build --target tai-browser test_presentation -j 4
+ctest --test-dir build -R '^presentation_dummy$' --output-on-failure
+python3 tests/tabs_oracle_probe.py --check
+python3 -m http.server 8765 --bind 127.0.0.1 --directory tests/fixtures/tabs_window
+SDL_EVENT_LOGGING=1 SDL_VIDEO_X11_XINPUT2=0 ./build/tai-browser --window http://127.0.0.1:8765/index.html
+```
+
+每次啟動後重新查詢 X11 視窗 ID；逐一以 `xdotool getwindowpid ID` 對照本次 browser PID，
+確認唯一目標後才設定 `tai_window_id` 並送出輸入。座標與按鍵按案例調整，動作後擷取
+`/tmp` 截圖，檢查畫面非空白且頁面或 chrome 確有預期變化：
+
+```bash
+xdotool search --name '^Tai Gar$'
+xdotool getwindowpid REPLACE_WITH_CANDIDATE_ID
+tai_window_id=REPLACE_WITH_CURRENT_ID
+xdotool mousemove --window "$tai_window_id" 15 18 click --window "$tai_window_id" 1
+xdotool click --window "$tai_window_id" 5
+xdotool windowsize "$tai_window_id" 120 600
+python3 /home/paulboul/.codex/skills/screenshot/scripts/take_screenshot.py --mode temp --window-id "$tai_window_id"
+xwd -silent -id "$tai_window_id" -out /tmp/tai-window.xwd
+convert /tmp/tai-window.xwd /tmp/tai-window.png
+```
+
+真實鍵盤輸入需核對焦點、SDL `windowID`、事件日誌及前後畫面；`xdotool` 成功返回不算
+送達證據。WSLg 焦點失效時依
+[`docs/agents/native-window-verification.md`](docs/agents/native-window-verification.md) 的 Xvfb
+流程驗證。結束前再核對視窗 PID，只用 `xdotool windowclose "$tai_window_id"` 關閉本次
+啟動的視窗，並停止本次 fixture server。
+
+使用者授權與執行平台的 sandbox／GUI 核准是兩件事。遇到 sandbox 阻擋時，直接在工具呼叫中
+對**同一項、同一目標**的指令使用 `sandbox_permissions: "require_escalated"` 與簡短
+`justification`，優先沿用已核准的限定範圍規則；不要另發對話訊息詢問是否同意使用驗證
+工具。平台若仍顯示核准提示，依平台流程處理；若平台拒絕，記錄限制與已完成的驗證層。

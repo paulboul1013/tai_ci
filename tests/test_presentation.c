@@ -6,6 +6,8 @@
 #include <assert.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -179,6 +181,50 @@ static bool inject_input(void *opaque, SDL_Event *event) {
   return false;
 }
 
+typedef struct {
+  atomic_uint window_id;
+  const InputKind *kinds;
+  const SDL_FPoint *positions;
+  size_t count;
+  bool queued;
+} DelayedInputs;
+
+static bool capture_window_id(void *opaque, SDL_Event *event) {
+  DelayedInputs *inputs = opaque;
+  if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED)
+    atomic_store(&inputs->window_id, event->window.windowID);
+  return true;
+}
+
+static void *post_delayed_inputs(void *opaque) {
+  DelayedInputs *inputs = opaque;
+  SDL_WindowID window_id = 0;
+  for (int attempts = 0; attempts < 500 && !window_id; attempts++) {
+    window_id = atomic_load(&inputs->window_id);
+    if (!window_id) {
+      struct timespec pause = {.tv_nsec = 1000000};
+      nanosleep(&pause, NULL);
+    }
+  }
+  if (!window_id) return NULL;
+  struct timespec commit_wait = {.tv_nsec = 250000000};
+  nanosleep(&commit_wait, NULL);
+  for (size_t index = 0; index < inputs->count; index++) {
+    SDL_Event input = make_input_event(inputs->kinds[index], window_id);
+    if (inputs->positions && input.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+      input.button.x = inputs->positions[index].x;
+      input.button.y = inputs->positions[index].y;
+    }
+    if (!SDL_PushEvent(&input)) return NULL;
+  }
+  inputs->queued = true;
+  struct timespec settle_wait = {.tv_nsec = 300000000};
+  nanosleep(&settle_wait, NULL);
+  SDL_Event quit = {.type = SDL_EVENT_QUIT};
+  (void)SDL_PushEvent(&quit);
+  return NULL;
+}
+
 static void *request_quit(void *unused) {
   (void)unused;
   struct timespec pause = {.tv_sec = 1, .tv_nsec = 0};
@@ -186,6 +232,125 @@ static void *request_quit(void *unused) {
   SDL_Event event = {.type = SDL_EVENT_QUIT};
   SDL_PushEvent(&event);
   return NULL;
+}
+
+typedef struct {
+  bool injected;
+  bool queued;
+  int logical_width, logical_height;
+  int pixel_width, pixel_height;
+} HidpiProbe;
+
+static TaiNode *find(TaiNode *node, const char *tag);
+static void present_delayed_bookmark_inputs(TaiTabSet *tabs,
+    const char *initial_url, int width, int height,
+    const InputKind *kinds, const SDL_FPoint *positions, size_t count,
+    bool dummy_driver);
+
+static bool inject_hidpi_clicks(void *opaque, SDL_Event *event) {
+  HidpiProbe *probe = opaque;
+  if (event->type != SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || probe->injected)
+    return true;
+  SDL_Window *window = SDL_GetWindowFromID(event->window.windowID);
+  if (!window) return true;
+  probe->injected = true;
+  if (!SDL_GetWindowSize(window, &probe->logical_width, &probe->logical_height) ||
+      !SDL_GetWindowSizeInPixels(window, &probe->pixel_width,
+                                 &probe->pixel_height))
+    return false;
+  const SDL_FPoint logical_clicks[] = {
+      {7.5f, 9.0f},  /* Physical (15,18): New Tab. */
+      {20.0f, 13.0f}, /* Physical (40,26): first tab, not New Tab. */
+  };
+  for (size_t index = 0; index < sizeof(logical_clicks) / sizeof(logical_clicks[0]);
+       index++) {
+    SDL_Event click = {.button = {
+        .type = SDL_EVENT_MOUSE_BUTTON_DOWN,
+        .windowID = event->window.windowID,
+        .button = SDL_BUTTON_LEFT,
+        .down = true,
+        .x = logical_clicks[index].x,
+        .y = logical_clicks[index].y,
+    }};
+    if (!SDL_PushEvent(&click)) return false;
+  }
+  SDL_Event quit = {.type = SDL_EVENT_QUIT};
+  probe->queued = SDL_PushEvent(&quit);
+  return false;
+}
+
+static int run_hidpi_probe(void) {
+  char *error = NULL;
+  TaiTabSet *tabs = tai_tabset_create_with_home_url(
+      "html {display:block} body {display:block} p {display:block}", false,
+      "data:text/html,<p>home</p>", &error);
+  assert(tabs && !error);
+  HidpiProbe probe = {0};
+  SDL_SetEventFilter(inject_hidpi_clicks, &probe);
+  bool presented = tai_present_window_with_tabs(
+      tabs, "data:text/html,<p>initial</p>", 300, 100, &error);
+  TaiTabSetView view = {0};
+  bool viewed = tai_tabset_view(tabs, &view);
+  fprintf(stderr, "hidpi probe: logical=%dx%d physical=%dx%d "
+                  "injected=%d queued=%d presented=%d tabs=%zu active=%zu error=%s\n",
+          probe.logical_width, probe.logical_height,
+          probe.pixel_width, probe.pixel_height,
+          probe.injected, probe.queued, presented,
+          viewed ? view.tab_count : 0, viewed ? view.active_index : 0,
+          error ? error : "none");
+  assert(presented && !error && probe.injected && probe.queued && viewed);
+  assert(probe.logical_width > 0 && probe.logical_height > 0);
+  assert(probe.pixel_width > probe.logical_width &&
+         probe.pixel_height > probe.logical_height);
+  assert(view.tab_count == 2 && view.active_index == 0);
+  tai_tabset_destroy(tabs);
+
+  static const InputKind bookmark_kinds[] = {
+      INPUT_TABS_FIRST, INPUT_TABS_FIRST,
+  };
+  /* A 300x100 logical window is 600x200 physical pixels in this probe. */
+  static const SDL_FPoint bookmark_positions[] = {
+      {285.0f, 30.0f}, {55.0f, 26.0f},
+  };
+  tabs = tai_tabset_create_with_home_url(
+      "html {display:block} body {display:block} p {display:block}", false,
+      "data:text/html,<p>home</p>", &error);
+  assert(tabs && !error);
+  present_delayed_bookmark_inputs(tabs, "data:text/html,<p>initial</p>",
+      300, 100, bookmark_kinds, bookmark_positions, 2, false);
+  assert(tai_tabset_view(tabs, &view));
+  assert(view.page && !view.loading &&
+         !strcmp(view.url, "about:bookmarks") && view.history_count == 2);
+  TaiNode *saved_link = find(tai_page_root(view.page), "a");
+  assert(saved_link && !strcmp(tai_map_get(&saved_link->attributes, "href"),
+                               "data:text/html,<p>initial</p>"));
+  tai_tabset_destroy(tabs);
+  return 0;
+}
+
+static void present_delayed_bookmark_inputs(TaiTabSet *tabs,
+    const char *initial_url, int width, int height,
+    const InputKind *kinds, const SDL_FPoint *positions, size_t count,
+    bool dummy_driver) {
+  DelayedInputs inputs = {.kinds = kinds, .positions = positions,
+                          .count = count};
+  atomic_init(&inputs.window_id, 0);
+  char *error = NULL;
+  pthread_t poster;
+  if (dummy_driver) {
+    assert(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
+    assert(SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software"));
+  }
+  SDL_SetEventFilter(capture_window_id, &inputs);
+  assert(pthread_create(&poster, NULL, post_delayed_inputs, &inputs) == 0);
+  bool presented = tai_present_window_with_tabs(tabs, initial_url,
+                                                width, height, &error);
+  assert(pthread_join(poster, NULL) == 0);
+  if (!presented)
+    fprintf(stderr, "bookmark presentation failed: %s\n",
+            error ? error : "unknown error");
+  assert(presented && !error && atomic_load(&inputs.window_id) &&
+         inputs.queued);
 }
 
 static TaiNode *find(TaiNode *node, const char *tag) {
@@ -231,6 +396,8 @@ static bool replace_page(void *opaque, TaiPage **current_page,
 }
 
 int main(void) {
+  const char *hidpi_probe = getenv("TAI_PRESENTATION_HIDPI_PROBE");
+  if (hidpi_probe && !strcmp(hidpi_probe, "1")) return run_hidpi_probe();
   TaiScrollbarRect bar = {0};
   assert(!tai_scrollbar_geometry(100, 100, 0, 0, &bar));
   assert(tai_scrollbar_geometry(100, 100, 0, 300, &bar));
@@ -246,6 +413,30 @@ int main(void) {
   assert(!tai_scrollbar_geometry(100, 100, NAN, 300, &bar));
   assert(!tai_scrollbar_geometry(100, 100, 0, INFINITY, &bar));
   assert(!tai_scrollbar_geometry(0, 100, 0, 300, &bar));
+  /* SDL mouse events use window-logical coordinates, while this renderer
+   * draws and hit-tests in physical pixels. A 2x window maps both axes. */
+  double pixel_x = -1.0, pixel_y = -1.0;
+  assert(tai_presentation_pointer_to_pixels(14.25, 20.5, 300, 100,
+                                            600, 200, &pixel_x, &pixel_y));
+  assert(pixel_x == 28.5 && pixel_y == 41.0);
+  assert(tai_presentation_pointer_to_pixels(14.25, 20.5, 300, 100,
+                                            300, 100, &pixel_x, &pixel_y));
+  assert(pixel_x == 14.25 && pixel_y == 20.5);
+  /* The tabbed bookmark controls receive physical chrome coordinates. */
+  assert(tai_presentation_pointer_to_pixels(135.0, 30.0, 300, 100,
+                                            600, 200, &pixel_x, &pixel_y));
+  assert(pixel_x == 270.0 && pixel_y == 60.0);
+  assert(tai_presentation_pointer_to_pixels(55.0, 26.0, 300, 100,
+                                            600, 200, &pixel_x, &pixel_y));
+  assert(pixel_x == 110.0 && pixel_y == 52.0);
+  assert(!tai_presentation_pointer_to_pixels(NAN, 20.5, 300, 100,
+                                             600, 200, &pixel_x, &pixel_y));
+  assert(!tai_presentation_pointer_to_pixels(14.25, INFINITY, 300, 100,
+                                             600, 200, &pixel_x, &pixel_y));
+  assert(!tai_presentation_pointer_to_pixels(14.25, 20.5, 0, 100,
+                                             600, 200, &pixel_x, &pixel_y));
+  assert(!tai_presentation_pointer_to_pixels(14.25, 20.5, 300, 100,
+                                             600, 0, &pixel_x, &pixel_y));
   char *error = NULL;
   assert(!tai_present_window(NULL, 800, 532, &error));
   assert(error);
@@ -700,12 +891,49 @@ int main(void) {
       "html {display:block} body {display:block} p {display:block}", false,
       "data:text/html,<p>home</p>", &error);
   assert(tabs && !error);
+  assert(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
+  assert(SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software"));
   input_injected = false;
   input_events_queued = false;
   SDL_SetEventFilter(inject_input, &active_first_events);
   assert(pthread_create(&thread, NULL, request_quit, NULL) == 0);
+  bool active_first_presented = tai_present_window_with_tabs(tabs,
+      "data:text/html,<p>initial</p>", 300, 100, &error);
+  if (!active_first_presented)
+    fprintf(stderr, "active-first presentation failed: %s\n",
+            error ? error : "unknown error");
+  assert(active_first_presented);
+  assert(pthread_join(thread, NULL) == 0);
+  assert(!error && input_injected && input_events_queued);
+  assert(tai_tabset_view(tabs, &tab_view));
+  assert(tab_view.tab_count == 2 && tab_view.active_index == 1);
+  tai_tabset_destroy(tabs);
+
+  /* Frozen 120px Python chrome keeps the wrapped, inactive Tab 1 link
+   * clickable through x=113 while its second line remains above toolbar. */
+  static const InputKind narrow_tab_inputs[] = {
+      INPUT_TABS_NEW_TAB, INPUT_TABS_FIRST, INPUT_TABS_SECOND,
+  };
+  static const SDL_FPoint narrow_tab_clicks[] = {
+      {15.0f, 18.0f}, {34.0f, 27.0f}, {110.0f, 45.0f},
+  };
+  InputEvents narrow_tab_events = {
+      .kinds = narrow_tab_inputs,
+      .count = sizeof(narrow_tab_inputs) / sizeof(narrow_tab_inputs[0]),
+      .click_positions = narrow_tab_clicks,
+  };
+  tabs = tai_tabset_create_with_home_url(
+      "html {display:block} body {display:block} p {display:block}", false,
+      "data:text/html,<p>home</p>", &error);
+  assert(tabs && !error);
+  assert(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
+  assert(SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software"));
+  input_injected = false;
+  input_events_queued = false;
+  SDL_SetEventFilter(inject_input, &narrow_tab_events);
+  assert(pthread_create(&thread, NULL, request_quit, NULL) == 0);
   assert(tai_present_window_with_tabs(tabs,
-      "data:text/html,<p>initial</p>", 300, 100, &error));
+      "data:text/html,<p>initial</p>", 120, 200, &error));
   assert(pthread_join(thread, NULL) == 0);
   assert(!error && input_injected && input_events_queued);
   assert(tai_tabset_view(tabs, &tab_view));
@@ -724,7 +952,7 @@ int main(void) {
   compact_clicks[26] = (SDL_FPoint){784.0f, 18.0f};
   size_t compact_count = 27;
   compact_inputs[compact_count] = INPUT_TABS_ADDRESS;
-  compact_clicks[compact_count++] = (SDL_FPoint){780.0f, 56.0f};
+  compact_clicks[compact_count++] = (SDL_FPoint){740.0f, 56.0f};
   for (size_t index = 0; index < 64; index++)
     compact_inputs[compact_count++] = INPUT_BACKSPACE;
   compact_inputs[compact_count++] = INPUT_TABS_URL_TEXT;
@@ -742,6 +970,8 @@ int main(void) {
       "html {display:block} body {display:block} p {display:block}", false,
       "data:text/html,<p>home</p>", &error);
   assert(tabs && !error);
+  assert(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
+  assert(SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software"));
   input_injected = false;
   input_events_queued = false;
   SDL_SetEventFilter(inject_input, &compact_events);
@@ -755,6 +985,112 @@ int main(void) {
   assert(tai_tabset_select(tabs, 24));
   assert(tai_tabset_view(tabs, &tab_view));
   assert(!strcmp(tab_view.url, "data:text/html,<p>draft</p>"));
+  tai_tabset_destroy(tabs);
+
+  /* A click queued before the first pump cannot bookmark the pending page. */
+  static const InputKind pending_star_kinds[] = {INPUT_TABS_FIRST};
+  static const SDL_FPoint pending_star_positions[] = {{270.0f, 60.0f}};
+  InputEvents pending_star = {
+      .kinds = pending_star_kinds,
+      .count = 1,
+      .click_positions = pending_star_positions,
+  };
+  tabs = tai_tabset_create_with_home_url(
+      "html {display:block} body {display:block} p {display:block}", false,
+      "data:text/html,<p>home</p>", &error);
+  assert(tabs && !error);
+  assert(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
+  assert(SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software"));
+  input_injected = false;
+  input_events_queued = false;
+  SDL_SetEventFilter(inject_input, &pending_star);
+  assert(pthread_create(&thread, NULL, request_quit, NULL) == 0);
+  assert(tai_present_window_with_tabs(tabs,
+      "data:text/html,<p>initial</p>", 300, 180, &error));
+  assert(pthread_join(thread, NULL) == 0);
+  assert(!error && input_injected && input_events_queued);
+  assert(tai_tabset_view(tabs, &tab_view));
+  assert(tab_view.page && tab_view.bookmarkable && !tab_view.bookmarked &&
+         !tab_view.loading && tab_view.history_count == 1);
+  tai_tabset_destroy(tabs);
+
+  /* The other window's star click is ignored; the current star saves the
+   * committed URL, then the distinct left button opens the internal list. */
+  static const InputKind bookmark_kinds[] = {
+      INPUT_UNRELATED_LEFT_CLICK, INPUT_TABS_FIRST, INPUT_TABS_FIRST,
+  };
+  static const SDL_FPoint bookmark_positions[] = {
+      {270.0f, 60.0f}, {270.0f, 60.0f}, {110.0f, 52.0f},
+  };
+  tabs = tai_tabset_create_with_home_url(
+      "html {display:block} body {display:block} p {display:block}", false,
+      "data:text/html,<p>home</p>", &error);
+  assert(tabs && !error);
+  present_delayed_bookmark_inputs(tabs, "data:text/html,<p>initial</p>",
+      300, 180, bookmark_kinds, bookmark_positions, 3, true);
+  assert(tai_tabset_view(tabs, &tab_view));
+  assert(tab_view.page && !tab_view.loading &&
+         !strcmp(tab_view.url, "about:bookmarks") &&
+         tab_view.history_count == 2 && tab_view.can_go_back &&
+         !tab_view.bookmarkable);
+  TaiNode *saved_link = find(tai_page_root(tab_view.page), "a");
+  assert(saved_link && !strcmp(tai_map_get(&saved_link->attributes, "href"),
+                               "data:text/html,<p>initial</p>"));
+  tai_tabset_destroy(tabs);
+
+  static const InputKind toggle_twice_kinds[] = {
+      INPUT_TABS_FIRST, INPUT_TABS_FIRST, INPUT_TABS_FIRST,
+  };
+  static const SDL_FPoint toggle_twice_positions[] = {
+      {270.0f, 60.0f}, {270.0f, 60.0f}, {110.0f, 52.0f},
+  };
+  tabs = tai_tabset_create_with_home_url(
+      "html {display:block} body {display:block} p {display:block}", false,
+      "data:text/html,<p>home</p>", &error);
+  assert(tabs && !error);
+  present_delayed_bookmark_inputs(tabs, "data:text/html,<p>initial</p>",
+      300, 180, toggle_twice_kinds, toggle_twice_positions, 3, true);
+  assert(tai_tabset_view(tabs, &tab_view));
+  assert(tab_view.page && !tab_view.loading &&
+         !strcmp(tab_view.url, "about:bookmarks") &&
+         tab_view.history_count == 2 &&
+         !find(tai_page_root(tab_view.page), "a"));
+  tai_tabset_destroy(tabs);
+
+  static const InputKind internal_star_kinds[] = {INPUT_TABS_FIRST};
+  static const SDL_FPoint internal_star_positions[] = {{270.0f, 60.0f}};
+  tabs = tai_tabset_create_with_home_url(
+      "html {display:block} body {display:block} p {display:block}", false,
+      "data:text/html,<p>home</p>", &error);
+  assert(tabs && !error);
+  present_delayed_bookmark_inputs(tabs, "about:bookmarks", 300, 180,
+      internal_star_kinds, internal_star_positions, 1, true);
+  assert(tai_tabset_view(tabs, &tab_view));
+  assert(tab_view.page && !tab_view.loading &&
+         !strcmp(tab_view.url, "about:bookmarks") &&
+         !tab_view.bookmarkable && !tab_view.bookmarked &&
+         tab_view.history_count == 1 &&
+         !find(tai_page_root(tab_view.page), "a"));
+  tai_tabset_destroy(tabs);
+
+  /* At 120px the list button moves above the address field and the star
+   * remains in the field's rightmost 23px. */
+  static const SDL_FPoint narrow_bookmark_positions[] = {
+      {90.0f, 130.0f}, {12.0f, 103.0f},
+  };
+  tabs = tai_tabset_create_with_home_url(
+      "html {display:block} body {display:block} p {display:block}", false,
+      "data:text/html,<p>home</p>", &error);
+  assert(tabs && !error);
+  present_delayed_bookmark_inputs(tabs, "data:text/html,<p>initial</p>",
+      120, 200, bookmark_kinds + 1, narrow_bookmark_positions, 2, true);
+  assert(tai_tabset_view(tabs, &tab_view));
+  assert(tab_view.page && !tab_view.loading &&
+         !strcmp(tab_view.url, "about:bookmarks") &&
+         tab_view.history_count == 2);
+  saved_link = find(tai_page_root(tab_view.page), "a");
+  assert(saved_link && !strcmp(tai_map_get(&saved_link->attributes, "href"),
+                               "data:text/html,<p>initial</p>"));
   tai_tabset_destroy(tabs);
 
   tai_page_destroy(click_page);

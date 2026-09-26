@@ -1,0 +1,49 @@
+{
+  "planned_native_ux": {
+    "address_bar_inner_star": "toggle committed page without navigation",
+    "left_star": "open about:bookmarks in active tab",
+    "list_links": "navigate to the exact saved URL",
+    "persistence": "pending user decision",
+    "shared_collection": true
+  },
+  "python_reference": {
+    "address_draft_ignored_and_discarded": true,
+    "back_url": "about:bookmarks",
+    "blank_page_toggle_changed_bookmarks": false,
+    "empty_page_message": "No bookmarks yet.",
+    "escaped_rows": [
+      "<li><a href=\"http://127.0.0.1:<PORT>/alpha?x=1&amp;y=2#frag&quot;&#x27;&lt;tag&gt;&amp;\">http://127.0.0.1:<PORT>/alpha?x=1&amp;y=2#frag&quot;&#x27;&lt;tag&gt;&amp;</a></li>",
+      "<li><a href=\"http://127.0.0.1:<PORT>/zeta\">http://127.0.0.1:<PORT>/zeta</a></li>"
+    ],
+    "history_after_link_click": [
+      "http://127.0.0.1:<PORT>/alpha?x=1&y=2#frag\"'<tag>&",
+      "about:bookmarks",
+      "http://127.0.0.1:<PORT>/alpha?x=1&amp;y=2#frag&quot;&#x27;&lt;tag&gt;&amp;"
+    ],
+    "internal_page_toggle_changed_bookmarks": false,
+    "link_click_get_path": "/alpha?x=1&amp;y=2",
+    "link_click_matches_saved_url": false,
+    "link_click_url": "http://127.0.0.1:<PORT>/alpha?x=1&amp;y=2#frag&quot;&#x27;&lt;tag&gt;&amp;",
+    "parsed_links": [
+      {
+        "href": "http://127.0.0.1:<PORT>/alpha?x=1&amp;y=2#frag&quot;&#x27;&lt;tag&gt;&amp;",
+        "text": "http://127.0.0.1:<PORT>/alpha?x=1&y=2#frag\"'<tag>&"
+      },
+      {
+        "href": "http://127.0.0.1:<PORT>/zeta",
+        "text": "http://127.0.0.1:<PORT>/zeta"
+      }
+    ],
+    "shared_across_tabs": true,
+    "sorted_urls": [
+      "http://127.0.0.1:<PORT>/alpha?x=1&y=2#frag\"'<tag>&",
+      "http://127.0.0.1:<PORT>/zeta"
+    ],
+    "toggle_sequence_on_zeta": [
+      "saved",
+      "removed",
+      "saved"
+    ],
+    "toolbar_bookmark_buttons": 1
+  }
+}

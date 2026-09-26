@@ -39,7 +39,8 @@ tai_ci/
 | `tests/` | Executable evidence | C unit/integration tests、Python differential drivers、fixtures、reference snapshot |
 | `tests/reference/` | Frozen Python oracle | `browser.py`、`runtime.js`、CSS、manifest、reference server 與人工 scenarios |
 | `docs/` | On-demand project knowledge | historical Python analysis、topic-specific render contracts、agent rules、architecture details |
-| `deps/quickjs/` | JavaScript dependency | QuickJS-NG source integrated by CMake |
+| `patches/` | Tracked dependency fixes | configure 時套用至 `deps/` checkout 的 patches；規則見 [`patches/README.md`](patches/README.md) |
+| `deps/quickjs/` | JavaScript dependency | QuickJS-NG source integrated by CMake；套用 `patches/quickjs/` |
 | `deps/SDL/` | Window/presentation source | vendored SDL3 checkout；CMake 建置並連結靜態 SDL3 |
 | `deps/sysroot/` | Local dependency prefix | development headers and libraries such as utf8proc/cmocka |
 | `build*/` | Generated artifacts | Ninja files、CTest metadata、libraries、executables；不屬於 source of truth |
@@ -63,7 +64,8 @@ Public interfaces generally share a name with their implementation; internal fil
 | `scheduler.h` / `scheduler.c` | priority tasks、generation cancellation、frame deadlines |
 | `browser.h` / `browser.c` | `TaiPage` navigation and subsystem orchestration |
 | `session.h` / `session.c` | committed page, URL history, address normalization and page commits |
-| `tabset.h` / `tabset.c` | ordered window tabs, async load ownership, generation-checked completion |
+| `tabset.h` / `tabset.c` | ordered window tabs, async load ownership, generation-checked completion, shared bookmarks and `about:bookmarks` page |
+| `bookmarks.h` / `bookmarks.c` | sorted bookmark collection, snapshots, atomic per-user file persistence |
 | `main.c` | `tai-browser` JSON/screenshot/`--window` CLI |
 | `html_entities.inc` | generated named-entity lookup included by `dom.c` |
 
@@ -87,6 +89,7 @@ graph TD
   CLI --> Window[SDL presentation]
   Window --> Tabs[TaiTabSet]
   Tabs --> Sessions[TaiSession per tab]
+  Tabs --> Bookmarks[TaiBookmarks store]
   Tabs --> Loader[loader thread]
   Loader --> Network
   Loader --> Page
@@ -116,6 +119,11 @@ single-page presentation APIs remain available to callers.
   chrome, delayed-load, resize, and failure behavior; `tabset_integration.py`
   drives native tab-set and SDL-window tests against delayed localhost document
   and CSS responses.
+- `bookmarks_oracle_probe.py` and `fixtures/bookmarks_oracle.json` freeze
+  Python bookmark toggle, sorting, escaping, and list-link behavior;
+  `bookmarks_integration.py` drives `test_tabset_bookmarks.c` against local
+  HTTP for shared tabs, exact-URL link GETs, history, and restart persistence;
+  `fixtures/bookmarks_window/` serves the real-window check.
 - `url_probe.c` exposes the native URL result to its Python differential driver.
 - `fixtures/basic.html` is the current minimal layout input.
 - `reference/` stores `browser.py`, `runtime.js`, `browser.css`, `web_server.py`,

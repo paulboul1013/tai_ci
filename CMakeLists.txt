@@ -19,6 +19,32 @@ set(QJS_BUILD_CLI_STATIC OFF CACHE BOOL "" FORCE)
 set(QJS_BUILD_CLI_WITH_MIMALLOC OFF CACHE BOOL "" FORCE)
 set(QJS_BUILD_CLI_WITH_STATIC_MIMALLOC OFF CACHE BOOL "" FORCE)
 set(QJS_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+# Tai-owned fixes to the QuickJS-NG checkout; see patches/README.md.
+find_package(Git REQUIRED)
+set(TAI_QUICKJS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/quickjs")
+file(GLOB TAI_QUICKJS_PATCHES CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/patches/quickjs/*.patch")
+list(SORT TAI_QUICKJS_PATCHES)
+foreach(tai_patch IN LISTS TAI_QUICKJS_PATCHES)
+  # The ceiling keeps git from treating deps/quickjs as a path in this repo
+  # when the checkout has no .git of its own.
+  set(tai_git_apply "${CMAKE_COMMAND}" -E env
+    "GIT_CEILING_DIRECTORIES=${CMAKE_CURRENT_SOURCE_DIR}/deps"
+    "${GIT_EXECUTABLE}" apply)
+  execute_process(COMMAND ${tai_git_apply} --reverse --check "${tai_patch}"
+    WORKING_DIRECTORY "${TAI_QUICKJS_DIR}"
+    RESULT_VARIABLE tai_patch_present OUTPUT_QUIET ERROR_QUIET)
+  if(NOT tai_patch_present EQUAL 0)
+    execute_process(COMMAND ${tai_git_apply} "${tai_patch}"
+      WORKING_DIRECTORY "${TAI_QUICKJS_DIR}"
+      RESULT_VARIABLE tai_patch_result ERROR_VARIABLE tai_patch_error)
+    if(NOT tai_patch_result EQUAL 0)
+      message(FATAL_ERROR "Cannot apply ${tai_patch} to ${TAI_QUICKJS_DIR}:\n"
+        "${tai_patch_error}")
+    endif()
+    message(STATUS "Applied QuickJS patch ${tai_patch}")
+  endif()
+endforeach()
 add_subdirectory(deps/quickjs EXCLUDE_FROM_ALL)
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
 set(SDL_TESTS OFF CACHE BOOL "" FORCE)
@@ -26,6 +52,7 @@ set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(deps/SDL EXCLUDE_FROM_ALL)
 
 add_library(tai_core src/core.c src/url.c src/dom.c src/css.c src/scheduler.c
+  src/bookmarks.c
   src/js.c src/layout.c src/render.c src/network.c src/browser.c src/session.c
   src/tabset.c)
 target_include_directories(tai_core PUBLIC include)
@@ -90,6 +117,10 @@ if(BUILD_TESTING)
   target_link_libraries(test_js PRIVATE tai_core)
   target_compile_options(test_js PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME javascript COMMAND test_js)
+  add_executable(test_quickjs_oom tests/test_quickjs_oom.c)
+  target_link_libraries(test_quickjs_oom PRIVATE qjs)
+  target_compile_options(test_quickjs_oom PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME quickjs_oom COMMAND test_quickjs_oom)
   add_executable(test_layout tests/test_layout.c)
   target_link_libraries(test_layout PRIVATE tai_core)
   target_compile_options(test_layout PRIVATE -Wall -Wextra -Wpedantic -Werror)
@@ -127,9 +158,30 @@ if(BUILD_TESTING)
   target_link_libraries(test_history PRIVATE tai_core)
   target_compile_options(test_history PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME browser_history COMMAND test_history)
+  add_executable(test_bookmarks tests/test_bookmarks.c)
+  target_link_libraries(test_bookmarks PRIVATE tai_core)
+  target_compile_options(test_bookmarks PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  target_link_options(test_bookmarks PRIVATE
+    "LINKER:--wrap=malloc,--wrap=realloc,--wrap=fsync,--wrap=rename")
+  add_test(NAME bookmarks COMMAND test_bookmarks)
+  add_executable(test_tabset_bookmarks tests/test_tabset_bookmarks.c)
+  target_link_libraries(test_tabset_bookmarks PRIVATE tai_core)
+  target_compile_options(test_tabset_bookmarks PRIVATE
+    -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME bookmarks_integration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/bookmarks_integration.py"
+    $<TARGET_FILE:test_tabset_bookmarks>)
+  add_test(NAME bookmarks_oracle_probe COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/bookmarks_oracle_probe.py" --check)
   add_executable(test_tabset tests/test_tabset.c)
   target_link_libraries(test_tabset PRIVATE tai_core)
   target_compile_options(test_tabset PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_executable(test_tabset_loader_oom tests/test_tabset_loader_oom.c)
+  target_link_libraries(test_tabset_loader_oom PRIVATE tai_core)
+  target_compile_options(test_tabset_loader_oom PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  target_link_options(test_tabset_loader_oom PRIVATE
+    "LINKER:--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=pthread_create")
+  add_test(NAME tabset_loader_oom COMMAND test_tabset_loader_oom)
   add_executable(test_tabs_window tests/test_tabs_window.c)
   target_link_libraries(test_tabs_window PRIVATE tai_presentation)
   target_compile_options(test_tabs_window PRIVATE -Wall -Wextra -Wpedantic -Werror)

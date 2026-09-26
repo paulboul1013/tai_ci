@@ -2,8 +2,9 @@
 
 ## SDL3 presentation slice
 
-`tai-browser --window URL` 以 `TaiTabSet` 開啟可調整大小的 SDL3 視窗，原生外框初始為
-800×600px，尺寸包含 tab row 和 toolbar。初始文件在視窗建立後非同步載入；SDL event loop
+`tai-browser --window URL` 以 `TaiTabSet` 開啟可調整大小的 SDL3 視窗，建立時要求
+800×600 SDL 視窗座標，尺寸包含 tab row 和 toolbar；實際繪製尺寸取自
+`SDL_GetWindowSizeInPixels()`，高密度視窗可有更多實體像素。初始文件在視窗建立後非同步載入；SDL event loop
 持續處理切換、地址列、resize 和 close。Cairo 先在不透明白底繪製 native-endian premultiplied ARGB32；
 因最終 alpha 皆為 255，其數值布局可直接上傳至 SDL `ARGB8888` texture。每次 page raster
 呼叫交付獨立擁有的 pixel copy，SDL adapter 在上傳後釋放。Chrome toolbar 由另一個 Cairo
@@ -16,17 +17,21 @@ surface 繪製並上傳至獨立 texture；page 與 chrome texture 在 SDL scene
 Headless `--screenshot` 仍是 page-only 800×532，不包含 Chrome。
 Forward 控制項在寬度 ≥94px 時位於 (49,36)，低於 94px 時位於 (0,66)，與 Python probe 的
 位置一致。Window resize event 若任一維 ≤10px 會忽略並保留上一有效畫面；dummy 測試
-覆蓋 0×0、10×10、10×200、200×10 resize no-op。低寬度控件限制及尚未實作的 bookmark row
+覆蓋 0×0、10×10、10×200、200×10 resize no-op。低寬度控件限制
 由 [migration plan](../PORTING_PLAN.md) 追蹤；最新視窗檢查及 acceptance evidence 見
 [`ACCEPTANCE.md`](../ACCEPTANCE.md)。
 
-Tabbed `--window` 的 tab Chrome bottom/address y 在寬度 ≥232px 時為 74.82/49.072；120px
-窄寬探針得到 138.48/119.212。800px 寬、兩個 tabs 時，New Tab button rect 為
+Tabbed `--window` 的 tab Chrome bottom/address y 在寬度 ≥232px 時為 74.82/55.552；120px
+窄寬探針得到 138.48/119.212。兩個 tabs 在 125px 寬開始保持單行；127px 的
+bottom/address y 為 118.48/99.212。800px 寬、兩個 tabs 時，New Tab button rect 為
 `[0,6,30,30]`，Tab 0 link text 為 `[34,19.072,71,35.072]`，Tab 1 為
 `[75,19.184,125,35.184]`（Tab 1 作用中）。切到 Tab 0 後，粗體標籤擴大，兩個 link rect
 分別為 `[34,19.184,84,35.184]` 與 `[88,19.072,125,35.072]`；Tab 1 的起點隨前一個
-標籤寬度移動，`x=75` 仍命中 Tab 0。120px 寬、兩個 tabs 時，link rectangles 為
-`[34,19.072,71,35.072]` 和 `[0,19.184,108,55.184]`。Chrome fixture 固定左界命中、右界
+標籤寬度移動，`x=75` 仍命中 Tab 0。120px 寬、Tab 1 作用中時，link rectangles 為
+`[34,19.072,71,35.072]` 和 `[0,19.184,108,55.184]`；切到 Tab 0 後，
+Tab 1 的換行 link 右界延伸到 x=113。Back/Forward 在 800px 的頂端為 42.48，
+120px 時為 62.48，讓第二行 tab 文字露出；完整矩形由 frozen fixture 保存。
+Chrome fixture 固定左界命中、右界
 不命中；active link 標示為粗體黑字，其他 tab 為藍字。New Tab 建立並選取
 `https://browser.engineering/`；New Tab 與有效 Tab N 選取都清除 dirty address draft。
 完整 oracle 結果在 [`tabs_oracle.json`](../tests/fixtures/tabs_oracle.json)，可用
@@ -40,6 +45,17 @@ Chrome 轉成從 x=34 到右緣的等寬 tab 方框；每格寬 `(pixel_width - 
 不增加 tab，也不清除地址草稿或焦點；TabSet API 再建立會回傳明確的上限錯誤。兩個 tabs 的 Python oracle 幾何
 維持上述契約；等寬壓縮與 25 個上限是使用者指定的 native 差異，見
 [`PORTING_PLAN.md`](../PORTING_PLAN.md)。極窄視窗可能無法讀出每個編號，仍列為可用性缺口。
+
+Tabbed Chrome 有兩個書籤控制，只存在於 tabbed `--window`，是使用者指定的 native UX。
+書籤清單按鈕是 26×24 的獨立方框（灰星加三條清單線），寬度 ≥128px 時位於
+(98, Back y)；94–127px 時位於 (0, Back y+30)；79–93px 時位於 (49, Forward y)；
+<79px 時位於 (0, Forward y+30)。點擊會丟棄地址草稿，並在 active tab 以一般 navigation
+開啟 `about:bookmarks`。收藏星畫在地址欄內右側，中心 (field right−12, field 中線)，
+外半徑 7px；未收藏為灰色，已收藏為金色。命中區是地址欄最右 23px，並先於地址欄判定；
+地址文字裁切寬度為 field−28，避免文字壓到星星。只有已提交、未 pending、且不是
+`about:blank`／`about:bookmarks` 的頁面可切換收藏；不可收藏時點擊只丟棄地址草稿。
+Tabbed 地址欄寬度另夾限為不超過視窗寬度，讓 <100px 視窗仍看得到星星；單頁 Chrome
+維持 Python 的最小 100px。各寬度下兩個控制與 Back/Forward、地址欄都不重疊。
 
 Tabbed page viewport 高度使用 `max(1, window_height - tabs_chrome_bottom(width))`；800×600
 外框因此為 800×525.18，raster height 向上取整為 526px，page 從 y=74.82 開始。Page layout、
@@ -55,6 +71,10 @@ Chrome state 改變時只重建 chrome texture；page 或 chrome 任一改變都
 依 textures→renderer→window→SDL 順序釋放。寬或高 ≤10px 的 resize 忽略，超過單邊 8192 或
 25,000,000 pixels 的 raster 明確失敗。
 
+SDL button 的視窗座標先在 presentation 邊界以實際視窗尺寸與像素尺寸換成實體像素；chrome、
+tab 與 page 共用轉換後的座標進行命中測試。只有本視窗且兩軸有限的 button event 會
+轉換，無效尺寸或結果不可表示時忽略該次 click。SDL 視窗使用
+`SDL_WINDOW_HIGH_PIXEL_DENSITY` 以請求高密度像素緩衝；顯示內容縮放比例不充當座標轉換倍率。
 Chrome y 小於 bottom 的 click 由 toolbar 處理；page y 不小於 bottom 的 click 扣除 bottom
 一次，再經 `tai_page_activate_viewport` 套用 page-scroll-to-document 轉換。地址列 click
 會顯示目前 URL 並依 x 放置游標；在地址列 focus 期間 SDL text input、Backspace、Left/Right
@@ -91,7 +111,8 @@ scroll 值也能抓出事件全被忽略的回歸。超限 resize event 不會�
 `tests/layout_differential.py` 另以 80px 寬度的換行案例比對 frozen Python/C layout geometry。
 `tests/test_presentation.c` 另以 SDL dummy driver 注入 tabbed New Tab、Tab 0/Tab 1 選取、
 地址草稿輸入與切換、New Tab 和 tab link 的半開 hit boundaries，驗證 active index、tab count
-與 home URL。`test_tabset.c` 與 `tabset_integration.py` 覆蓋 async pending、delayed HTTP/CSS、
+與 home URL；120px 換行案例驗證 Tab 1 右側命中，同檔的座標換算案例覆蓋
+1×/2×、非有限輸入和零尺寸。`test_tabset.c` 與 `tabset_integration.py` 覆蓋 async pending、delayed HTTP/CSS、
 pending navigation replacement/late response、Referer、history 與各類失敗回滾。`test_tabs_window.c`
 透過真實 tabbed SDL event loop 在 delayed document/CSS 載入期間注入 new-tab/switch input，並在
 文件仍 pending 時關閉視窗。這些 dummy-window 案例驗證互動路徑，並不構成 native chrome pixel diff。

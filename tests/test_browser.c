@@ -61,9 +61,59 @@ static bool activate_control(TaiPage *page, const TaiNode *target,
     return tai_page_activate_viewport(page, point.x, point.y, changed, error);
 }
 
+typedef struct {
+    bool called;
+    bool network_failure;
+    TaiPage *page;
+    char *error;
+} MarkupResult;
+
+static void markup_done(void *opaque, TaiPage *page, bool network_failure,
+                        char *error) {
+    MarkupResult *result = opaque;
+    result->called = true;
+    result->network_failure = network_failure;
+    result->page = page;
+    result->error = error;
+}
+
 int main(void) {
     char *error = NULL;
     TaiNetwork *network = tai_network_create();
+    TaiUrl *internal_url = tai_url_parse("about:bookmarks");
+    assert(network && internal_url);
+    char internal_markup[] = "<style>p {color:red}</style><p>Saved page</p>"
+                             "<link rel=stylesheet href=http://example.invalid/x.css>";
+    MarkupResult internal = {0};
+    TaiPageLoad *internal_load = tai_page_load_async_markup(
+        network, internal_url, internal_markup,
+        "html {display:block} body {display:block} p {display:block}",
+        320.0, 160.0, false, markup_done, &internal, &error);
+    assert(!internal_load && !error && internal.called && internal.page &&
+           !internal.error && !internal.network_failure);
+    memset(internal_markup, 'X', sizeof(internal_markup) - 1);
+    assert(!strcmp(tai_url_string(tai_page_url(internal.page)),
+                   "about:bookmarks"));
+    assert(text_command(tai_page_display_list(internal.page), "Saved"));
+    assert(text_command(tai_page_display_list(internal.page), "page"));
+    TaiNode *internal_paragraph = find(tai_page_root(internal.page), "p");
+    assert(internal_paragraph &&
+           !strcmp(tai_map_get(&internal_paragraph->style, "color"), "red"));
+    assert(tai_network_pending(network) == 0);
+    tai_page_destroy(internal.page);
+    tai_url_destroy(internal_url);
+
+    TaiUrl *ordinary_url = tai_url_parse("https://example.invalid/");
+    MarkupResult rejected = {0};
+    assert(ordinary_url);
+    assert(!tai_page_load_async_markup(network, ordinary_url,
+        "<p>wrong scheme</p>", "", 320.0, 160.0, false,
+        markup_done, &rejected, &error));
+    assert(error && !rejected.called);
+    free(error);
+    error = NULL;
+    tai_url_destroy(ordinary_url);
+
     TaiUrl *url = tai_url_parse(
         "data:text/html,<style>p%20%7Bcolor:red%7D</style><p>Hello%20world</p>");
     assert(network && url);

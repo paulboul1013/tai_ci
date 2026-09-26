@@ -141,3 +141,225 @@ tabs 時，改繪製等寬編號方框；所有方框共用同一條 y=6..30 命
 Tab 24 仍作用中。測試視窗已以最新 binary 重開並保留供手動檢查；X11 ID 可在重開時重用，
 須每次重新搜尋。極窄視窗中每格可能小到無法顯示編號；完整
 Python/native pixel diff 與 OS 鍵盤輸入順序仍是獨立缺口，tabs slice 維持 `VALIDATING`。
+
+## Pointer pixel coordinates and follow-up validation — 2026-09-25
+
+SDL3 的 button event 使用視窗座標；presentation 的 chrome、page layout 和 SDL renderer
+使用實體像素。依 [SDL high-DPI guide](https://wiki.libsdl.org/SDL3/README-highdpi)，
+兩條視窗路徑現在於 button event 進入時量測 `SDL_GetWindowSize()` 與
+`SDL_GetWindowSizeInPixels()`，轉換一次後才分流 chrome/page/tab 命中，並以
+`SDL_WINDOW_HIGH_PIXEL_DENSITY` 請求高密度緩衝。`tests/test_presentation.c` 的
+2×/1×/非有限值/無效尺寸案例在實作前因缺少轉換函式無法連結，實作後通過。
+
+另以從 Ubuntu 套件解出到 `/tmp/tai-weston` 的 Weston 13 headless compositor 建立
+`--scale=2` 隔離 Wayland socket，執行
+`TAI_PRESENTATION_HIDPI_PROBE=1 ./build/test_presentation`。SDL 回報 logical
+300×100、physical 600×200；注入視窗座標 `(7.5,9)` 建立 New Tab，再以 `(20,13)`
+命中實體座標 `(40,26)` 的 Tab 0，結果 `tabs=2 active=0`，程式 exit 0。
+舊未轉換路徑的第二下會落在 New Tab 區；此探針驗證實際 2× SDL event→presentation→
+tab selection 邊界，不是原生視窗截圖。
+
+更新後 `cmake --build build -j 4` 成功；完整 CTest 30/30 通過，Python
+`tests/tabs_oracle_probe.py --check` 與凍結 fixture 相符。`build-asan` focused
+`presentation_dummy`、`presentation_chrome`、`browser_tabs` 3/3 通過，設定
+`ASAN_OPTIONS=detect_leaks=0`；此結果仍不代表 LeakSanitizer 通過，先前
+Fontconfig/Cairo 報告與 tab-set allocation failure injection 缺口未關閉。
+
+本次 X11 視窗的 800×600 兩分頁截圖
+[`hidpi-fix-two-tabs-800.png`](/tmp/tai-tabs-acceptance/hidpi-fix-two-tabs-800.png)
+顯示 active Tab 1；120×600 的
+[`active1.png`](/tmp/tai-tabs-acceptance/hidpi-fix-two-tabs-120-active1.png)、
+[`active0.png`](/tmp/tai-tabs-acceptance/hidpi-fix-two-tabs-120-active0.png)
+顯示 Tab 0 可切回本機頁面，但窄寬文字裁切仍存在。800px 的 25 格
+[`active24.png`](/tmp/tai-tabs-acceptance/hidpi-fix-25-active24.png)、
+[`active0.png`](/tmp/tai-tabs-acceptance/hidpi-fix-25-active0.png)、
+[`active12.png`](/tmp/tai-tabs-acceptance/hidpi-fix-25-active12.png)
+分別核對末、首、中格；放寬至 1200px 後
+[`wide1200.png`](/tmp/tai-tabs-acceptance/hidpi-fix-25-wide1200.png)
+切回一般文字列。120px 截圖在 x=110 的 y=138 為 chrome、y=139 為白色頁面，
+符合 frozen oracle 的 bottom 138.48；這些是 key-region／命中證據，仍非完整 pixel diff。
+
+本次再次嘗試 `xdotool windowfocus`，但 `xdotool getwindowfocus` 回報
+`xdo_get_focused_window_sane failed`。針對地址列的 `xdotool type` 命令成功結束，
+截圖中沒有輸入字串；因此真實 X11 鍵盤／地址事件交付仍未驗證，不以此修改
+`windowID=0` 的輸入規則。切片保持 `VALIDATING`，整體 acceptance 勾選狀態不變。
+
+## Chrome comparison, narrow layout and resource probes — 2026-09-25
+
+以 frozen Python `Chrome.paint()` 的 display list 離屏輸出固定兩分頁 chrome，和相同
+800px／120px 狀態的 X11 `Tai Gar` 視窗截圖比較。比較範圍只含 chrome；Python Skia
+與 native Cairo 的字型光柵化不同，因此全像素差異率是診斷訊號，驗收以控制項、幾何與
+key regions 為主。修正前 800×75 active Tab 1 有 18,568／60,000 不同像素；
+120×139 active Tab 0／1 分別有 8,889／9,245 不同像素。背景純色區域一致，
+但 Python 有橘色按鈕、書籤與 HTTPS 鎖頭，native 對應外觀仍缺；這些明確差異由
+`PORTING_PLAN.md` 追蹤。Python 的 Back/Forward 在 800px 從 y=42.48、120px
+從 y=62.48 開始；native 原先都從 y=36 開始，蓋住 120px 第二行 Tab 1 文字。
+
+以 Python oracle 新增的 Back/Forward/address 矩形凍結至
+[`tabs_oracle.json`](tests/fixtures/tabs_oracle.json)。Native tabbed chrome 現在使用對應的
+toolbar/address y，兩分頁在 125px 寬改為單行，120px 的 inactive Tab 1 命中右界為
+x=113。新增 120px dummy SDL 點擊案例在修正前失敗、修正後通過。修正後 120px
+active Tab 0 的第二行藍字由 0 增為 17 像素（同區 Python 21 像素）；
+[`active0.png`](/tmp/tai-tabs-acceptance/narrow-overlap-fixed-active0.png)
+與 [`active1.png`](/tmp/tai-tabs-acceptance/narrow-overlap-fixed-active1.png)
+顯示真實視窗在 `(110,45)` 可選取 Tab 1。127px
+[`unwrapped.png`](/tmp/tai-tabs-acceptance/narrow-127-unwrapped.png)
+的 x=110 欄 y=118 為 chrome、y=119 為 page，對應 Python bottom 118.48。
+修正後與 Python 的不同像素降為 800px 10,994／60,000、120px active0
+6,533／16,680、active1 6,961／16,680；800px
+[`active1.png`](/tmp/tai-tabs-acceptance/chrome-geometry-fixed-800-active1.png)
+仍可見未實作的視覺控制項。這不宣稱完整 chrome parity。
+
+LeakSanitizer 在 sandbox 外以 Fontconfig suppression `leak:libfontconfig.so`
+執行 focused `test_chrome`、`test_presentation` 和
+`tests/tabset_integration.py build-asan/test_tabset build-asan/test_tabs_window`，
+均 exit 0，沒有未抑制的洩漏報告。分別抑制 Fontconfig 13 筆／1035 bytes、
+23 筆／1771 bytes、23 筆／1751 bytes；這只支持上述路徑沒有被 LSan 偵測到的
+專案洩漏，Fontconfig/Cairo 全域快取仍需獨立清理策略。另以 `/tmp` 的 linker
+`--wrap=malloc/calloc/realloc` harness 掃描 0–79 的配置失敗 budget，覆蓋
+TabSet create/start/new-tab 240 個主執行緒建構／立即關閉序列；失敗後 retry 和 tab
+數量不變的斷言通過，ASan 與上述 LSan suppression 都無其他報告。loader thread 的
+配置故障與完成提交尚未注入，切片繼續 `VALIDATING`。
+
+## Keyboard delivery, loader-thread allocation failure and QuickJS OOM — 2026-09-25
+
+以 `SDL_EVENT_LOGGING=1` 啟動 `tai-browser --window` 記錄 SDL 實收事件。WSLg `:0`
+上點擊地址列後，`xdotool key --window` 產生 `windowid=0` 的 KEY_DOWN 且沒有
+TEXT_INPUT；`xdotool windowfocus` 使 SDL 在約 0.8ms 內先 FOCUS_GAINED 再
+FOCUS_LOST，其後 XTEST 按鍵沒有任何 SDL 事件。WSLg compositor 會撤回 X11 焦點，
+此路徑仍無法作為鍵盤證據，瀏覽器維持忽略 `windowID=0`。
+
+改在無 window manager 的隔離 `Xvfb :99` 執行同一 binary 與 fixture，XTEST 按鍵經
+X server 焦點分派。點擊地址欄右端、80 次 BackSpace、輸入
+`http://127.0.0.1:8765/second.html` 後按 Return：267 個鍵盤／文字事件全為
+`windowid=2`，`windowid=0` 為 0，TEXT_INPUT 33 筆與 URL 長度一致，順序為每鍵
+KEY_DOWN→TEXT_INPUT→KEY_UP；server 記錄 `GET /second.html 200`，截圖
+[`xvfb-keyboard-address.png`](/tmp/tai-tabs-acceptance/xvfb-keyboard-address.png)
+依序顯示清空、輸入與 Second Page，事件記錄在
+[`xvfb-keyboard-events.txt`](/tmp/tai-tabs-acceptance/xvfb-keyboard-events.txt)。先前一次
+點在 URL 中段再按 Ctrl+A 的嘗試送出 `/indhttp://…second.htmlx.html`；frozen Python
+同樣以點擊 x 決定游標且不處理 Ctrl+A，因此這是等價行為，不是缺陷。這驗證真實 X11
+server→SDL→地址列的鍵盤順序；WSLg／Wayland compositor 的焦點交付仍未驗證。
+
+loader thread 配置故障以 linker `--wrap=malloc,calloc,realloc,pthread_create` harness
+注入：只標記 TabSet loader thread，從第 i 次配置起持續失敗，涵蓋專案與 QuickJS 靜態碼，
+不含 curl/Cairo/Fontconfig 共享函式庫。每個 i 檢查 pending 會結束、失敗時保留原頁與
+history、成功時 history 前進，再以同 tab 無故障導覽恢復。第 190 點在
+`JS_NewContextRaw()` 的 `class_proto` 配置失敗時，QuickJS-NG `df836d1`（上游 master
+`19dbe85` 仍相同）已 `add_gc_object()` 卻直接 `js_free_rt(ctx)`，其後
+`JS_FreeRuntime()` 走訪已釋放 GC 節點，ASan 回報 SEGV。這是可重現的依賴端
+use-after-free。以 scratch 複本在釋放前加 `remove_gc_object(&ctx->header)` 後，
+`data:` 導覽／初始載入分別掃過 444／396 點、本機 HTTP 分別掃過 791／835 點至無故障
+完成，ASan/UBSan/LSan（僅 Fontconfig suppression）全部 exit 0。
+
+此修補已成為 tracked
+[`patches/quickjs/0001`](patches/quickjs/0001-unlink-context-on-class-proto-oom.patch)，
+CMake configure 時套用至 `deps/quickjs`，已存在則略過，無法套用則停止；無自身
+`.git` 的 checkout 也以 `GIT_CEILING_DIRECTORIES` 驗證可套用與偵測。新增兩個 CTest：
+`quickjs_oom` 以毒化並延後歸還的自訂 QuickJS allocator 逐點失敗 `JS_NewContext()`，
+未修補的 libqjs 在 `gc_decref` 斷言 abort，修補後 57 點通過；
+`tabset_loader_oom` 為上述 `data:` loader-thread 掃描（本機 HTTP 掃描未納入 CTest）。
+`build` 完整 CTest 32/32 通過；`build-asan` 兩個新測試在 ASan/UBSan/LSan
+（Fontconfig suppression）下通過。上游 quickjs-ng 尚未回報。
+
+code review 指出 button 座標以即時視窗尺寸換算、命中以已處理尺寸判斷。換算比例是
+pixel density，resize 不改變它；命中使用使用者點擊當下已呈現的版面。剩餘風險只在
+display scale 改變與 click 同時排隊，未另建自動測試。
+
+## WSLg manual keyboard delivery — 2026-09-25
+
+WSLg `:0` 上以 `SDL_EVENT_LOGGING=1 SDL_VIDEO_X11_XINPUT2=0` 啟動 `tai-browser --window`
+本機 fixture，由使用者以實體鍵盤操作：點擊地址欄右端、BackSpace 編輯、輸入
+`.htmX`、修正，最後清空並輸入 `http://127.0.0.1:8765/second.html` 後按 Enter。SDL
+記錄在點擊前已 FOCUS_GAINED；266 個 KEY_DOWN／KEY_UP／TEXT_INPUT 全為 SDL
+`windowid=2`，無 `windowid=0`；每筆 TEXT_INPUT 都緊接在其 KEY_DOWN 後，含 61 次
+BackSpace 與 1 次 Enter，文字依序為 `.htmX`、`l`、`second` 與完整 URL。Enter 後
+server 記錄 `GET /second.html 200`，截圖
+[`wslg-manual-keyboard-after.png`](/tmp/tai-tabs-acceptance/wslg-manual-keyboard-after.png)
+顯示地址欄與 Second Page，事件見
+[`wslg-manual-keyboard-events.txt`](/tmp/tai-tabs-acceptance/wslg-manual-keyboard-events.txt)。
+FOCUS_LOST 出現在 Enter 之後，對應使用者切回其他視窗。這驗證 WSLg compositor→
+X11→SDL→地址列的實體鍵盤交付；自動注入仍受 WSLg 焦點撤回限制，Wayland 原生
+backend 未驗證。
+
+## Native Wayland address keyboard delivery — 2026-09-26
+
+在隔離的 `Xvfb :98` 上執行 Weston 13 的 X11 backend、Pixman renderer 與 kiosk shell；
+Weston 的 X11 output ID 為 `2097157`。本機未安裝 Weston，因此只把 Ubuntu
+`weston`/`libweston-13-0` 套件解到 `/tmp`，並在暫存副本改寫其固定模組搜尋路徑；
+未改動系統安裝或專案程式碼。fixture server 綁定 `127.0.0.1:8765`。browser 以
+`SDL_VIDEODRIVER=wayland WAYLAND_DISPLAY=tai-wayland-test SDL_EVENT_LOGGING=1`
+啟動，SDL 記錄 Wayland window `4` 的 `WINDOW_SHOWN` 與 `FOCUS_GAINED`。
+
+重跑時以 `Xvfb :98 -screen 0 1280x800x24 -nolisten tcp` 建立隔離 display，在
+`DISPLAY=:98` 上啟動 Weston `--backend=x11 --shell=kiosk --renderer=pixman`
+`--socket=tai-wayland-test --width=1024 --height=768 --no-config`，啟動上述 fixture
+與 browser 並將 stderr 分別保存為 server/event log。先對隔離 X server 執行
+`DISPLAY=:98 xset r off`，從本次 Weston log 取得 X11 output ID，再用下列命令
+透過 Weston X11 window 把輸入送進 Wayland seat
+（將 `2097157` 換成本次 ID）：
+
+```bash
+DISPLAY=:98 xdotool mousemove --window 2097157 760 63 click 1 windowfocus 2097157
+DISPLAY=:98 xdotool key --repeat 80 --delay 5 BackSpace
+DISPLAY=:98 xdotool type --delay 80 'http://127.0.0.1:8765/second.html'
+DISPLAY=:98 xwd -silent -id 2097157 -out /tmp/tai-wayland-keyboard-2026-09-26/typed.xwd
+DISPLAY=:98 xdotool key Return
+DISPLAY=:98 xwd -silent -id 2097157 -out /tmp/tai-wayland-keyboard-2026-09-26/after.xwd
+```
+
+實際記錄中，click 為 `windowid=4 x=760 y=63`；focus 曾在 click 後短暫 LOST，
+`windowfocus` 後 GAINED，所有後續 Backspace、33 筆 `TEXT_INPUT` 與 Return
+`KEY_DOWN/KEY_UP` 均為 `windowid=4`，直到 Return 前沒有再次失焦。送出前截圖顯示
+地址欄為完整 `http://127.0.0.1:8765/second.html` 且仍是 Tab Zero；fixture
+收到 `GET /second.html HTTP/1.1` 200；送出後非空白截圖顯示 Second Page。
+這證明輸入經 XTEST→Weston X11 backend→Wayland seat→SDL3→地址列與導覽。
+第一次使用 Xvfb 預設 auto-repeat、`xdotool type --delay 30` 時出現重複 `t`；
+停用 auto-repeat 並改為 80ms 間隔後，文字事件數與 URL 長度一致。
+截圖與 event log 原存於本次 `/tmp/tai-wayland-keyboard-2026-09-26/`，已目視檢查，
+但執行環境在後續對話回合重置 `/tmp`，檔案未保留；上述命令與事件條件是重跑檢查。
+這是隔離 Weston 的原生 Wayland backend 證據，未涵蓋 WSLg 原生 Wayland seat。
+同一 binary 的 focused `presentation_dummy`、`presentation_chrome`、`browser_tabs`
+3/3 通過；完整 CTest 32/32、`python3 tests/tabs_oracle_probe.py --check` 通過。
+本次只有驗證文件變更，沒有程式碼修補或新增 sanitizer 案例。
+
+## Two-star bookmarks slice — 2026-09-26
+
+切片狀態 `VALIDATING`；不勾選整體 acceptance 條件（bookmarks E2E 條目仍需與 windows、
+view-source 等其他項目一併達成）。設計與決定見 [書籤計畫](docs/bookmarks-plan.md)，
+刻意差異見 [PORTING_PLAN.md](PORTING_PLAN.md)。
+
+**建置注意：** 本機曾兩度出現原始碼 mtime 早於既有 `.o`，Ninja 因此沿用過期物件
+（`tabset.c.o` 缺少持久化呼叫）。以下結果是在 `touch` 全部專案原始碼後重建
+`build/` 與 `build-asan/`，並以 `objdump`／字串比對確認產物含最終程式碼後取得。
+
+- 完整 CTest `ctest --test-dir build -j 3`：35/35 通過。新增 `bookmarks`、
+  `bookmarks_integration`、`bookmarks_oracle_probe`。
+- `python3 tests/bookmarks_oracle_probe.py --check` 與凍結 fixture 相符。
+- `bookmarks_integration`（本機 HTTP）：跨 tab 共用、pending／`about:blank`／
+  `about:bookmarks` 不可收藏、排序與逸出、點擊清單連結以原 URL 送出 GET（不含
+  `&amp;`）、Back/Forward，以及透過 `tai_tabset_create` 的重啟讀回、取消後持久化、
+  壞檔不阻擋啟動且不被覆寫。
+- ASan/UBSan **含 LeakSanitizer**（`ASAN_OPTIONS=detect_leaks=1`，先以刻意洩漏程式確認
+  LSan 可執行）：`bookmarks`、`bookmarks_integration`、`browser_headless`、
+  `browser_history`、`presentation_dummy`、`presentation_chrome`、`browser_tabs`、
+  `tabset_loader_oom` 8/8 通過。SDL 視窗測試的 LSan 報告只剩 Cairo toy font／fontconfig
+  全域快取（`cairo_select_font_face`→`FcPatternDuplicate`，未涉及書籤的
+  `presentation_chrome` 也相同），以 `leak:libfontconfig.so`、`leak:libcairo.so`
+  suppression 排除；排除後沒有專案程式碼的洩漏。
+- 真實視窗：隔離 `Xvfb :99`、`SDL_VIDEO_X11_XINPUT2=0`、fixture
+  `python3 -m http.server 8766 --bind 127.0.0.1 --directory tests/fixtures/bookmarks_window`、
+  暫存 `XDG_DATA_HOME`。點欄內星 (769,63)：灰→金，檔案目錄 0700、檔案 0600，內容為
+  magic 加一筆 URL。點左側按鈕 (110,54) 開啟清單，點清單連結後 server 收到
+  `GET /index.html`，Back 回到清單且 Forward 啟用。SIGTERM 正常結束後以同一目錄重啟，
+  星星仍為金色；取消後檔案筆數為 0，清單顯示「No bookmarks yet.」，沒有殘留暫存檔。
+  200／110／85／70px 寬度下兩顆星與 Back/Forward、地址欄都不重疊。最終 binary 另以
+  壞檔啟動：stderr 警告、可在記憶體中收藏、原檔不變。截圖存於
+  `/tmp/tai-bookmarks-acceptance-2026-09-26/`（已目視檢查；`/tmp` 可能被重置）。
+  在沒有視窗管理器的 Xvfb 上，`xdotool windowclose` 會直接銷毀視窗，SDL 收到
+  BadWindow 後以 1 結束，因此這裡改用對已核對 PID 送 SIGTERM。
+- 獨立 reviewer 指出的問題中，壞檔或缺少 HOME 時拒絕啟動、單頁 Chrome 窄寬改變，
+  以及未記錄的刻意差異已修正或寫入紀錄。多 process 後寫者覆蓋與暫存檔殘留列為已知
+  限制。
+- 尚未涵蓋：79–93、<79、125–127、128–231px 的 dummy SDL 命中測試（只做了真實視窗
+  目視）、長地址文字接近星星時的游標位置，以及 WSLg／Wayland 下的書籤點擊。
