@@ -36,42 +36,46 @@
 
 ## 原生視窗與 SDL 驗證：持續授權
 
-儲存庫擁有者已授權 agent 在本專案後續工作中直接執行建置、CTest、Python oracle、
-本機 fixture server、`tai-browser --window`、SDL 合成輸入測試，以及只針對本次啟動的
-`Tai Gar` 視窗進行 X11 滑鼠、滾輪、鍵盤、resize、截圖和關閉操作。這項授權持續有效，
-執行這些驗證時不必再次向使用者詢問。每次啟動後重新查詢視窗 ID，並確認只命中本次
-測試視窗；截圖存放 `/tmp`，關閉時只關閉 agent 自己啟動的視窗。
+**直接執行已授權的驗證。** 儲存庫擁有者對本專案後續 session 的授權涵蓋：建置、CTest、
+Python oracle、僅綁定 `127.0.0.1` 的 fixture server、`tai-browser --window`、SDL 合成輸入
+測試，以及對 agent 本次啟動的 `Tai Gar` 視窗進行 X11 滑鼠、滾輪、鍵盤、焦點、resize、
+截圖與關閉操作。這些操作不需要逐次或逐座標向使用者徵求同意，也不要因此暫停驗證。
 
-從儲存庫根目錄執行以下指令；有相依性的步驟依序執行，server 與視窗各保留一個執行中
-session：
+從儲存庫根目錄依序完成建置、相關 CTest 與 Python oracle；需要真實視窗證據時，保留
+fixture server 和 browser 各自的執行中 session。以下是近期已使用的 tabs 驗證組合，
+測試目標與 fixture 應隨受影響功能調整：
 
 ```bash
 cmake --build build --target tai-browser test_presentation -j 4
 ctest --test-dir build -R '^presentation_dummy$' --output-on-failure
 python3 tests/tabs_oracle_probe.py --check
 python3 -m http.server 8765 --bind 127.0.0.1 --directory tests/fixtures/tabs_window
-SDL_VIDEO_X11_XINPUT2=0 ./build/tai-browser --window http://127.0.0.1:8765/index.html
+SDL_EVENT_LOGGING=1 SDL_VIDEO_X11_XINPUT2=0 ./build/tai-browser --window http://127.0.0.1:8765/index.html
 ```
 
-在另一個 shell 查詢本次視窗 ID，只有一個匹配時才設定 `tai_window_id`；多個匹配時先用
-`xdotool getwindowpid ID` 對照剛啟動的 browser process：
+每次啟動後重新查詢 X11 視窗 ID；逐一以 `xdotool getwindowpid ID` 對照本次 browser PID，
+確認唯一目標後才設定 `tai_window_id` 並送出輸入。座標與按鍵按案例調整，動作後擷取
+`/tmp` 截圖，檢查畫面非空白且頁面或 chrome 確有預期變化：
 
 ```bash
 xdotool search --name '^Tai Gar$'
+xdotool getwindowpid REPLACE_WITH_CANDIDATE_ID
 tai_window_id=REPLACE_WITH_CURRENT_ID
 xdotool mousemove --window "$tai_window_id" 15 18 click --window "$tai_window_id" 1
 xdotool click --window "$tai_window_id" 5
-xdotool key --window "$tai_window_id" Page_Down
 xdotool windowsize "$tai_window_id" 120 600
 python3 /home/paulboul/.codex/skills/screenshot/scripts/take_screenshot.py --mode temp --window-id "$tai_window_id"
 xwd -silent -id "$tai_window_id" -out /tmp/tai-window.xwd
 convert /tmp/tai-window.xwd /tmp/tai-window.png
 ```
 
-滑鼠座標與按鍵依測試案例調整；每次操作後檢查非空白截圖及可觀察的頁面／chrome 變化。
-關閉前確認 ID 仍屬本次視窗，再使用 `xdotool windowclose "$tai_window_id"`。真實鍵盤
-事件必須另核對 SDL `windowID`、焦點與前後畫面；注入指令成功不等於事件已送達。
-完整判讀與失敗處理見 [`docs/agents/native-window-verification.md`](docs/agents/native-window-verification.md)。
+真實鍵盤輸入需核對焦點、SDL `windowID`、事件日誌及前後畫面；`xdotool` 成功返回不算
+送達證據。WSLg 焦點失效時依
+[`docs/agents/native-window-verification.md`](docs/agents/native-window-verification.md) 的 Xvfb
+流程驗證。結束前再核對視窗 PID，只用 `xdotool windowclose "$tai_window_id"` 關閉本次
+啟動的視窗，並停止本次 fixture server。
 
-此段是使用者對測試操作的授權；執行平台的 sandbox／GUI 權限由平台獨立管理。若工具要求
-`require_escalated`，直接透過工具送出所需的限定範圍執行申請，並沿用已核准的規則。
+使用者授權與執行平台的 sandbox／GUI 核准是兩件事。遇到 sandbox 阻擋時，直接在工具呼叫中
+對**同一項、同一目標**的指令使用 `sandbox_permissions: "require_escalated"` 與簡短
+`justification`，優先沿用已核准的限定範圍規則；不要另發對話訊息詢問是否同意使用驗證
+工具。平台若仍顯示核准提示，依平台流程處理；若平台拒絕，記錄限制與已完成的驗證層。
