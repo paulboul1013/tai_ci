@@ -29,6 +29,12 @@ Keep objective whole-project completion conditions and conservative evidence.
 Check an item only when every clause is demonstrated. A successful build or one
 vertical slice does not satisfy browser-level acceptance.
 
+`ACCEPTANCE.md` itself stays short: title, status line, the checklist, the
+rules paragraphs, and a "Slice evidence" table (newest first). New slice
+evidence = a new dated file under `docs/acceptance/<YYYY-MM-DD>-<slug>.md`
+plus one row in that table; never append long logs to `ACCEPTANCE.md`
+directly — see `docs/acceptance/README.md`.
+
 Documentation sync is complete when every changed architectural fact, migration
 state, acceptance claim, and known discrepancy has exactly one authoritative
 record and agrees with the implementation and tests.
