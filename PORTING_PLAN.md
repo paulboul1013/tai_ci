@@ -10,7 +10,7 @@
 2. **HTTPS 鎖頭與地址欄寬度：已實作，`VALIDATING`。** 依 [計畫](docs/https-lock-plan.md) 完成；
    oracle（`tests/https_oracle_probe.py`）、HTTPS 整合、dummy SDL、sanitizer 與 Xvfb 真實視窗證據見
    [ACCEPTANCE.md](ACCEPTANCE.md)。
-3. **續做 Chrome 與 History。** 對照 Python 的 Back/Forward 可用狀態、history 分支截斷、fragment、POST 後 traversal、dirty 地址草稿及 pending/失敗時的可見 URL；修正觀察到的缺口。既有後續載入失敗回滾依下表保留並測試。完成條件：每一項都有可重跑的 oracle/native 對照，active/inactive tabs 的 URL、index、按鈕狀態和請求方法互不串線。
+3. **續做 Chrome 與 History：規劃完成，待實作。** 實作計畫見 [docs/history-plan.md](docs/history-plan.md)。對照 Python 的 Back/Forward 可用狀態、history 分支截斷、fragment、POST 後 traversal、dirty 地址草稿及 pending/失敗時的可見 URL；修正觀察到的缺口。依使用者 2026-09-26 的決定，之後的載入失敗改為比照 Python 顯示錯誤頁（取代下表的回滾策略，實作後更新該列），pending 時按 Back 維持 native 做法。完成條件：每一項都有可重跑的 oracle/native 對照，active/inactive tabs 的 URL、index、按鈕狀態和請求方法互不串線。
 4. **驗收。** 建置、相關 CTest、Python oracle、代表性原生視窗與適用的 sanitizer 均通過；將結果寫入 [ACCEPTANCE.md](ACCEPTANCE.md)。完成條件：上述 chrome/history 情境有通過證據、資源清理已審查，且剩餘差異在本計畫有唯一紀錄。整體 browser 仍依 [專案狀態規則](.agents/skills/project-records/SKILL.md) 判定是否可升為 `COMPLETE`。
 
 ### 已知差異與範圍

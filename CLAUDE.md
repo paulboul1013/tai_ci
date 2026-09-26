@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+所有回答都用繁體中文
+
 <!-- 共用規約在 AGENTS.md（Codex 也讀）。本檔只放 Claude Code 專屬內容；保持精簡。 -->
 
 @AGENTS.md
