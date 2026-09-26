@@ -1521,6 +1521,7 @@ bool tai_page_write_viewport_png(const TaiPage *page, const char *path,
         (int)ceil(page->viewport_height), 0.0, page->scroll_y, error);
 }
 const TaiUrl *tai_page_url(const TaiPage *page) { return page ? page->url : NULL; }
+bool tai_page_secure(const TaiPage *page) { return page && page->secure; }
 void tai_page_json(FILE *out, const TaiPage *page) {
     fputs("{\"url\":", out);
     tai_json_string(out, tai_url_string(page->url));

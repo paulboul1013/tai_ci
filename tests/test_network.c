@@ -71,6 +71,13 @@ static void integration(TaiNetwork *n, const char *base) {
 int main(int argc, char **argv) {
   TaiNetwork *n = tai_network_create();
   assert(n);
+  /* --ca FILE trusts a test CA for the single-request mode below. */
+  if (argc > 2 && !strcmp(argv[1], "--ca")) {
+    assert(tai_network_set_ca_file(n, argv[2]));
+    argv[2] = argv[0];
+    argv += 2;
+    argc -= 2;
+  }
   if (argc == 3 && !strcmp(argv[2], "--suite")) {
     integration(n, argv[1]);
     tai_network_destroy(n);
@@ -89,6 +96,8 @@ int main(int argc, char **argv) {
     tai_json_string(stdout, r->body ? r->body : "");
     fputs(",\"error\":", stdout);
     tai_json_string(stdout, r->error ? r->error : "");
+    printf(",\"certificate_error\":%s",
+           r->certificate_error ? "true" : "false");
     fputs(",\"headers\":{", stdout);
     for (size_t i = 0; i < r->headers.count; i++) {
       if (i)

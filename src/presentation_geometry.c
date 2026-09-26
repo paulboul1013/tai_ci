@@ -1,5 +1,16 @@
-#include "presentation_geometry.h"
+#include "presentation_internal.h"
 #include <math.h>
+
+TaiAddressField tai_tabs_address_field(int width, bool secure) {
+  double slot = secure ? TAI_SECURITY_ICON_SLOT : 0.0;
+  /* The lock slot is added after inline layout, so it does not change where
+   * the field wraps; only the field's start and its natural width move. */
+  double natural = width >= 232 ? fmax(100.0, width - 150.0 - slot) : 100.0;
+  TaiAddressField field = {.slot_x = address_x(width)};
+  field.x = field.slot_x + slot;
+  field.width = fmax(0.0, fmin(natural, (double)width - field.x));
+  return field;
+}
 
 bool tai_scrollbar_geometry(double width, double height, double scroll,
                             double max_scroll, TaiScrollbarRect *rect) {

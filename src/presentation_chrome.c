@@ -58,6 +58,32 @@ static void draw_star(cairo_t *context, double center_x, double center_y,
   cairo_stroke(context);
 }
 
+/* Python build_lock_path: an outline body with a pointed shackle, stroked in
+ * black at 1.8px inside a 14x14 box centered in the lock slot. */
+static void draw_lock(cairo_t *context, double center_x, double center_y) {
+  double size = TAI_SECURITY_ICON_SIZE;
+  double left = center_x - size / 2.0, top = center_y - size / 2.0;
+  double right = left + size, bottom = top + size;
+  double body_left = left + size * 0.18, body_right = right - size * 0.18;
+  double body_top = top + size * 0.46, body_bottom = bottom - size * 0.10;
+  double shackle_left = left + size * 0.30;
+  double shackle_right = right - size * 0.30;
+  cairo_new_path(context);
+  cairo_move_to(context, body_left, body_top);
+  cairo_line_to(context, body_right, body_top);
+  cairo_line_to(context, body_right, body_bottom);
+  cairo_line_to(context, body_left, body_bottom);
+  cairo_close_path(context);
+  cairo_move_to(context, shackle_left, body_top);
+  cairo_line_to(context, shackle_left, top + size * 0.30);
+  cairo_line_to(context, center_x, top + size * 0.10);
+  cairo_line_to(context, shackle_right, top + size * 0.30);
+  cairo_line_to(context, shackle_right, body_top);
+  set_source(context, 0.0, 0.0, 0.0);
+  cairo_set_line_width(context, 1.8);
+  cairo_stroke(context);
+}
+
 static void draw_bookmarks_button(cairo_t *context, int width) {
   double x = bookmarks_button_x(width), y = bookmarks_button_y(width);
   set_source(context, 0.92, 0.92, 0.92);
@@ -283,9 +309,10 @@ bool tai_pres_render_tabs_chrome_texture(SDL_Renderer *renderer,
                                       const AddressEditor *editor,
                                       char **error) {
   double bottom = tabs_chrome_bottom(width);
-  double field_x = address_x(width);
+  TaiAddressField field = tai_tabs_address_field(width, view->secure);
+  double field_x = field.x;
   double field_y = tabs_address_y(width);
-  double field_width = tabs_address_width(width);
+  double field_width = field.width;
   double forward_x = forward_button_x(width);
   double forward_y = tabs_forward_button_y(width);
   int height = (int)ceil(bottom);
@@ -367,6 +394,9 @@ bool tai_pres_render_tabs_chrome_texture(SDL_Renderer *renderer,
   draw_button(context, forward_x, forward_y, 45.0, 24.0,
               view->can_go_forward, true);
   draw_bookmarks_button(context, width);
+  if (view->secure)
+    draw_lock(context, field.slot_x + TAI_SECURITY_ICON_SLOT / 2.0,
+              field_y + TAI_ADDRESS_HEIGHT / 2.0);
   cairo_rectangle(context, field_x, field_y, field_width,
                   TAI_ADDRESS_HEIGHT);
   cairo_set_source_rgb(context, 1.0, 1.0, 1.0);

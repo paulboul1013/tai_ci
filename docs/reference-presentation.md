@@ -57,6 +57,17 @@ Tabbed Chrome 有兩個書籤控制，只存在於 tabbed `--window`，是使用
 Tabbed 地址欄寬度另夾限為不超過視窗寬度，讓 <100px 視窗仍看得到星星；單頁 Chrome
 維持 Python 的最小 100px。各寬度下兩個控制與 Back/Forward、地址欄都不重疊。
 
+安全頁面（`TaiTabSetView.secure`）的 tabbed 地址欄依 Python `Chrome`（`SECURITY_ICON_SLOT`
+＝30）右移：鎖頭槽為 [address_x, address_x+30)，欄位起點為 address_x+30，自然寬度
+在 ≥232px 時為 `max(100, width−180)`、否則 100；地址欄換行斷點不因鎖頭改變。native
+再把寬度夾限為 `window−x`（見上段）。唯一來源是 `tai_tabs_address_field()`
+（`src/presentation_geometry.c`），繪製、文字裁切（field−28）、游標定位、地址欄命中與欄內
+收藏星都用它。oracle 矩形（`tests/fixtures/https_oracle.json`）：800px 安全時欄位
+`[162,55.552,782,71.552]`、鎖頭 `[140,56.552,154,70.552]`；不安全時欄位起點 132；
+232px 安全時 Python 為 `[162,…,262,…]`、native 夾限到 232；231/120/70px 安全時欄位起點
+30、鎖頭 `[8,…,22,…]`。鎖頭是 14×14 黑色外框（鎖身＋尖頂鎖環，線寬 1.8，不填滿），中心
+為 (slot_x+15, 欄位中線)。鎖頭槽不是命中區：點擊只丟棄地址草稿，不聚焦地址欄。
+
 Tabbed page viewport 高度使用 `max(1, window_height - tabs_chrome_bottom(width))`；800×600
 外框因此為 800×525.18，raster height 向上取整為 526px，page 從 y=74.82 開始。Page layout、
 page raster 和 scrollbar geometry 均使用內容區高度；scrollbar thumb 在內容區計算後，呈現時
@@ -116,6 +127,10 @@ scroll 值也能抓出事件全被忽略的回歸。超限 resize event 不會�
 pending navigation replacement/late response、Referer、history 與各類失敗回滾。`test_tabs_window.c`
 透過真實 tabbed SDL event loop 在 delayed document/CSS 載入期間注入 new-tab/switch input，並在
 文件仍 pending 時關閉視窗。這些 dummy-window 案例驗證互動路徑，並不構成 native chrome pixel diff。
+`tests/https_integration.py` 以每次產生的測試 CA 與 127.0.0.1 HTTP／HTTPS fixture 驅動
+`test_tabs_secure_window.c`：`--geometry` 輸出各斷點欄位／鎖頭矩形並與 oracle 比對；視窗模式在
+800/232/120/70px 點擊鎖頭槽（Return 不導覽）、欄內收藏星與右移後的欄位（Return 重新導覽），
+以及不安全頁面同一 x（會聚焦）。
 `tests/test_chrome.c` 以 SDL dummy driver 注入地址列 focus/edit/Unicode cursor/Return、
 Back/Forward toolbar click、toolbar/content click 分界、頁面 y offset、地址列失焦後 page input、
 page navigation 後清除舊地址草稿、320×240 一般寬度、200/100px resize、232/231px、128/127px、

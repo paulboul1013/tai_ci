@@ -121,6 +121,10 @@ bool tai_page_text_input_active(const TaiPage *page);
 bool tai_page_write_viewport_png(const TaiPage *page, const char *path,
                                  char **error);
 const TaiUrl *tai_page_url(const TaiPage *page);
+/* True when the page's requested URL is https and its document response had
+ * no transport or certificate error (the oracle's Tab.secure). Redirects do
+ * not change it; internal and error pages are never secure. */
+bool tai_page_secure(const TaiPage *page);
 void tai_page_json(FILE *out, const TaiPage *page);
 
 #endif

@@ -44,6 +44,7 @@ struct TaiNetwork {
   TaiRequest *requests;
   Cookie *cookies;
   Cache *cache;
+  char *ca_file;
   size_t pending;
 };
 
@@ -558,6 +559,8 @@ static bool start(TaiRequest *q) {
   SET(CURLOPT_CONNECTTIMEOUT_MS, 10000L);
   SET(CURLOPT_TIMEOUT_MS, 30000L);
   SET(CURLOPT_PROXY, "");
+  if (q->network->ca_file)
+    SET(CURLOPT_CAINFO, q->network->ca_file);
   if (q->payload) {
     SET(CURLOPT_POST, 1L);
     SET(CURLOPT_POSTFIELDS, q->payload);
@@ -761,8 +764,19 @@ void tai_network_destroy(TaiNetwork *n) {
     free(c);
   }
   curl_multi_cleanup(n->multi);
+  free(n->ca_file);
   free(n);
   curl_global_cleanup();
+}
+bool tai_network_set_ca_file(TaiNetwork *n, const char *path) {
+  if (!n)
+    return false;
+  char *copy = NULL;
+  if (path && !(copy = tai_strdup(path)))
+    return false;
+  free(n->ca_file);
+  n->ca_file = copy;
+  return true;
 }
 TaiRequest *tai_network_submit(TaiNetwork *n, const TaiUrl *url,
                                const TaiUrl *referrer, const char *payload,

@@ -141,6 +141,19 @@ private, incompatible node layouts.
   unchanged. If the file cannot be opened or parsed, the tab set warns on
   stderr, keeps the file untouched, and uses a memory-only collection.
   `tai_tabset_create_with_home_url` is always memory-only.
+- Page security is a property of the committed `TaiPage`, not extra tab-set
+  state: `tai_page_secure()` is true when the page's requested URL is `https`
+  and its document response had no transport or certificate error (redirects
+  do not change it). `TaiTabSetView.secure` reads the active tab's committed
+  page, so a pending navigation and a later-failure rollback keep the previous
+  page's lock, and every tab keeps its own value. The SDL thread is the only
+  reader.
+- `tai_tabset_create_for_test` additionally copies a CA bundle path that the
+  loader thread applies with `tai_network_set_ca_file()` right after creating
+  its `TaiNetwork` and before reporting readiness; the string is written
+  before `pthread_create` and only read by the loader afterwards. Only
+  integration tests call it: `tai-browser` never trusts a test CA and reads no
+  environment variable for trust roots.
 - Window resize updates every committed session page on the SDL thread. A
   pending candidate is resized to the latest viewport immediately before
   commit. Tab selection changes only the active index; it does not move page,

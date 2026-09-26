@@ -54,6 +54,7 @@ struct TabSlot {
 struct TaiTabSet {
     const char *default_css;
     char *home_url;
+    char *ca_file;
     TaiBookmarks *bookmarks;
     bool rtl;
     double width;
@@ -242,6 +243,11 @@ static void cancel_or_reap_loads(TaiTabSet *tabs, TaiNetwork *network,
 static void *loader_main(void *opaque) {
     TaiTabSet *tabs = opaque;
     TaiNetwork *network = tai_network_create();
+    if (network && tabs->ca_file &&
+        !tai_network_set_ca_file(network, tabs->ca_file)) {
+        tai_network_destroy(network);
+        network = NULL;
+    }
     pthread_mutex_lock(&tabs->mutex);
     tabs->loader_ok = network != NULL;
     tabs->loader_ready = true;
@@ -425,9 +431,16 @@ static bool reserve_slot(TaiTabSet *tabs, char **error) {
     return true;
 }
 
-TaiTabSet *tai_tabset_create_with_home_url(const char *default_css, bool rtl,
-                                           const char *home_url,
-                                           char **error) {
+static void tabset_free_state(TaiTabSet *tabs) {
+    tai_bookmarks_destroy(tabs->bookmarks);
+    free(tabs->home_url);
+    free(tabs->ca_file);
+    free(tabs);
+}
+
+static TaiTabSet *tabset_create(const char *default_css, bool rtl,
+                                const char *home_url, const char *ca_file,
+                                char **error) {
     if (error) { free(*error); *error = NULL; }
     if (!default_css || !home_url || !*home_url) {
         set_error(error, "default CSS and New Tab URL are required");
@@ -440,30 +453,25 @@ TaiTabSet *tai_tabset_create_with_home_url(const char *default_css, bool rtl,
     }
     tabs->default_css = default_css;
     tabs->home_url = tai_strdup(home_url);
+    tabs->ca_file = ca_file ? tai_strdup(ca_file) : NULL;
     tabs->bookmarks = tai_bookmarks_create();
     tabs->rtl = rtl;
     tabs->next_tab_id = 1;
-    if (!tabs->home_url || !tabs->bookmarks) {
+    if (!tabs->home_url || !tabs->bookmarks || (ca_file && !tabs->ca_file)) {
         set_error(error, "tab set state allocation failed");
-        tai_bookmarks_destroy(tabs->bookmarks);
-        free(tabs->home_url);
-        free(tabs);
+        tabset_free_state(tabs);
         return NULL;
     }
     if (pthread_mutex_init(&tabs->mutex, NULL) != 0) {
         set_error(error, "tab set mutex initialization failed");
-        tai_bookmarks_destroy(tabs->bookmarks);
-        free(tabs->home_url);
-        free(tabs);
+        tabset_free_state(tabs);
         return NULL;
     }
     tabs->mutex_ready = true;
     if (pthread_cond_init(&tabs->condition, NULL) != 0) {
         set_error(error, "tab set condition initialization failed");
         pthread_mutex_destroy(&tabs->mutex);
-        tai_bookmarks_destroy(tabs->bookmarks);
-        free(tabs->home_url);
-        free(tabs);
+        tabset_free_state(tabs);
         return NULL;
     }
     tabs->condition_ready = true;
@@ -471,9 +479,7 @@ TaiTabSet *tai_tabset_create_with_home_url(const char *default_css, bool rtl,
         set_error(error, "page loader thread creation failed");
         pthread_cond_destroy(&tabs->condition);
         pthread_mutex_destroy(&tabs->mutex);
-        tai_bookmarks_destroy(tabs->bookmarks);
-        free(tabs->home_url);
-        free(tabs);
+        tabset_free_state(tabs);
         return NULL;
     }
     tabs->loader_started = true;
@@ -488,6 +494,18 @@ TaiTabSet *tai_tabset_create_with_home_url(const char *default_css, bool rtl,
         return NULL;
     }
     return tabs;
+}
+
+TaiTabSet *tai_tabset_create_with_home_url(const char *default_css, bool rtl,
+                                           const char *home_url,
+                                           char **error) {
+    return tabset_create(default_css, rtl, home_url, NULL, error);
+}
+
+TaiTabSet *tai_tabset_create_for_test(const char *default_css, bool rtl,
+                                      const char *home_url,
+                                      const char *ca_file, char **error) {
+    return tabset_create(default_css, rtl, home_url, ca_file, error);
 }
 
 TaiTabSet *tai_tabset_create(const char *default_css, bool rtl, char **error) {
@@ -776,6 +794,7 @@ bool tai_tabset_view(const TaiTabSet *tabs, TaiTabSetView *view) {
         .bookmarkable = bookmarkable,
         .bookmarked = bookmarkable &&
             tai_bookmarks_contains(tabs->bookmarks, committed_url),
+        .secure = page && tai_page_secure(page),
     };
     return true;
 }
@@ -814,6 +833,7 @@ void tai_tabset_destroy(TaiTabSet *tabs) {
     free(tabs->slots);
     tai_bookmarks_destroy(tabs->bookmarks);
     free(tabs->home_url);
+    free(tabs->ca_file);
     if (tabs->condition_ready) pthread_cond_destroy(&tabs->condition);
     if (tabs->mutex_ready) pthread_mutex_destroy(&tabs->mutex);
     free(tabs);

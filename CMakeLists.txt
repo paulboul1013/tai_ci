@@ -197,6 +197,18 @@ if(BUILD_TESTING)
     $<TARGET_FILE:test_tabset> $<TARGET_FILE:test_tabs_window>)
   add_test(NAME tabs_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/tabs_oracle_probe.py" --check)
+  add_test(NAME https_oracle_probe COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/https_oracle_probe.py" --check)
+  add_executable(test_tabset_secure tests/test_tabset_secure.c)
+  target_link_libraries(test_tabset_secure PRIVATE tai_core)
+  target_compile_options(test_tabset_secure PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_executable(test_tabs_secure_window tests/test_tabs_secure_window.c)
+  target_link_libraries(test_tabs_secure_window PRIVATE tai_presentation)
+  target_compile_options(test_tabs_secure_window PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME https_integration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/https_integration.py"
+    $<TARGET_FILE:test_network> $<TARGET_FILE:test_tabset_secure>
+    $<TARGET_FILE:test_tabs_secure_window>)
   add_executable(test_address tests/test_address.c)
   target_link_libraries(test_address PRIVATE tai_core)
   target_compile_options(test_address PRIVATE -Wall -Wextra -Wpedantic -Werror)

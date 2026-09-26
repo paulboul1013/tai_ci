@@ -136,6 +136,12 @@ single-page presentation APIs remain available to callers.
   `bookmarks_integration.py` drives `test_tabset_bookmarks.c` against local
   HTTP for shared tabs, exact-URL link GETs, history, and restart persistence;
   `fixtures/bookmarks_window/` serves the real-window check.
+- `https_fixture.py` issues a per-run trusted and an untrusted test CA (via the
+  `openssl` CLI) and serves 127.0.0.1 HTTP/HTTPS pages; `https_oracle_probe.py`
+  and `fixtures/https_oracle.json` freeze Python lock state and address/lock
+  geometry; `https_integration.py` drives `test_network --ca`,
+  `test_tabset_secure.c`, and `test_tabs_secure_window.c` (whose `--window`
+  mode is the real-window harness for HTTPS fixtures).
 - `url_probe.c` exposes the native URL result to its Python differential driver.
 - `fixtures/basic.html` is the current minimal layout input.
 - `reference/` stores `browser.py`, `runtime.js`, `browser.css`, `web_server.py`,

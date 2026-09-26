@@ -23,6 +23,10 @@ typedef struct {
     bool can_go_forward;
     bool bookmarkable;
     bool bookmarked;
+    /* The committed page was requested over https and loaded without a
+     * transport or certificate error. It changes only when a page commits,
+     * so a pending navigation keeps the previous page's state. */
+    bool secure;
 } TaiTabSetView;
 
 /* The caller owns the tab set and default_css must outlive it. Creation starts
@@ -40,6 +44,12 @@ TaiTabSet *tai_tabset_create(const char *default_css, bool rtl, char **error);
 TaiTabSet *tai_tabset_create_with_home_url(const char *default_css, bool rtl,
                                           const char *home_url,
                                           char **error);
+/* Integration tests only: like tai_tabset_create_with_home_url, but the
+ * loader's network trusts the PEM CA bundle at ca_file (copied). tai-browser
+ * never calls this. */
+TaiTabSet *tai_tabset_create_for_test(const char *default_css, bool rtl,
+                                      const char *home_url,
+                                      const char *ca_file, char **error);
 /* Starts the initial tab and navigation. width/height are page viewport pixels,
  * not outer window dimensions. The window may be presented before this
  * navigation completes. */

@@ -233,8 +233,11 @@ bool tai_pres_handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
     return true;
   }
 
-  double field_x = address_x(width), field_y = tabs_address_y(width);
-  double field_width = tabs_address_width(width);
+  /* A click in the lock slot misses every target and falls through to the
+   * blank-chrome path below, as in Python. */
+  TaiAddressField field = tai_tabs_address_field(width, view.secure);
+  double field_x = field.x, field_y = tabs_address_y(width);
+  double field_width = field.width;
   double bookmarks_x = bookmarks_button_x(width);
   double bookmarks_y = bookmarks_button_y(width);
   if (x >= bookmarks_x && x < bookmarks_x + 26.0 &&

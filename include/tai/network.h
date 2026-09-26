@@ -21,6 +21,11 @@ typedef struct {
 typedef void (*TaiNetworkDone)(void *userdata, TaiResponse *response);
 TaiNetwork *tai_network_create(void);
 void tai_network_destroy(TaiNetwork *network);
+/* Test-only trust override: requests started afterwards (including redirect
+ * hops) verify peers against the PEM bundle at path instead of libcurl's
+ * default CA file; NULL restores the default. The path is copied. tai-browser
+ * never calls this and no environment variable reaches it. */
+bool tai_network_set_ca_file(TaiNetwork *network, const char *path);
 TaiRequest *tai_network_submit(TaiNetwork *network, const TaiUrl *url,
     const TaiUrl *referrer, const char *payload, const char *origin,
     const char *referrer_policy, TaiNetworkDone done, void *userdata);

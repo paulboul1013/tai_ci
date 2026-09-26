@@ -67,11 +67,6 @@ static inline double tabs_address_y(int width) {
 static inline double address_width(int width) {
   return width >= 232 ? fmax(100.0, width - 150.0) : 100.0;
 }
-/* The tabbed chrome keeps the field inside narrow windows so its bookmark
- * star stays visible and clickable; Python's fixed 100px field would clip it. */
-static inline double tabs_address_width(int width) {
-  return fmin(address_width(width), (double)width);
-}
 static inline double forward_button_x(int width) { return width >= 94 ? 49.0 : 0.0; }
 static inline double forward_button_y(int width) { return width >= 94 ? 36.0 : 66.0; }
 static inline double tabs_back_button_y(int width) {
