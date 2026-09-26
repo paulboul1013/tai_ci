@@ -1,3 +1,8 @@
+---
+name: validation-and-completion
+description: Evidence ladder and completion rules: unit/integration tests, Python-oracle comparison, sanitizers and leak checks, screenshot/pixel comparison, independent review, and when a subsystem may be marked COMPLETE. Use before claiming a task, slice, or acceptance item is done. 觸發：測試策略／驗證證據／sanitizer／記憶體洩漏／驗收宣告／完成宣告／回歸／截圖比較／程式碼審查。
+---
+
 # Validation and Completion
 
 ## Evidence ladder
@@ -16,7 +21,7 @@ fonts, backend, and environment are controlled well enough for pixel-perfect
 assertions. Record the comparison boundary and known omissions.
 
 For agent-driven SDL window input and screenshot evidence, follow
-[`native-window-verification.md`](native-window-verification.md). Its real-window
+the `native-window-verification` skill ([SKILL.md](../native-window-verification/SKILL.md)). Its real-window
 pixel check complements the focused `presentation_dummy` event test.
 
 Memory safety is a first-class acceptance condition. Reproducible corruption,

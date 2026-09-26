@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 /test-output/
 /CONTEXT.md
+/compile_commands.json

@@ -1,3 +1,8 @@
+---
+name: oracle-and-porting
+description: Python oracle and porting rules for the C17 browser port. Use when behavior is uncertain, comparing Python vs C (differential, behavioral equivalence), choosing porting order, or recording an intentional difference. 觸發：Oracle／Python 參考實作／行為等價／差異比對／移植策略／刻意差異。
+---
+
 # Oracle and Porting
 
 ## Porting target

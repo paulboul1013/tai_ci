@@ -1,3 +1,8 @@
+---
+name: architecture-and-ownership
+description: Subsystem boundary and ownership rules for C code: opaque structs, dependency direction, borrow vs transfer, lifetime, cleanup on error/cancellation, memory safety. Use when adding or changing a subsystem interface or any resource crossing a boundary. 觸發：架構邊界／所有權移轉／物件生命週期／配置清理／use-after-free／記憶體毀損。
+---
+
 # Architecture and Ownership
 
 ## Boundaries

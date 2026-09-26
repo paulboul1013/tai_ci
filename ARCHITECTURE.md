@@ -7,32 +7,39 @@
 
 ```text
 tai_ci/
-├── AGENTS.md                  # agent 規約 router
+├── AGENTS.md                  # 共用 agent 契約（每個 session 載入）
+├── CLAUDE.md                  # @AGENTS.md 匯入＋Claude Code 專屬設定
 ├── ARCHITECTURE.md            # 本文件：repo 與 subsystem map
 ├── PORTING_PLAN.md            # subsystem migration 狀態與差異
-├── ACCEPTANCE.md              # whole-project 驗收條件
+├── ACCEPTANCE.md              # 驗收條件與各切片證據索引
 ├── CMakeLists.txt             # C17 build、dependencies、CTest targets
+├── .agents/skills/            # 按需載入的主題規約（Codex 直接掃描）
+├── .claude/                   # Claude Code：skills symlink、rules、agents、hooks、settings
 ├── assets/                    # runtime 靜態資源
 ├── include/tai/               # public C subsystem interfaces
 ├── src/                       # native C17 implementation
 ├── tests/                     # C tests、Python differential、oracle snapshot
+│   └── tools/                 # agent 工具：oracle 符號查詢、真實視窗驗證
 ├── docs/                      # 分析、contract 與漸進式 reference
 │   ├── python-{core,render,runtime}.md  # 歷史分析，按需閱讀
 │   ├── reference-render-contract.md    # 舊連結導覽
 │   ├── reference-{layout-fonts,display-raster,presentation}.md
-│   ├── agents/                # AGENTS.md 按關鍵字披露的工程規約
+│   ├── acceptance/            # 各切片的日期化驗證紀錄
 │   └── architecture/          # 本文件按 architecture 分支披露的細節
 ├── deps/                      # ignored/local-only third-party source/sysroot
 ├── build/                     # ignored/generated normal CMake/Ninja output
 └── build-asan/                # ignored/generated ASan/UBSan output
 ```
 
-`.agents/` 與 `.codex/` 是目前為空的 repository-local agent 設定預留目錄；空目錄不由 Git 保存。
+`.claude/skills/<name>` 是指向 `.agents/skills/<name>` 的 symlink，兩種 agent 共用同一份內容；
+編輯時改 `.agents/skills/`。`.claude/rules/` 依 `paths` 在讀到對應檔案時才載入。
+根目錄 `compile_commands.json` 是指向 `build/` 的 ignored symlink，供 clangd 使用。
 
 ## Directory responsibilities
 
 | Path | Responsibility | Contents |
 |---|---|---|
+| `.agents/skills/`, `.claude/` | Agent tooling | On-demand skills, path-scoped rules, subagents, hooks, permissions |
 | `assets/` | Browser runtime assets | 預設 user-agent `browser.css`；安裝至 share directory |
 | `include/tai/` | Public subsystem contracts | opaque handles、public types、ownership comments、error-return APIs |
 | `src/` | Native implementation | 每個 subsystem 的 `.c`、CLI entry point、generated HTML entity table |
@@ -142,10 +149,8 @@ single-page presentation APIs remain available to callers.
   links; the contracts live in [layout/fonts](docs/reference-layout-fonts.md),
   [display/raster](docs/reference-display-raster.md), and
   [SDL presentation](docs/reference-presentation.md).
-- `agents/` contains `oracle-and-porting.md`, `native-stack.md`,
-  `architecture-and-ownership.md`, `validation-and-completion.md`,
-  `native-window-verification.md`, `execution-workflow.md`, and
-  `project-records.md`.
+- `.agents/skills/` holds the agent rules (oracle, native stack, ownership,
+  validation, window verification, workflow, records, oracle lookup).
 - `architecture/` contains `python-reference.md`, `native-runtime.md`, and
   `compatibility-semantics.md`.
 

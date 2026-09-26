@@ -8,7 +8,7 @@
 
 1. **兩顆星書籤：已實作，`VALIDATING`。** 依 [書籤實作計畫](docs/bookmarks-plan.md) 完成共用且跨重啟保存的收藏、網址列內灰／亮切換星、左側書籤清單入口與可真正導覽的連結；oracle、整合、dummy SDL、sanitizer 與 Xvfb 真實視窗證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 2. **續做 Chrome 與 History。** 對照 Python 的 HTTPS 鎖頭與地址欄寬度、Back/Forward 可用狀態、history 分支截斷、fragment、POST 後 traversal、dirty 地址草稿及 pending/失敗時的可見 URL；修正觀察到的缺口。既有後續載入失敗回滾依下表保留並測試。完成條件：每一項都有可重跑的 oracle/native 對照，active/inactive tabs 的 URL、index、按鈕狀態和請求方法互不串線。
-3. **驗收。** 建置、相關 CTest、Python oracle、代表性原生視窗與適用的 sanitizer 均通過；將結果寫入 [ACCEPTANCE.md](ACCEPTANCE.md)。完成條件：上述 chrome/history 情境有通過證據、資源清理已審查，且剩餘差異在本計畫有唯一紀錄。整體 browser 仍依 [專案狀態規則](docs/agents/project-records.md) 判定是否可升為 `COMPLETE`。
+3. **驗收。** 建置、相關 CTest、Python oracle、代表性原生視窗與適用的 sanitizer 均通過；將結果寫入 [ACCEPTANCE.md](ACCEPTANCE.md)。完成條件：上述 chrome/history 情境有通過證據、資源清理已審查，且剩餘差異在本計畫有唯一紀錄。整體 browser 仍依 [專案狀態規則](.agents/skills/project-records/SKILL.md) 判定是否可升為 `COMPLETE`。
 
 ### 已知差異與範圍
 
@@ -29,7 +29,7 @@
 
 ## 子系統地圖
 
-每列保留來源、目的地、依賴、狀態、證據與下一個缺口。`COMPLETE` 的門檻由 [project records](docs/agents/project-records.md) 定義；沒有整體驗收證據的列維持 `VALIDATING`。
+每列保留來源、目的地、依賴、狀態、證據與下一個缺口。`COMPLETE` 的門檻由 [project records](.agents/skills/project-records/SKILL.md) 定義；沒有整體驗收證據的列維持 `VALIDATING`。
 
 | 子系統 | Python → C | 依賴 | 狀態 | 證據 | 下一個缺口 |
 |---|---|---|---|---|---|
@@ -47,6 +47,6 @@
 
 - **Chrome 幾何、SDL input、視窗截圖：** [presentation 契約](docs/reference-presentation.md)。
 - **History、tab/page、thread 與資源所有權：** [native runtime](docs/architecture/native-runtime.md)。
-- **Python/C 行為比對與刻意差異：** [oracle 路由](docs/agents/oracle-and-porting.md) 與 [`tests/reference/browser.py`](tests/reference/browser.py)。
+- **Python/C 行為比對與刻意差異：** [oracle 規約](.agents/skills/oracle-and-porting/SKILL.md) 與 [`tests/reference/browser.py`](tests/reference/browser.py)。
 - **測試結果與整體完成宣告：** [ACCEPTANCE.md](ACCEPTANCE.md)。
 - **已完成切片的歷史背景：** [handoff 紀錄](docs/handoff/)。

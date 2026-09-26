@@ -1,3 +1,8 @@
+---
+name: execution-workflow
+description: Vertical-slice execution loop, migration order, parallel work and subagent delegation, and when to escalate versus continue autonomously. Use for large or multi-file changes, planning a slice, or after repeated failures. 觸發：大型變更／垂直切片／移植順序／平行工作／subagent／受阻／重複失敗／自主執行。
+---
+
 # Execution Workflow
 
 ## Vertical loop

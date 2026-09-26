@@ -1,3 +1,8 @@
+---
+name: native-stack
+description: Approved native stack and toolchain rules (C17, CMake, Ninja, SDL3, Cairo, HarfBuzz, FriBidi, FreeType, QuickJS-NG, libcurl, OpenSSL, zlib, stb_image, libwebp, utf8proc, profiling) and dependency patch policy. Use when choosing or replacing a library, touching deps/ or patches/, or changing build flags. 觸發：C17 工具鏈／依賴選擇／函式庫替換／影像編解碼器／效能分析。
+---
+
 # Native Stack
 
 ## Platform
@@ -31,7 +36,7 @@ replacement. A replacement decision must document why the existing dependency
 fails, alternatives evaluated, architectural impact, and migration impact.
 
 Fix a defect inside a dependency with a tracked patch under `patches/<dependency>/`
-and a regression test, following [`patches/README.md`](../../patches/README.md);
+and a regression test, following [`patches/README.md`](../../../patches/README.md);
 do not rely on edits to the untracked `deps/` checkout.
 
 New C code should compile under strict warnings. Treat warnings as defects.

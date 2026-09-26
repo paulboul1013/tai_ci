@@ -1,3 +1,8 @@
+---
+name: project-records
+description: Rules for keeping ARCHITECTURE.md, PORTING_PLAN.md (migration states) and ACCEPTANCE.md in sync with evidence. Use when updating status, recording differences, or syncing docs after a change. 觸發：ARCHITECTURE.md／ACCEPTANCE.md／狀態定義／狀態更新／文件同步。
+---
+
 # Project Records
 
 ## `ARCHITECTURE.md`
