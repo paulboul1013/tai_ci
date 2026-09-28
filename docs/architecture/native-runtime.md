@@ -102,18 +102,23 @@ private, incompatible node layouts.
 - `--window` now enters through `tai_present_window_with_tabs`. The presentation
   adapter creates the SDL window before starting the initial navigation and
   keeps polling the tab set while waiting for SDL events. It owns the address
-  editor, chrome/page textures, and all SDL resources on the window thread.
+  editor, an owned copy of the active tab's last shown URL (used once per loop
+  iteration to discard the draft when that URL changes), chrome/page textures,
+  and all SDL resources on the window thread.
   The legacy `tai_present_window_with_chrome` remains available for the
   synchronous single-session adapter.
 - `TaiTabSet` owns ordered tab slots, the active index, and one `TaiSession` per
   slot. It borrows default CSS and owns the New Tab URL. Each session owns its
   committed page and copied URL history; in-flight URL/history state is exposed
-  provisionally without changing the committed session. A successful document
-  commit replaces the provisional state. An initial transport failure commits
-  the visible Network Error page and requested URL; a later transport failure
-  discards its candidate and provisional history while preserving the prior
-  page and committed history, an intentional native difference recorded in
-  [`PORTING_PLAN.md`](../../PORTING_PLAN.md).
+  provisionally without changing the committed session
+  (`tai_tabset_history_url` reads that provisional list). A successful
+  document commit replaces the provisional state. A transport or certificate
+  failure commits its Network/Certificate Error page like any other document,
+  as Python does: an ordinary navigation appends the requested URL and drops
+  forward entries, and a Back/Forward traversal keeps its target index. A
+  superseded or cancelled load commits nothing, so Back while a navigation is
+  pending drops the provisional entry (an intentional difference recorded in
+  [`PORTING_PLAN.md`](../../PORTING_PLAN.md)).
 - The tab set starts one loader thread. That thread creates, exclusively uses,
   and destroys the shared `TaiNetwork`; document and external-resource requests
   use its submit/poll API. It also owns a page candidate through parsing,
@@ -145,8 +150,8 @@ private, incompatible node layouts.
   state: `tai_page_secure()` is true when the page's requested URL is `https`
   and its document response had no transport or certificate error (redirects
   do not change it). `TaiTabSetView.secure` reads the active tab's committed
-  page, so a pending navigation and a later-failure rollback keep the previous
-  page's lock, and every tab keeps its own value. The SDL thread is the only
+  page, so a pending navigation keeps the previous page's lock, an error page
+  has none, and every tab keeps its own value. The SDL thread is the only
   reader.
 - `tai_tabset_create_for_test` additionally copies a CA bundle path that the
   loader thread applies with `tai_network_set_ca_file()` right after creating

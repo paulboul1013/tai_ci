@@ -1,0 +1,648 @@
+{
+  "address_drafts": {
+    "active_pending": {
+      "address": "http://127.0.0.1:<PORT>/delay-b",
+      "dirty": false,
+      "focused": false
+    },
+    "back_button_click": {
+      "address": "http://127.0.0.1:<PORT>/frag",
+      "dirty": false,
+      "focused": false
+    },
+    "back_button_loaded": {
+      "address": "http://127.0.0.1:<PORT>/frag",
+      "dirty": false,
+      "focused": false
+    },
+    "fragment_link": {
+      "address": "http://127.0.0.1:<PORT>/frag#target",
+      "dirty": false,
+      "focused": false
+    },
+    "inactive_load": {
+      "address": "typed draft",
+      "dirty": true,
+      "focused": true
+    },
+    "page_click": {
+      "address": "typed draft",
+      "dirty": true,
+      "focused": false
+    },
+    "switch_tab": {
+      "address": "http://127.0.0.1:<PORT>/a",
+      "dirty": false,
+      "focused": false
+    }
+  },
+  "basic_truncation": {
+    "a": {
+      "address": "http://127.0.0.1:<PORT>/a",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": false,
+      "can_go_forward": false,
+      "heading": "page-a",
+      "history": [
+        "http://127.0.0.1:<PORT>/a"
+      ],
+      "history_index": 0,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/a"
+    },
+    "b": {
+      "address": "http://127.0.0.1:<PORT>/b",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "page-b",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/b"
+      ],
+      "history_index": 1,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/b"
+    },
+    "back_a": {
+      "address": "http://127.0.0.1:<PORT>/a",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": false,
+      "can_go_forward": true,
+      "heading": "page-a",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/b",
+        "http://127.0.0.1:<PORT>/c"
+      ],
+      "history_index": 0,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/a"
+    },
+    "back_b": {
+      "address": "http://127.0.0.1:<PORT>/b",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": true,
+      "heading": "page-b",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/b",
+        "http://127.0.0.1:<PORT>/c"
+      ],
+      "history_index": 1,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/b"
+    },
+    "c": {
+      "address": "http://127.0.0.1:<PORT>/c",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "page-c",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/b",
+        "http://127.0.0.1:<PORT>/c"
+      ],
+      "history_index": 2,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/c"
+    },
+    "forward_b": {
+      "address": "http://127.0.0.1:<PORT>/b",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": true,
+      "heading": "page-b",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/b",
+        "http://127.0.0.1:<PORT>/c"
+      ],
+      "history_index": 1,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/b"
+    },
+    "truncated_d": {
+      "address": "http://127.0.0.1:<PORT>/d",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "page-d",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/d"
+      ],
+      "history_index": 1,
+      "requests": [
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/a"
+        },
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/b"
+        },
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/c"
+        },
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/b"
+        },
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/a"
+        },
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/b"
+        },
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/a"
+        },
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/d"
+        }
+      ],
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/d"
+    }
+  },
+  "cross_page_fragment": {
+    "missing": {
+      "address": "http://127.0.0.1:<PORT>/frag#missing",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "frag",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/frag#target",
+        "http://127.0.0.1:<PORT>/b",
+        "http://127.0.0.1:<PORT>/frag#missing"
+      ],
+      "history_index": 3,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/frag#missing"
+    },
+    "target": {
+      "address": "http://127.0.0.1:<PORT>/frag#target",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "frag",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/frag#target"
+      ],
+      "history_index": 1,
+      "scroll": 1258.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/frag#target"
+    }
+  },
+  "cross_tab": {
+    "first_active": {
+      "address": "http://127.0.0.1:<PORT>/c",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "page-c",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/b",
+        "http://127.0.0.1:<PORT>/c"
+      ],
+      "history_index": 2,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/c"
+    },
+    "first_after_second_back": {
+      "address": "http://127.0.0.1:<PORT>/c",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "page-c",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/b",
+        "http://127.0.0.1:<PORT>/c"
+      ],
+      "history_index": 2,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/c"
+    },
+    "second_again": {
+      "address": "http://127.0.0.1:<PORT>/delay-c",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "page-e",
+      "history": [
+        "http://127.0.0.1:<PORT>/d",
+        "http://127.0.0.1:<PORT>/e",
+        "http://127.0.0.1:<PORT>/delay-c"
+      ],
+      "history_index": 2,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/delay-c"
+    },
+    "second_back": {
+      "address": "http://127.0.0.1:<PORT>/e",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": true,
+      "heading": "page-e",
+      "history": [
+        "http://127.0.0.1:<PORT>/d",
+        "http://127.0.0.1:<PORT>/e",
+        "http://127.0.0.1:<PORT>/delay-c"
+      ],
+      "history_index": 1,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/e"
+    },
+    "second_pending": {
+      "address": "http://127.0.0.1:<PORT>/delay-c",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "page-e",
+      "history": [
+        "http://127.0.0.1:<PORT>/d",
+        "http://127.0.0.1:<PORT>/e",
+        "http://127.0.0.1:<PORT>/delay-c"
+      ],
+      "history_index": 2,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/delay-c"
+    }
+  },
+  "failures": {
+    "after_b": {
+      "address": "http://127.0.0.1:<PORT>/fail",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "Network Error",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/b",
+        "http://127.0.0.1:<PORT>/fail"
+      ],
+      "history_index": 2,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/fail"
+    },
+    "after_b_back": {
+      "address": "http://127.0.0.1:<PORT>/b",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": true,
+      "heading": "page-b",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/b",
+        "http://127.0.0.1:<PORT>/fail"
+      ],
+      "history_index": 1,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/b"
+    },
+    "back_from_error": {
+      "address": "http://127.0.0.1:<PORT>/a",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": false,
+      "can_go_forward": true,
+      "heading": "page-a",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/e"
+      ],
+      "history_index": 0,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/a"
+    },
+    "back_to_failing": {
+      "address": "http://127.0.0.1:<PORT>/a",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": false,
+      "can_go_forward": true,
+      "heading": "Network Error",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/e"
+      ],
+      "history_index": 0,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/a"
+    },
+    "forward_to_failing": {
+      "address": "http://127.0.0.1:<PORT>/e",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "Network Error",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/e"
+      ],
+      "history_index": 1,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/e"
+    },
+    "from_middle": {
+      "address": "http://127.0.0.1:<PORT>/fail",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "Network Error",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/b",
+        "http://127.0.0.1:<PORT>/fail"
+      ],
+      "history_index": 2,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/fail"
+    }
+  },
+  "pending": {
+    "loaded": {
+      "address": "http://127.0.0.1:<PORT>/delay-b",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "delay-b",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/delay-b"
+      ],
+      "history_index": 1,
+      "requests": [
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/delay-b"
+        }
+      ],
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/delay-b"
+    },
+    "pending": {
+      "address": "http://127.0.0.1:<PORT>/delay-b",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "page-a",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/delay-b"
+      ],
+      "history_index": 1,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/delay-b"
+    }
+  },
+  "pending_back": {
+    "back": {
+      "address": "http://127.0.0.1:<PORT>/a",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": false,
+      "can_go_forward": true,
+      "heading": "page-a",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/delay-b"
+      ],
+      "history_index": 0,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/a"
+    },
+    "released": {
+      "address": "http://127.0.0.1:<PORT>/a",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": false,
+      "can_go_forward": true,
+      "heading": "page-a",
+      "history": [
+        "http://127.0.0.1:<PORT>/a",
+        "http://127.0.0.1:<PORT>/delay-b"
+      ],
+      "history_index": 0,
+      "requests": [
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/delay-b"
+        },
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/a"
+        }
+      ],
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/a"
+    }
+  },
+  "post_traversal": {
+    "back": {
+      "address": "http://127.0.0.1:<PORT>/posted",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": true,
+      "heading": "posted",
+      "history": [
+        "http://127.0.0.1:<PORT>/form",
+        "http://127.0.0.1:<PORT>/posted",
+        "http://127.0.0.1:<PORT>/c"
+      ],
+      "history_index": 1,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/posted"
+    },
+    "forward": {
+      "address": "http://127.0.0.1:<PORT>/c",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "page-c",
+      "history": [
+        "http://127.0.0.1:<PORT>/form",
+        "http://127.0.0.1:<PORT>/posted",
+        "http://127.0.0.1:<PORT>/c"
+      ],
+      "history_index": 2,
+      "requests": [
+        {
+          "has_body": true,
+          "method": "POST",
+          "path": "/posted"
+        },
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/c"
+        },
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/posted"
+        },
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/c"
+        }
+      ],
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/c"
+    },
+    "posted": {
+      "address": "http://127.0.0.1:<PORT>/posted",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "posted",
+      "history": [
+        "http://127.0.0.1:<PORT>/form",
+        "http://127.0.0.1:<PORT>/posted"
+      ],
+      "history_index": 1,
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/posted"
+    }
+  },
+  "same_page_fragment": {
+    "back": {
+      "address": "http://127.0.0.1:<PORT>/frag",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": false,
+      "can_go_forward": true,
+      "heading": "frag",
+      "history": [
+        "http://127.0.0.1:<PORT>/frag",
+        "http://127.0.0.1:<PORT>/frag#target"
+      ],
+      "history_index": 0,
+      "requests": [
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/frag"
+        }
+      ],
+      "scroll": 0.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/frag"
+    },
+    "clicked": {
+      "address": "http://127.0.0.1:<PORT>/frag#target",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "frag",
+      "history": [
+        "http://127.0.0.1:<PORT>/frag",
+        "http://127.0.0.1:<PORT>/frag#target"
+      ],
+      "history_index": 1,
+      "requests": [],
+      "scroll": 1258.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/frag#target"
+    },
+    "forward": {
+      "address": "http://127.0.0.1:<PORT>/frag#target",
+      "address_dirty": false,
+      "address_focused": false,
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "frag",
+      "history": [
+        "http://127.0.0.1:<PORT>/frag",
+        "http://127.0.0.1:<PORT>/frag#target"
+      ],
+      "history_index": 1,
+      "requests": [
+        {
+          "has_body": false,
+          "method": "GET",
+          "path": "/frag"
+        }
+      ],
+      "scroll": 1258.0,
+      "secure": false,
+      "url": "http://127.0.0.1:<PORT>/frag#target"
+    }
+  }
+}

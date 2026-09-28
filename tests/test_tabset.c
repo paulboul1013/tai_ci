@@ -342,15 +342,14 @@ static void main_tabs_scenario(const char *base) {
   TaiNode *styled = find_element(tai_page_root(view.page), "p", "id", "styled");
   CHECK(styled && !strcmp(tai_map_get(&styled->style, "color"), "red"));
 
-  /* A failed replacement on a tab that already has a page is intentionally
-   * rolled back: page identity, visible URL, and history stay unchanged. */
+  /* A failed replacement on a tab that already has a page keeps the old page
+   * visible while pending, then commits the Network Error page at the
+   * requested URL with its own history entry, as Python does. */
   TaiPage *old_page = view.page;
   size_t old_count = view.history_count;
   size_t old_index = view.history_index;
   CHECK(tai_page_set_scroll_y(view.page, 25.0));
   double old_scroll = tai_page_scroll_y(view.page);
-  char old_url[512];
-  CHECK(snprintf(old_url, sizeof(old_url), "%s", view.url) > 0);
   error = NULL;
   CHECK(tai_tabset_navigate_address(tabs, fail_url, &error));
   CHECK(error == NULL);
@@ -362,22 +361,25 @@ static void main_tabs_scenario(const char *base) {
   CHECK(view.history_count == old_count + 1 &&
         view.history_index == old_index + 1);
   CHECK(view.can_go_back && !view.can_go_forward);
-  view = await_active_document(tabs, NULL);
-  CHECK(view.page == old_page);
-  CHECK(close_enough(tai_page_scroll_y(view.page), old_scroll));
-  assert_view_url(&view, old_url);
-  CHECK(view.history_count == old_count && view.history_index == old_index);
-  CHECK(contains_text(tai_page_root(view.page), "styled-page"));
+  view = await_active_document(tabs, "Network Error");
+  CHECK(view.page != old_page);
+  CHECK(close_enough(tai_page_scroll_y(view.page), 0.0));
+  assert_view_url(&view, fail_url);
+  CHECK(view.history_count == old_count + 1 &&
+        view.history_index == old_index + 1);
+  CHECK(view.can_go_back && !view.can_go_forward && !view.secure);
 
-  /* A failed link navigation follows the same later-navigation rollback as
-   * the failed address navigation, preserving the forward history branch. */
-  error = NULL;
-  CHECK(tai_tabset_history(tabs, -1, &error));
-  CHECK(error == NULL);
-  free(error);
-  view = pump_until_loading(tabs, false);
+  /* A failed link navigation from the middle of history truncates the
+   * forward branch like any other committed navigation. */
+  for (int step = 0; step < 2; step++) {
+    error = NULL;
+    CHECK(tai_tabset_history(tabs, -1, &error));
+    CHECK(error == NULL);
+    free(error);
+    view = pump_until_loading(tabs, false);
+  }
   assert_view_url(&view, next_url);
-  CHECK(view.history_count == 3 && view.history_index == 1);
+  CHECK(view.history_count == 4 && view.history_index == 1);
   CHECK(view.can_go_back && view.can_go_forward);
   TaiPage *next_page = view.page;
   navigate_via_link(tabs, next_page, "/later-fail", fail_url);
@@ -385,10 +387,12 @@ static void main_tabs_scenario(const char *base) {
   CHECK(view.loading && view.page == next_page);
   assert_view_url(&view, fail_url);
   CHECK(view.history_count == 3 && view.history_index == 2);
-  view = await_active_document(tabs, NULL);
-  CHECK(view.page == next_page);
-  assert_view_url(&view, next_url);
-  CHECK(view.history_count == 3 && view.history_index == 1);
+  view = await_active_document(tabs, "Network Error");
+  CHECK(view.page != next_page);
+  assert_view_url(&view, fail_url);
+  CHECK(view.history_count == 3 && view.history_index == 2);
+  CHECK(view.can_go_back && !view.can_go_forward);
+  TaiPage *error_page = view.page;
 
   /* Superseding a pending URL cancels its request. The replacement request's
    * Referer is the provisional URL, and releasing the canceled response later
@@ -398,7 +402,7 @@ static void main_tabs_scenario(const char *base) {
   CHECK(error == NULL);
   free(error);
   view = read_view(tabs);
-  CHECK(view.loading && view.page == next_page);
+  CHECK(view.loading && view.page == error_page);
   assert_view_url(&view, replace_url);
   print_checkpoint("REPLACE_PENDING");
   error = NULL;
@@ -407,7 +411,7 @@ static void main_tabs_scenario(const char *base) {
   free(error);
   view = await_active_document(tabs, "replacement-fast");
   assert_view_url(&view, replacement_url);
-  CHECK(view.history_count == 3 && view.history_index == 2);
+  CHECK(view.history_count == 4 && view.history_index == 3);
   print_checkpoint("REPLACED_COMMITTED");
   struct timespec late_deadline = deadline_after(1);
   while (before_deadline(late_deadline)) {
@@ -467,7 +471,7 @@ static void history_failure_scenarios(const char *base) {
   CHECK(snprintf(stable_url, sizeof(stable_url), "%s/history-stable", base) > 0);
   CHECK(snprintf(flaky_url, sizeof(flaky_url), "%s/flaky", base) > 0);
 
-  /* Back to a committed URL that now fails leaves the current entry/page. */
+  /* Back to a URL that fails commits its error page at the target entry. */
   TaiTabSet *tabs = create_set(failure_url);
   start_set(tabs, failure_url);
   TaiTabSetView view = await_active_document(tabs, "Network Error");
@@ -487,11 +491,11 @@ static void history_failure_scenarios(const char *base) {
   CHECK(view.loading && view.page == stable_page);
   assert_view_url(&view, failure_url);
   CHECK(view.history_count == 2 && view.history_index == 0);
-  view = await_active_document(tabs, NULL);
-  CHECK(view.page == stable_page);
-  assert_view_url(&view, stable_url);
-  CHECK(view.history_count == 2 && view.history_index == 1);
-  CHECK(view.can_go_back && !view.can_go_forward);
+  view = await_active_document(tabs, "Network Error");
+  CHECK(view.page != stable_page);
+  assert_view_url(&view, failure_url);
+  CHECK(view.history_count == 2 && view.history_index == 0);
+  CHECK(!view.can_go_back && view.can_go_forward);
   tai_tabset_destroy(tabs);
 
   /* A Forward target succeeds once, then fails on the next traversal. */
@@ -519,11 +523,11 @@ static void history_failure_scenarios(const char *base) {
   view = read_view(tabs);
   CHECK(view.loading && view.page == stable_page);
   assert_view_url(&view, flaky_url);
-  view = await_active_document(tabs, NULL);
-  CHECK(view.page == stable_page);
-  assert_view_url(&view, stable_url);
-  CHECK(view.history_count == 2 && view.history_index == 0);
-  CHECK(!view.can_go_back && view.can_go_forward);
+  view = await_active_document(tabs, "Network Error");
+  CHECK(view.page != stable_page);
+  assert_view_url(&view, flaky_url);
+  CHECK(view.history_count == 2 && view.history_index == 1);
+  CHECK(view.can_go_back && !view.can_go_forward);
   tai_tabset_destroy(tabs);
 }
 

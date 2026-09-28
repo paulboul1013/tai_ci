@@ -57,6 +57,25 @@ void tai_pres_editor_discard(AddressEditor *editor) {
   editor->dirty = false;
 }
 
+bool tai_pres_address_follow_view(AddressWatch *watch,
+                                  const TaiTabSetView *view,
+                                  AddressEditor *editor,
+                                  bool *chrome_changed) {
+  const char *url = view->url ? view->url : "";
+  bool same_tab = watch->url && watch->active_index == view->active_index;
+  if (same_tab && !strcmp(watch->url, url)) return true;
+  char *copy = tai_strdup(url);
+  if (!copy) return false;
+  if (same_tab && (editor->focused || editor->dirty)) {
+    tai_pres_editor_discard(editor);
+    *chrome_changed = true;
+  }
+  free(watch->url);
+  watch->url = copy;
+  watch->active_index = view->active_index;
+  return true;
+}
+
 static bool editor_set_text(AddressEditor *editor, const char *text) {
   char *copy = tai_strdup(text ? text : "");
   if (!copy) return false;

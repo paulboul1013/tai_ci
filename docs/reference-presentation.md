@@ -96,8 +96,11 @@ Chrome y 小於 bottom 的 click 由 toolbar 處理；page y 不小於 bottom �
 一次，再經 `tai_page_activate_viewport` 套用 page-scroll-to-document 轉換。地址列 click
 會顯示目前 URL 並依 x 放置游標；在地址列 focus 期間 SDL text input、Backspace、Left/Right
 及 Return 編輯/提交地址，其他 key 不送給頁面。page click 會讓地址列失焦但保留 dirty draft；
-重新點地址列會繼續編輯該草稿，URL-changing page navigation、Back/Forward 或其他非地址列 toolbar
-控制項會丟棄它。Back/Forward 按鈕使用
+重新點地址列會繼續編輯該草稿，其他非地址列 toolbar 控制項會丟棄它。Tabbed 視窗比照 Python 的
+`discard_address_bar_edit_on_commit`：每輪事件／載入處理後，只要 **active tab** 的可見 URL
+改變（導覽開始、fragment、Back/Forward、Alt+Left/Right）就丟棄草稿與焦點；切換分頁、其他分頁
+完成載入、導覽到相同 URL 都不丟棄（`tai_pres_address_follow_view`，對照
+`tests/fixtures/history_oracle.json` 的 `address_drafts`）。Back/Forward 按鈕使用
 session history availability 決定外觀與是否 traversal。普通文字以 DuckDuckGo query 導覽，
 URL-like 文字直接導覽；`about:blank` 的 query/path 形式保留輸入。地址列未聚焦時，Alt+Left/
 Alt+Right 送往 history callback。直接網址的拒絕策略、mailto 外部啟動與其他未實作控制項的
@@ -130,7 +133,8 @@ scroll 值也能抓出事件全被忽略的回歸。超限 resize event 不會�
 地址草稿輸入與切換、New Tab 和 tab link 的半開 hit boundaries，驗證 active index、tab count
 與 home URL；120px 換行案例驗證 Tab 1 右側命中，同檔的座標換算案例覆蓋
 1×/2×、非有限輸入和零尺寸。`test_tabset.c` 與 `tabset_integration.py` 覆蓋 async pending、delayed HTTP/CSS、
-pending navigation replacement/late response、Referer、history 與各類失敗回滾。`test_tabs_window.c`
+pending navigation replacement/late response、Referer、history 與失敗時提交錯誤頁。
+`tests/history_integration.py` 以 `test_tabset_history.c` 逐點比對 `history_oracle.json`。`test_tabs_window.c`
 透過真實 tabbed SDL event loop 在 delayed document/CSS 載入期間注入 new-tab/switch input，並在
 文件仍 pending 時關閉視窗。這些 dummy-window 案例驗證互動路徑，並不構成 native chrome pixel diff。
 `tests/https_integration.py` 以每次產生的測試 CA 與 127.0.0.1 HTTP／HTTPS fixture 驅動

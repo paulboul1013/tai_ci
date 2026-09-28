@@ -20,8 +20,8 @@ typedef enum {
  * load borrows network until completion or cancellation; the network must
  * outlive that operation.
  * Completion transfers page and owned error to done. A non-NULL page with
- * network_failure=true is a Python-compatible initial error document; callers
- * may choose to commit it only when the target session has no prior page.
+ * network_failure=true is the Python-compatible Network or Certificate Error
+ * document for the requested URL.
  * The load handle expires immediately before completion. */
 typedef void (*TaiPageLoadDone)(void *userdata, TaiPage *page,
                                 bool network_failure, char *error);

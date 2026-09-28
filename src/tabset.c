@@ -727,11 +727,11 @@ bool tai_tabset_pump(TaiTabSet *tabs, bool *changed, char **error) {
             slot->active_task == task) {
             slot->active_task = NULL;
             *changed = true;
+            /* A transport or certificate failure still yields an error page;
+             * Python shows it at the requested URL and history position. */
             TaiPage *candidate = items->page;
             items->page = NULL;
-            bool initial_failure = items->network_failure &&
-                tai_session_page(slot->session) == NULL;
-            if (candidate && (!items->network_failure || initial_failure)) {
+            if (candidate) {
                 if ((tai_page_viewport_width(candidate) != tabs->width ||
                      tai_page_viewport_height(candidate) != tabs->height) &&
                     !tai_page_resize(candidate, tabs->width, tabs->height,
@@ -766,6 +766,18 @@ bool tai_tabset_pump(TaiTabSet *tabs, bool *changed, char **error) {
         items = next;
     }
     return all_ok;
+}
+
+char *tai_tabset_history_url(const TaiTabSet *tabs, size_t index) {
+    if (!tabs || !tabs->count || tabs->active >= tabs->count) return NULL;
+    const TabSlot *slot = &tabs->slots[tabs->active];
+    size_t count = 0, current = 0;
+    virtual_history(slot->session, slot->active_task, &count, &current);
+    if (index >= count) return NULL;
+    if (slot->active_task && slot->active_task->kind == LOAD_NAVIGATION &&
+        index == count - 1)
+        return tai_strdup(slot->active_task->url);
+    return tai_session_history_url(slot->session, index);
 }
 
 bool tai_tabset_view(const TaiTabSet *tabs, TaiTabSetView *view) {

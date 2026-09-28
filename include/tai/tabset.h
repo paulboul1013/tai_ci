@@ -75,8 +75,10 @@ bool tai_tabset_toggle_bookmark(TaiTabSet *tabs, bool *bookmarked,
                                 char **error);
 /* Opens the internal list in the active tab through normal navigation/history. */
 bool tai_tabset_open_bookmarks(TaiTabSet *tabs, char **error);
-/* direction is -1 for Back and 1 for Forward. Failed loads leave the current
- * page and history index unchanged. */
+/* direction is -1 for Back and 1 for Forward. Like Python, a load that fails
+ * commits its Network/Certificate Error page at the requested URL: an ordinary
+ * navigation truncates forward entries and a traversal keeps its target
+ * index. */
 bool tai_tabset_history_available(const TaiTabSet *tabs, int direction);
 bool tai_tabset_history(TaiTabSet *tabs, int direction, char **error);
 bool tai_tabset_record_fragment(TaiTabSet *tabs, const char *url,
@@ -89,5 +91,9 @@ bool tai_tabset_resize(TaiTabSet *tabs, double width, double height,
  * page, URL/history, or loading state changed and needs repainting. */
 bool tai_tabset_pump(TaiTabSet *tabs, bool *changed, char **error);
 bool tai_tabset_view(const TaiTabSet *tabs, TaiTabSetView *view);
+/* Returns an owned URL of the active tab's history entry at index, counting
+ * the provisional entry of an in-flight navigation like TaiTabSetView does,
+ * or NULL when index is out of range or allocation fails. */
+char *tai_tabset_history_url(const TaiTabSet *tabs, size_t index);
 
 #endif

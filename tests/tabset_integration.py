@@ -271,6 +271,8 @@ def main() -> int:
         assert_referer("/with-css", origin + "/first-next")
         assert_referer("/later-fail", origin + "/with-css")
         assert_referer("/later-fail", origin + "/first-next")
+        # The committed error page's URL is the next navigation's referrer.
+        assert_referer("/replace-delay", origin + "/later-fail")
         assert_referer("/replacement-fast", origin + "/replace-delay")
         assert_referer("/flaky", origin + "/history-stable")
         if SERVER_ERRORS:
@@ -333,7 +335,7 @@ def main() -> int:
             diagnostic = window_process.stderr.read()
             if diagnostic:
                 sys.stderr.write(diagnostic)
-        print("Tab-set HTTP barriers: pending routing, CSS, failure rollback, Referer, superseding, and destroy cancellation passed")
+        print("Tab-set HTTP barriers: pending routing, CSS, failure error pages, Referer, superseding, and destroy cancellation passed")
         print("Tabbed SDL HTTP barriers: delayed document and CSS remained interactive")
         return 0
     finally:

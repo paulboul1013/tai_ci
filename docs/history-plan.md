@@ -1,6 +1,6 @@
 # Chrome 與 History：實作計畫
 
-**狀態：規劃完成，待實作（2026-09-26）。** 本切片是 [PORTING_PLAN.md](../PORTING_PLAN.md)
+**狀態：已實作，`VALIDATING`（2026-09-26）。** 本切片是 [PORTING_PLAN.md](../PORTING_PLAN.md)
 「下一個垂直切片」第 3 項「續做 Chrome 與 History」。前置的 [HTTPS 鎖頭](https-lock-plan.md)
 與 tab 列換行修正已在 `https-lock` 分支完成。完成後的驗證證據寫入 `docs/acceptance/`，
 刻意差異寫入 `PORTING_PLAN.md`。

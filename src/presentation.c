@@ -316,8 +316,15 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
     }
   }
   TaiTabSetView view = {0};
+  AddressWatch address_watch = {0};
   if (ok && !tai_tabset_view(tabs, &view)) {
     set_error(error, "initial tab snapshot unavailable");
+    ok = false;
+  }
+  bool initial_discard = false;
+  if (ok && !tai_pres_address_follow_view(&address_watch, &view, &editor,
+                                          &initial_discard)) {
+    set_error(error, "address URL snapshot allocation failed");
     ok = false;
   }
   if (ok && !tai_pres_repaint_tabs_scene(renderer, &page_texture,
@@ -413,7 +420,6 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
                       history_error ? history_error : "navigation failed");
               free(history_error);
             }
-            tai_pres_editor_discard(&editor);
             chrome_changed = true;
           }
           handled = true;
@@ -438,8 +444,6 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
             break;
           }
           if (fragment_url) {
-            bool fragment_url_changed =
-                tai_page_fragment_url_changed(view.page);
             char *fragment_error = NULL;
             bool recorded = tai_tabset_record_fragment(tabs, fragment_url,
                                                         &fragment_error);
@@ -452,8 +456,6 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
             }
             free(fragment_url);
             chrome_changed = true;
-            if (recorded && fragment_url_changed)
-              tai_pres_editor_discard(&editor);
           }
 
           TaiNavigationIntent *intent = NULL;
@@ -471,7 +473,6 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
               free(navigation_error);
             }
             tai_navigation_intent_destroy(intent);
-            tai_pres_editor_discard(&editor);
             chrome_changed = true;
           }
         }
@@ -534,6 +535,14 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
       ok = false;
       break;
     }
+    /* One place applies Python's draft discard for every URL change made by
+     * this event or by completed loads. */
+    if (!tai_pres_address_follow_view(&address_watch, &view, &editor,
+                                      &chrome_changed)) {
+      set_error(error, "address URL snapshot allocation failed");
+      ok = false;
+      break;
+    }
     /* New Tab (or switching which label is bold) can wrap or unwrap the tab
      * strip; keep every page viewport equal to the area below the chrome. */
     bool wraps_now = tai_pres_tab_row_wraps(&view, pixel_width);
@@ -562,6 +571,7 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
   }
   if (text_input_started) SDL_StopTextInput(window);
   free(editor.text);
+  free(address_watch.url);
   SDL_DestroyTexture(chrome_texture);
   SDL_DestroyTexture(page_texture);
   SDL_DestroyRenderer(renderer);

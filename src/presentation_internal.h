@@ -32,6 +32,12 @@ typedef struct {
   bool dirty;
 } AddressEditor;
 
+/* The active tab URL the address field last showed, for draft discards. */
+typedef struct {
+  size_t active_index;
+  char *url;
+} AddressWatch;
+
 static inline void set_error(char **error, const char *message) {
   if (error && !*error) *error = tai_strdup(message);
 }
@@ -167,6 +173,14 @@ size_t tai_pres_utf8_width(const char *text, size_t length, size_t offset,
                            uint32_t *codepoint);
 size_t tai_pres_utf8_byte_at(const char *text, size_t character_index);
 void tai_pres_editor_discard(AddressEditor *editor);
+/* Python discards the address draft and focus when the active tab's visible
+ * URL changes: a navigation starting, a fragment, Back/Forward, or a commit
+ * at a different URL. Selecting another tab or another tab's load does not;
+ * the watch re-baselines instead. Sets *chrome_changed on a discard. Returns
+ * false only when the URL copy cannot be allocated. */
+bool tai_pres_address_follow_view(AddressWatch *watch,
+                                  const TaiTabSetView *view,
+                                  AddressEditor *editor, bool *chrome_changed);
 /* Returns an owned copy of the page URL, or NULL. */
 char *tai_pres_copy_page_url(const TaiPage *page);
 bool tai_pres_page_url_differs(const char *previous_url, const TaiPage *page);

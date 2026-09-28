@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tai/presentation.h"
 #include "tai/tabset.h"
-#include "../src/presentation_geometry.h"
+#include "../src/presentation_internal.h"
 #include <SDL3/SDL.h>
 #include <assert.h>
 #include <math.h>
@@ -395,7 +395,65 @@ static bool replace_page(void *opaque, TaiPage **current_page,
   return true;
 }
 
+static void set_test_draft(AddressEditor *editor, bool focused) {
+  free(editor->text);
+  editor->text = tai_strdup("typed draft");
+  assert(editor->text);
+  editor->cursor = 11;
+  editor->focused = focused;
+  editor->dirty = true;
+}
+
+/* tests/fixtures/history_oracle.json "address_drafts": the draft survives a
+ * page click and another tab's load, and is discarded once the active tab's
+ * URL changes (pending navigation, fragment, Back). Tab-label and Back button
+ * clicks discard in the chrome click handler itself. */
+static void address_draft_rule(void) {
+  AddressWatch watch = {0};
+  AddressEditor editor = {0};
+  bool changed = false;
+  TaiTabSetView view = {.url = "http://127.0.0.1/a", .tab_count = 2};
+  assert(tai_pres_address_follow_view(&watch, &view, &editor, &changed));
+  assert(!changed && watch.url && !strcmp(watch.url, view.url));
+
+  set_test_draft(&editor, true);
+  assert(tai_pres_address_follow_view(&watch, &view, &editor, &changed));
+  assert(!changed && editor.focused && editor.dirty &&
+         !strcmp(editor.text, "typed draft"));
+
+  /* Selecting a tab with a different URL re-baselines without discarding. */
+  view = (TaiTabSetView){.url = "http://127.0.0.1/b", .tab_count = 2,
+                         .active_index = 1};
+  assert(tai_pres_address_follow_view(&watch, &view, &editor, &changed));
+  assert(!changed && editor.focused && editor.dirty);
+  view.active_index = 0;
+  view.url = "http://127.0.0.1/a";
+  assert(tai_pres_address_follow_view(&watch, &view, &editor, &changed));
+  assert(!changed && editor.focused && editor.dirty);
+
+  /* An unfocused dirty draft (after a page click) also goes on a URL change. */
+  editor.focused = false;
+  view.url = "http://127.0.0.1/delay-b";
+  assert(tai_pres_address_follow_view(&watch, &view, &editor, &changed));
+  assert(changed && !editor.focused && !editor.dirty && !editor.text[0]);
+
+  changed = false;
+  set_test_draft(&editor, true);
+  view.url = "http://127.0.0.1/delay-b#target";
+  assert(tai_pres_address_follow_view(&watch, &view, &editor, &changed));
+  assert(changed && !editor.focused && !editor.dirty);
+
+  /* Nothing to discard still records the new URL but repaints nothing. */
+  changed = false;
+  view.url = "http://127.0.0.1/delay-b";
+  assert(tai_pres_address_follow_view(&watch, &view, &editor, &changed));
+  assert(!changed && !strcmp(watch.url, view.url));
+  free(watch.url);
+  free(editor.text);
+}
+
 int main(void) {
+  address_draft_rule();
   const char *hidpi_probe = getenv("TAI_PRESENTATION_HIDPI_PROBE");
   if (hidpi_probe && !strcmp(hidpi_probe, "1")) return run_hidpi_probe();
   TaiScrollbarRect bar = {0};

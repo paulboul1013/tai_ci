@@ -2,7 +2,7 @@
 /* Native HTTPS security state for tab sets. Driven by tests/https_integration.py,
  * which owns the per-run test CA and the 127.0.0.1 HTTP/HTTPS fixture servers.
  * Expected values follow tests/fixtures/https_oracle.json except where
- * PORTING_PLAN.md records a difference (pending and rollback keep the old
+ * PORTING_PLAN.md records a difference (a pending navigation keeps the old
  * page's lock). */
 #include "tai/tabset.h"
 
@@ -158,12 +158,18 @@ static void transitions_scenario(void) {
   print_checkpoint("SECURE_PENDING_CHECKED");
   settle(tabs, "secure-delayed", true);
 
-  /* Later certificate and transport failures roll back to the old page, so
-   * its lock stays (Python shows an insecure error page). */
+  /* Later certificate and transport failures show an insecure error page at
+   * the requested URL, as in the oracle. */
   go(tabs, join(url, sizeof(url), untrusted_base, "/secure-home"));
-  settle(tabs, "secure-delayed", true);
+  settle(tabs, "Certificate Error", false);
+  view = read_view(tabs);
+  CHECK(!strcmp(view.url, url));
+  go(tabs, join(url, sizeof(url), https_base, "/secure-next"));
+  settle(tabs, "secure-next", true);
   go(tabs, join(url, sizeof(url), https_base, "/secure-fail"));
-  settle(tabs, "secure-delayed", true);
+  settle(tabs, "Network Error", false);
+  view = read_view(tabs);
+  CHECK(!strcmp(view.url, url));
 
   go(tabs, join(url, sizeof(url), http_base, "/plain-home"));
   settle(tabs, "plain-home", false);
