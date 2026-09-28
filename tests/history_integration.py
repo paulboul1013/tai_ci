@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Compare native tab-set history with the frozen Python oracle answers.
 
-Serves tests/history_fixture.py on 127.0.0.1, runs test_tabset_history, answers
-its commands, and compares every STATE it reports with the same checkpoint in
-tests/fixtures/history_oracle.json. The address-draft scenario is checked in
-tests/test_presentation.c; its focus/dirty fields are presentation state.
+Serves tests/history_fixture.py on 127.0.0.1, runs test_tabset_history and
+then test_history_window, answers their commands, and compares every STATE they
+report with the same checkpoint in tests/fixtures/history_oracle.json. The
+window test replays the address_drafts scenario in the dummy-SDL tabbed
+presentation loop, where the address field's focus and draft live.
 
 Intentional differences (PORTING_PLAN.md):
 * Back while a navigation is pending: native drops the uncommitted entry, so
   Forward is unavailable afterwards (Python keeps it as a forward entry).
 
-    python3 tests/history_integration.py PATH_TO_TEST_TABSET_HISTORY BROWSER_CSS
+    python3 tests/history_integration.py TEST_TABSET_HISTORY BROWSER_CSS \\
+        TEST_HISTORY_WINDOW
 """
 
 import json
@@ -24,8 +26,8 @@ sys.path.insert(0, str(ROOT / "tests"))
 import history_fixture  # noqa: E402
 
 COMPARED = ("url", "heading", "history", "history_index", "can_go_back",
-            "can_go_forward", "scroll", "secure", "address", "requests")
-NATIVE_ONLY_SCENARIOS = {"address_drafts"}
+            "can_go_forward", "scroll", "secure", "address", "focused",
+            "dirty", "requests")
 
 
 def pending_back_expectation(expected):
@@ -50,20 +52,13 @@ def compare(expected, actual, label, failures):
                 label, key, want, got))
 
 
-def main():
-    if len(sys.argv) != 3:
-        raise SystemExit(__doc__)
-    expected = pending_back_expectation(
-        json.loads(FIXTURE.read_text(encoding="utf-8")))
-    server = history_fixture.HistoryServer()
+def run_child(command, server, expected, seen, failures):
+    """Answer one native test's commands until it prints DONE."""
     process = None
-    seen = set()
-    failures = []
     mark = 0
     try:
         process = subprocess.Popen(
-            [sys.argv[1], str(server.port), sys.argv[2]],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
             bufsize=1)
         for line in process.stdout:
             line = line.rstrip("\n")
@@ -101,18 +96,32 @@ def main():
             process.stdin.write("ok\n")
             process.stdin.flush()
         else:
-            raise AssertionError("native history test ended without DONE")
+            raise AssertionError("{} ended without DONE".format(command[0]))
         if process.wait(timeout=10) != 0:
-            raise AssertionError("native history test failed")
+            raise AssertionError("{} failed".format(command[0]))
     finally:
         if process is not None and process.poll() is None:
             process.kill()
             process.wait()
+
+
+def main():
+    if len(sys.argv) != 4:
+        raise SystemExit(__doc__)
+    expected = pending_back_expectation(
+        json.loads(FIXTURE.read_text(encoding="utf-8")))
+    server = history_fixture.HistoryServer()
+    seen = set()
+    failures = []
+    try:
+        arguments = [str(server.port), sys.argv[2]]
+        run_child([sys.argv[1]] + arguments, server, expected, seen, failures)
+        run_child([sys.argv[3]] + arguments, server, expected, seen, failures)
+    finally:
         server.close()
 
     missing = sorted("{}.{}".format(scenario, step)
                      for scenario, steps in expected.items()
-                     if scenario not in NATIVE_ONLY_SCENARIOS
                      for step in steps if (scenario, step) not in seen)
     failures.extend("{}: not exercised natively".format(label)
                     for label in missing)

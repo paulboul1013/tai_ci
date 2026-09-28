@@ -2,7 +2,7 @@
 
 ## 目前工作：Chrome 與 History
 
-**狀態：`VALIDATING`。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+**狀態：`VALIDATING`；下列四項都已實作並驗收（2026-09-28），下一個工作項目待規劃。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 下一個垂直切片
 
@@ -14,7 +14,11 @@
    `tests/history_oracle_probe.py` 凍結 Python 答案，`tests/history_integration.py` 逐點比對
    native（30 個檢查點）；之後的載入失敗改為比照 Python 提交錯誤頁；地址草稿改為 active tab
    URL 改變時統一丟棄。證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
-4. **驗收。** 建置、相關 CTest、Python oracle、代表性原生視窗與適用的 sanitizer 均通過；將結果寫入 [ACCEPTANCE.md](ACCEPTANCE.md)。完成條件：上述 chrome/history 情境有通過證據、資源清理已審查，且剩餘差異在本計畫有唯一紀錄。整體 browser 仍依 [專案狀態規則](.agents/skills/project-records/SKILL.md) 判定是否可升為 `COMPLETE`。
+4. **驗收：完成（2026-09-28）。** 補上地址草稿的自動 oracle 比對（dummy SDL 分頁迴圈）與
+   憑證錯誤後的 history 斷言；CTest、整套 ASan-UBSan-LSan、Xvfb 真實視窗串接操作與獨立審查
+   都通過，證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。剩餘差異都記在下表。整體 browser 尚未符合
+   [專案狀態規則](.agents/skills/project-records/SKILL.md) 的 `COMPLETE`：新視窗、外部開啟與
+   完整 chrome 視覺比對仍未完成。
 
 ### 已知差異與範圍
 
@@ -51,7 +55,7 @@
 | Paint / raster | display/raster → `src/render.c` | Cairo, layout | VALIDATING | render differential、PNG/key-region tests | remote/general images、WebP；見 [raster 契約](docs/reference-display-raster.md) |
 | JavaScript / events | JS runtime → `src/js.c` | QuickJS-NG, DOM, network | VALIDATING | bridge、cancellation、OOM tests | bubbling、mutation、timers/fetch；QuickJS OOM UAF 由 [tracked patch](patches/quickjs/0001-unlink-context-on-class-proto-oom.patch) 修補，待上游整合 |
 | Scheduling | tasks/clocks → `src/scheduler.c` | threads, network | VALIDATING | priority/FIFO/aging/generation tests | browser/network/frame integration |
-| Browser / window | app/tab/chrome → `src/browser.c`, `src/session.c`, `src/tabset.c`, `src/presentation*.c`, `src/main.c` | page, threads, network, Cairo, SDL3 | VALIDATING | [acceptance](ACCEPTANCE.md)、[tabs oracle](tests/tabs_oracle_probe.py)、native tab/window tests | 目前 Chrome 與 History 切片；之後新視窗、外部開啟及剩餘視覺差異 |
+| Browser / window | app/tab/chrome → `src/browser.c`, `src/session.c`, `src/tabset.c`, `src/presentation*.c`, `src/main.c` | page, threads, network, Cairo, SDL3 | VALIDATING | [acceptance](ACCEPTANCE.md)、[tabs oracle](tests/tabs_oracle_probe.py)、native tab/window tests | 新視窗（Ctrl+N）、`mailto:` 外部開啟、完整 chrome 視覺比對與窄寬標籤排版 |
 
 ## 依工作分支讀取
 

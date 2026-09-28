@@ -113,6 +113,24 @@ static inline int tabs_content_pixel_height(int width, int height,
   return (int)ceil(tabs_content_height(width, height, wraps));
 }
 
+/* Test seam for the tabbed loop. frame runs on the SDL owner thread at the
+ * end of every loop iteration, after completed loads and the draft rule were
+ * applied. It may push SDL events, call TaiTabSet APIs and set the editor the
+ * way the Python probe sets chrome state; the next iteration applies the
+ * draft rule to any URL change it makes. Returning false closes the window
+ * and presentation then returns true. */
+typedef struct {
+  bool (*frame)(void *opaque, TaiTabSet *tabs, SDL_WindowID window_id,
+                int width, bool wraps, AddressEditor *editor);
+  void *opaque;
+} TaiPresTabsObserver;
+
+/* presentation.c: tai_present_window_with_tabs with an optional observer. */
+bool tai_pres_present_tabs_observed(TaiTabSet *tabs, const char *initial_url,
+                                    int width, int height,
+                                    const TaiPresTabsObserver *observer,
+                                    char **error);
+
 /* presentation_events.c */
 void tai_pres_pointer_event_to_pixels(SDL_Window *window,
                                       SDL_WindowID window_id,

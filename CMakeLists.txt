@@ -210,10 +210,14 @@ if(BUILD_TESTING)
   add_executable(test_tabset_history tests/test_tabset_history.c)
   target_link_libraries(test_tabset_history PRIVATE tai_core)
   target_compile_options(test_tabset_history PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_executable(test_history_window tests/test_history_window.c)
+  target_link_libraries(test_history_window PRIVATE tai_presentation)
+  target_compile_options(test_history_window PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME history_integration COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/history_integration.py"
     $<TARGET_FILE:test_tabset_history>
-    "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css"
+    $<TARGET_FILE:test_history_window>)
   add_executable(test_tabset_secure tests/test_tabset_secure.c)
   target_link_libraries(test_tabset_secure PRIVATE tai_core)
   target_compile_options(test_tabset_secure PRIVATE -Wall -Wextra -Wpedantic -Werror)

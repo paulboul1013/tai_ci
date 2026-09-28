@@ -275,7 +275,9 @@ static bool present_window_internal(
 }
 
 static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
-                                  int width, int height, char **error) {
+                                  int width, int height,
+                                  const TaiPresTabsObserver *observer,
+                                  char **error) {
   if (error) { free(*error); *error = NULL; }
   if (!tabs || !initial_url || width <= 0 || height <= 0) {
     set_error(error, "invalid tabbed window input");
@@ -568,6 +570,9 @@ static bool present_tabset_window(TaiTabSet *tabs, const char *initial_url,
         break;
       }
     }
+    if (observer && !observer->frame(observer->opaque, tabs, window_id,
+                                     pixel_width, row_wraps, &editor))
+      running = false;
   }
   if (text_input_started) SDL_StopTextInput(window);
   free(editor.text);
@@ -603,7 +608,15 @@ bool tai_present_window_with_chrome(
 
 bool tai_present_window_with_tabs(TaiTabSet *tabs, const char *initial_url,
                                   int width, int height, char **error) {
-  return present_tabset_window(tabs, initial_url, width, height, error);
+  return present_tabset_window(tabs, initial_url, width, height, NULL, error);
+}
+
+bool tai_pres_present_tabs_observed(TaiTabSet *tabs, const char *initial_url,
+                                    int width, int height,
+                                    const TaiPresTabsObserver *observer,
+                                    char **error) {
+  return present_tabset_window(tabs, initial_url, width, height, observer,
+                               error);
 }
 
 bool tai_present_window_with_navigation(TaiPage **page, int width, int height,

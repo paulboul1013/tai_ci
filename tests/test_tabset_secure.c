@@ -164,6 +164,19 @@ static void transitions_scenario(void) {
   settle(tabs, "Certificate Error", false);
   view = read_view(tabs);
   CHECK(!strcmp(view.url, url));
+  /* Python load() records history before the request, whatever the error,
+   * so the certificate error page is an ordinary entry: Back leaves it for
+   * the secure page and Forward requests it again. */
+  size_t failed_index = view.history_index;
+  CHECK(failed_index > 0 && view.history_count == failed_index + 1 &&
+        view.can_go_back && !view.can_go_forward);
+  history(tabs, -1);
+  settle(tabs, "secure-delayed", true);
+  history(tabs, 1);
+  settle(tabs, "Certificate Error", false);
+  view = read_view(tabs);
+  CHECK(!strcmp(view.url, url) && view.history_index == failed_index &&
+        view.history_count == failed_index + 1 && !view.can_go_forward);
   go(tabs, join(url, sizeof(url), https_base, "/secure-next"));
   settle(tabs, "secure-next", true);
   go(tabs, join(url, sizeof(url), https_base, "/secure-fail"));

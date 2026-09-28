@@ -100,7 +100,8 @@ Chrome y 小於 bottom 的 click 由 toolbar 處理；page y 不小於 bottom �
 `discard_address_bar_edit_on_commit`：每輪事件／載入處理後，只要 **active tab** 的可見 URL
 改變（導覽開始、fragment、Back/Forward、Alt+Left/Right）就丟棄草稿與焦點；切換分頁、其他分頁
 完成載入、導覽到相同 URL 都不丟棄（`tai_pres_address_follow_view`，對照
-`tests/fixtures/history_oracle.json` 的 `address_drafts`）。Back/Forward 按鈕使用
+`tests/fixtures/history_oracle.json` 的 `address_drafts`，由 `test_history_window.c` 在
+dummy SDL 分頁迴圈逐欄比對 address／focused／dirty）。Back/Forward 按鈕使用
 session history availability 決定外觀與是否 traversal。普通文字以 DuckDuckGo query 導覽，
 URL-like 文字直接導覽；`about:blank` 的 query/path 形式保留輸入。地址列未聚焦時，Alt+Left/
 Alt+Right 送往 history callback。直接網址的拒絕策略、mailto 外部啟動與其他未實作控制項的

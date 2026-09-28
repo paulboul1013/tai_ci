@@ -142,6 +142,13 @@ single-page presentation APIs remain available to callers.
   geometry; `https_integration.py` drives `test_network --ca`,
   `test_tabset_secure.c`, and `test_tabs_secure_window.c` (whose `--window`
   mode is the real-window harness for HTTPS fixtures).
+- `history_fixture.py` serves gated, failing and POST-recording 127.0.0.1 pages;
+  `history_oracle_probe.py` and `fixtures/history_oracle.json` freeze Python
+  history, failure, fragment, POST and address-draft states;
+  `history_integration.py` compares them with `test_tabset_history.c` (tab set)
+  and `test_history_window.c`, which replays the address-draft clicks in the
+  dummy-SDL tabbed loop through the test-only `TaiPresTabsObserver` seam
+  (`src/presentation_internal.h`).
 - `tab_strip_differential.py` measures the live Python chrome for one and two
   tabs across widths and compares `tab_strip_probe.c`'s toolbar row positions,
   which move only when the tab strip actually wraps.
