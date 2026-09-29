@@ -55,8 +55,11 @@ Also: `events PATTERN`; `start --size WxH --data-home DIR --display :0`. Then op
 - Launch env `SDL_EVENT_LOGGING=1 SDL_VIDEO_X11_XINPUT2=0 SDL_VIDEO_DRIVER=x11`
   (XInput2 skips synthetic core events).
 - PID is the real tai-browser (`$!` of the exec'd launch, checked via
-  `/proc/PID/exe`), never `pgrep -f`, which matches wrapper shells. Every
-  action re-checks `getwindowpid WID == PID`.
+  `/proc/PID/exe`), never `pgrep -f`, which matches wrapper shells. Windows
+  are found with `xdotool search --pid` (SDL makes one X window per SDL
+  window; titles follow the page), and every action re-checks
+  `getwindowpid WID == PID`. `title` prints the selected window's title and
+  `windows` lists each window's title, as title evidence.
 - Fresh private `XDG_DATA_HOME` per session, so real bookmarks are untouched;
   free display/port picked when omitted. Parallel sessions need distinct
   `TAI_WS_DIR`, display and port.

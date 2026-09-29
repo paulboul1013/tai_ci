@@ -6,10 +6,12 @@
 #   click X Y | key KEYS...(NAME*N repeats) | type TEXT | wheel up|down [N] | resize W H
 #   shot NAME [--crop WxH+X+Y] | events [PATTERN] | requests | status | stop
 #   windows | await N | select N|WID | close   (Ctrl+N multi-window sessions)
-# Only processes started by `start` are ever signalled; every action re-checks
-# that the selected window id still belongs to the saved browser PID. `select`
-# picks the Nth of the browser's windows (creation order) for later actions;
-# `close` asks only the selected window to close (WM_DELETE_WINDOW).
+#   title                                      (selected window's title)
+# Only processes started by `start` are ever signalled; windows are found by
+# the browser PID (titles follow the page), and every action re-checks that
+# the selected window id still belongs to that PID. `select` picks the Nth of
+# the browser's windows (creation order) for later actions; `close` asks only
+# the selected window to close (WM_DELETE_WINDOW).
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -106,12 +108,10 @@ cmd_start() {
 
   local wid=""
   for _ in $(seq 100); do
-    for w in $(xdotool search --name '^Tai Gar$' 2>/dev/null || true); do
-      [[ $(xdotool getwindowpid "$w" 2>/dev/null || true) == "$pid" ]] && { wid=$w; break; }
-    done
+    wid=$(PID=$pid owned_windows | head -n 1)
     [[ -n $wid ]] && break; alive "$pid" || break; sleep 0.1
   done
-  [[ -n $wid ]] || die "no 'Tai Gar' window owned by pid $pid (rc=$(get rc))"
+  [[ -n $wid ]] || die "no browser window owned by pid $pid (rc=$(get rc))"
   put wid "$wid"
   if [[ -n $size ]]; then xdotool windowsize "$wid" "${size%x*}" "${size#*x}"; fi
   sleep 1
@@ -124,17 +124,19 @@ focus() { xdotool windowfocus "$WID" 2>/dev/null || true; }
 # several browser windows (and no WM on Xvfb) raise the selected one first.
 front() { xdotool windowraise "$WID" 2>/dev/null || true; sleep 0.2; }
 
-# The browser's own 'Tai Gar' windows, oldest first (X ids grow per client).
+# The browser's own windows, oldest first (X ids grow per client). SDL gives
+# each SDL window one X window carrying _NET_WM_PID; the title follows the page.
 owned_windows() {
-  local w; for w in $(xdotool search --name '^Tai Gar$' 2>/dev/null || true); do
+  local w; for w in $(xdotool search --pid "$PID" 2>/dev/null || true); do
     [[ $(xdotool getwindowpid "$w" 2>/dev/null || true) == "$PID" ]] && echo "$w"
   done | sort -n
 }
 
 cmd_windows() { load; alive "$PID" || die "browser pid $PID not running (rc=$(get rc))"
   local i=0 w; for w in $(owned_windows); do i=$((i + 1))
-    echo "$i $w$([[ $w == "$WID" ]] && echo ' *' || true)"; done
+    echo "$i $w$([[ $w == "$WID" ]] && echo ' *' || true) title='$(xdotool getwindowname "$w" 2>/dev/null || true)'"; done
   echo "windows=$i"; }
+cmd_title() { check; echo "title wid=$WID '$(xdotool getwindowname "$WID")'"; }
 cmd_await() { (($# == 1)) || die "await N"; load
   local n=0; for _ in $(seq 100); do
     alive "$PID" || die "browser pid $PID exited (rc=$(get rc))"
@@ -270,7 +272,7 @@ cmd_stop() {
 }
 
 case $CMD in
-  start|click|key|type|wheel|resize|shot|events|requests|status|stop|windows|await|select|close) "cmd_$CMD" "$@";;
-  -h|--help|help) sed -n '2,12p' "$0";;
+  start|click|key|type|wheel|resize|shot|events|requests|status|stop|windows|await|select|close|title) "cmd_$CMD" "$@";;
+  -h|--help|help) sed -n '2,14p' "$0";;
   *) die "unknown command $CMD";;
 esac
