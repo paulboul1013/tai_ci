@@ -191,6 +191,21 @@ static void destroy_pending_scenario(TaiBrowserApp *app) {
   tai_tabset_destroy(third);
 }
 
+/* A completion already routed into a tab set's inbox (and still its tab's
+ * active task) is released when that tab set is destroyed unpumped. */
+static void destroy_with_inbox_scenario(TaiBrowserApp *app) {
+  TaiTabSet *first = window_in(app, "/a");
+  TaiTabSet *second = window_in(app, "/b");
+  struct timespec deadline = deadline_after(1);
+  while (before(deadline)) { pump(first); pause_briefly(); }
+  CHECK(shows(first, "page-a"));
+  CHECK(view_of(second).loading);
+  tai_tabset_destroy(second);
+  navigate(first, "/c");
+  await_document(first, "page-c");
+  tai_tabset_destroy(first);
+}
+
 int main(int argc, char **argv) {
   CHECK(argc == 2);
   CHECK(snprintf(base, sizeof(base), "http://127.0.0.1:%s", argv[1]) > 0);
@@ -202,6 +217,7 @@ int main(int argc, char **argv) {
   bookmarks_scenario(app);
   cookies_scenario(app);
   destroy_pending_scenario(app);
+  destroy_with_inbox_scenario(app);
   /* The app outlives every tab set; destroying it with a pending load in a
    * window that is already gone joins the loader cleanly. */
   TaiTabSet *last = window_in(app, "/delay");

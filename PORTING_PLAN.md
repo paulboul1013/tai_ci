@@ -2,8 +2,8 @@
 
 ## 目前工作：Chrome 與 History
 
-**狀態：`VALIDATING`；下列四項都已實作並驗收（2026-09-28）。下一個工作項目：
-[新視窗（Ctrl+N）計畫](docs/new-window-plan.md)，`PLANNED`，決定 D1–D4 已確認（2026-09-29）。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+**狀態：`VALIDATING`；下列四項都已實作並驗收（2026-09-28）。其後的
+[新視窗（Ctrl+N）](docs/new-window-plan.md) 已實作並驗收（2026-09-29），`VALIDATING`，見下方第 5 項。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 下一個垂直切片
 
@@ -18,8 +18,12 @@
 4. **驗收：完成（2026-09-28）。** 補上地址草稿的自動 oracle 比對（dummy SDL 分頁迴圈）與
    憑證錯誤後的 history 斷言；CTest、整套 ASan-UBSan-LSan、Xvfb 真實視窗串接操作與獨立審查
    都通過，證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。剩餘差異都記在下表。整體 browser 尚未符合
-   [專案狀態規則](.agents/skills/project-records/SKILL.md) 的 `COMPLETE`：新視窗、外部開啟與
+   [專案狀態規則](.agents/skills/project-records/SKILL.md) 的 `COMPLETE`：外部開啟與
    完整 chrome 視覺比對仍未完成。
+5. **新視窗（Ctrl+N）：已實作，`VALIDATING`（2026-09-29）。** 依 [計畫](docs/new-window-plan.md)
+   拆出共用的 `TaiBrowserApp`（loader、cookie、書籤）與單一 SDL 迴圈管理多視窗；
+   `tests/new_window_oracle_probe.py` 凍結 Python 9 個情境，`tests/new_window_integration.py`
+   逐點比對 23 個檢查點。證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 已知差異與範圍
 
@@ -29,7 +33,7 @@
 | 載入失敗與 pending | 載入失敗（首次或之後、網路或憑證）兩者都在請求 URL 顯示錯誤頁：一般導覽截斷 forward 項目，Back/Forward 停在目標 index（使用者 2026-09-26 決定，取代原回滾策略）。Pending 期間 native 仍顯示舊 page 與其 scroll；Python 開始導覽時 scroll 已歸零。可見 URL、history 與按鈕狀態在 pending 期間兩者相同。 |
 | Pending 時按 Back | Python 已把 pending URL 寫入 history，Back 後它成為 forward 項目；native 取消尚未提交的導覽並丟掉該項目，Forward 不可用（使用者 2026-09-26 決定維持）。`tests/history_integration.py` 只對這兩個欄位套用此差異。 |
 | 地址與外部開啟 | Native 拒絕 malformed/unsupported 直接網址，尚未啟動 `mailto:` 外部程式；Python 的 URL 解析與外部啟動不同。一般文字仍轉為 DuckDuckGo 查詢。 |
-| 快捷鍵與 wheel | Native 在地址欄未聚焦時支援 Alt+Left/Alt+Right（Python 沒有 history 快捷鍵）；尚無 Ctrl+N／新視窗／Escape 專用操作。未知 wheel direction 或非有限 y 為 no-op，與 frozen Python 不同。 |
+| 快捷鍵與 wheel | Native 在地址欄未聚焦時支援 Alt+Left/Alt+Right（Python 沒有 history 快捷鍵）；Ctrl+N 見下列「新視窗」；尚無 Escape 專用操作。未知 wheel direction 或非有限 y 為 no-op，與 frozen Python 不同。 |
 | History 保存 | 兩者均保存 URL，Back/Forward 以 GET 重載（含 POST 結果頁與同頁 fragment 項目，重新 GET 後捲到 fragment）；不保存 POST body、舊 DOM 或 scroll snapshot。跨 tab 與 pending 狀態已由 history oracle 比對。 |
 | Chrome 缺口 | 完整 chrome 視覺比對尚待完成。窄寬 tab 標籤本身的排版仍是近似：Python 逐字換行（例如 84–119px、Tab 0 作用中時 Tab 1 整個移到第二行 `[0,39.2,37,55.2]`，<84px 時 `[Tab` 與 `0]` 分兩行），native 以固定規則放置標籤與命中區；<70px 的 Python 列高也未建模。 |
 | Tab 列換行時的 viewport | Python 只在視窗 resize 或建立新 tab 時以當下 chrome bottom 計算 tab 高度，New Tab 造成換行後，既有 tab 的 viewport 仍是舊高度（下緣超出視窗 20px）；native 在換行狀態改變時立即把所有 tab 的 viewport 調成新 chrome bottom 以下的高度，讓捲動範圍與可見區一致。Python 依粗體／一般標籤混合，換行後列高另有 ≤0.14px 的差異，native 使用單一行高。 |
@@ -38,9 +42,11 @@
 | 書籤控制 | Python 以單一 toolbar 星星（黃／白底）切換收藏，須手動輸入 `about:bookmarks` 看清單。Native 以地址欄內灰／金星切換收藏，並以地址欄左側獨立按鈕開啟清單；`about:bookmarks` 仍可直接輸入。可收藏條件、排序與逸出與 Python 相同。幾何見 [presentation 契約](docs/reference-presentation.md)。 |
 | 書籤跨重啟保存 | Python 只在執行期間以 `set` 保存。使用者於 2026-09-26 選擇共用且跨重啟保存：native 寫入 `$XDG_DATA_HOME/tai-browser/bookmarks`（預設 `~/.local/share/tai-browser/bookmarks`），每次切換都原子寫入。檔案無法讀取或格式錯誤時不阻擋啟動，只在 stderr 警告、不覆寫原檔，本次改為只存在記憶體。多個 browser process 同時使用時後寫者覆蓋（無檔案鎖、不重讀）；寫入在點擊處理中同步執行。寫入中途崩潰可能留下 `bookmarks.tmp.*`，目前不會自動清除。 |
 | 書籤連結 URL | Python 產生清單時 HTML 逸出 `href`，但其 parser 不解碼屬性，點擊含 `&` 的收藏會請求 `&amp;`（`tests/bookmarks_oracle_probe.py` 已記錄）。Native 只在內部書籤頁解碼 `href`，讓點擊請求原本收藏的 URL；一般網頁的屬性解析不變。 |
+| 新視窗 | Ctrl+N 行為、共用 cookie／書籤、事件路由與關閉與 Python 相同（`tests/new_window_integration.py`）。使用者 2026-09-29 決定：最多 10 個視窗，達上限不動作（Python 無上限）；按住 Ctrl+N 的 key repeat 不開視窗（Python 會連續開）；建立失敗只在 stderr 報錯、既有視窗繼續（Python 崩潰）。新視窗開 app 的 New Tab URL，正式版與 Python 同為 `https://browser.engineering/`。 |
+| 視窗標題與位置 | Python 把 SDL 視窗標題設為頁面標題，並把每個視窗置中（新視窗與舊視窗重疊）；native 標題固定 `Tai Gar`（`window_session.sh` 以此搜尋視窗），位置交給視窗系統。與新視窗工作前即存在，未納入該切片。 |
 | 窄寬地址欄 | Tabbed Chrome 把地址欄寬度夾限為不超過視窗寬度，<100px 時仍看得到收藏星；Python 與單頁 Chrome 固定最小 100px，右端會超出視窗。安全頁面欄位右移 30px 後同樣夾限：Python 在 232–261px 與 <130px 時右端超出視窗，native 不超出。 |
 
-書籤、新視窗與外部網址啟動是不同邊界；書籤與 history 已實作。精確幾何與事件路由在 [presentation 契約](docs/reference-presentation.md)，page/session/SDL/loader 所有權在 [native runtime](docs/architecture/native-runtime.md)。
+書籤、新視窗與外部網址啟動是不同邊界；書籤、history 與新視窗已實作。精確幾何與事件路由在 [presentation 契約](docs/reference-presentation.md)，page/session/SDL/loader 所有權在 [native runtime](docs/architecture/native-runtime.md)。
 
 ## 子系統地圖
 
@@ -56,7 +62,7 @@
 | Paint / raster | display/raster → `src/render.c` | Cairo, layout | VALIDATING | render differential、PNG/key-region tests | remote/general images、WebP；見 [raster 契約](docs/reference-display-raster.md) |
 | JavaScript / events | JS runtime → `src/js.c` | QuickJS-NG, DOM, network | VALIDATING | bridge、cancellation、OOM tests | bubbling、mutation、timers/fetch；QuickJS OOM UAF 由 [tracked patch](patches/quickjs/0001-unlink-context-on-class-proto-oom.patch) 修補，待上游整合 |
 | Scheduling | tasks/clocks → `src/scheduler.c` | threads, network | VALIDATING | priority/FIFO/aging/generation tests | browser/network/frame integration |
-| Browser / window | app/tab/chrome → `src/browser.c`, `src/session.c`, `src/tabset.c`, `src/presentation*.c`, `src/main.c` | page, threads, network, Cairo, SDL3 | VALIDATING | [acceptance](ACCEPTANCE.md)、[tabs oracle](tests/tabs_oracle_probe.py)、native tab/window tests | 新視窗（Ctrl+N）、`mailto:` 外部開啟、完整 chrome 視覺比對與窄寬標籤排版 |
+| Browser / window | app/tab/chrome → `src/browser.c`, `src/session.c`, `src/tabset.c`, `src/presentation*.c`, `src/main.c` | page, threads, network, Cairo, SDL3 | VALIDATING | [acceptance](ACCEPTANCE.md)、[tabs oracle](tests/tabs_oracle_probe.py)、[new-window oracle](tests/new_window_oracle_probe.py)、native tab/window tests | `mailto:` 外部開啟、完整 chrome 視覺比對與窄寬標籤排版、視窗標題跟隨頁面 |
 
 ## 依工作分支讀取
 

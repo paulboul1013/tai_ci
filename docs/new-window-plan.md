@@ -1,6 +1,8 @@
 # 新視窗（Ctrl+N）：實作計畫
 
-**狀態：`PLANNED`（2026-09-29），決定 D1–D4 已確認，可從步驟 1 開工。** 本工作項目接在
+**狀態：已實作，`VALIDATING`（2026-09-29）。** 步驟 1–6 完成，證據見
+[`docs/acceptance/2026-09-29-new-window.md`](acceptance/2026-09-29-new-window.md)。實作時發現的
+既有差異（視窗標題、位置）記在 `PORTING_PLAN.md`。 本工作項目接在
 [PORTING_PLAN.md](../PORTING_PLAN.md)「Chrome 與 History」之後，處理 Browser / window
 子系統的第一個缺口「新視窗（Ctrl+N）」。完成後的驗證證據寫入 `docs/acceptance/`，
 刻意差異寫入 `PORTING_PLAN.md`「已知差異與範圍」。

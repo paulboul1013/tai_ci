@@ -66,7 +66,8 @@ Public interfaces generally share a name with their implementation; internal fil
 | `js.h` / `js.c` | QuickJS-NG context、DOM bridge、event dispatch |
 | `layout.h` / `layout.c` | block/line/text geometry and font measurement |
 | `render.h` / `render.c` | self-contained display list and Cairo PNG raster |
-| `presentation.h` / `presentation.c` | SDL3 window lifecycle, event loops and public entry points |
+| `presentation.h` / `presentation.c` | SDL3 window lifecycle, single-page event loop and public entry points |
+| `presentation_tabs.c` | tabbed windows: one SDL loop routing events to every window, Ctrl+N and per-window close |
 | `presentation_chrome.c` | internal Cairo toolbar, tab strip, buttons and bookmark stars; tab-link hit test |
 | `presentation_address.c` | internal address editor, UTF-8 helpers, chrome click and address key/text handling |
 | `presentation_scene.c` | internal page/chrome textures, scene composition and scrollbar overlay |
@@ -76,7 +77,7 @@ Public interfaces generally share a name with their implementation; internal fil
 | `scheduler.h` / `scheduler.c` | priority tasks、generation cancellation、frame deadlines |
 | `browser.h` / `browser.c` | `TaiPage` navigation and subsystem orchestration |
 | `session.h` / `session.c` | committed page, URL history, address normalization and page commits |
-| `tabset.h` / `tabset.c` | ordered window tabs, async load ownership, generation-checked completion, shared bookmarks and `about:bookmarks` page |
+| `tabset.h` / `tabset.c` | `TaiBrowserApp` (shared loader/network, bookmarks, tab IDs) and per-window `TaiTabSet`: ordered tabs, async load ownership, generation-checked completion routing, `about:bookmarks` page |
 | `bookmarks.h` / `bookmarks.c` | sorted bookmark collection, snapshots, atomic per-user file persistence |
 | `main.c` | `tai-browser` JSON/screenshot/`--window` CLI |
 | `html_entities.inc` | generated named-entity lookup included by `dom.c` |
@@ -111,9 +112,11 @@ graph TD
 
 `tai_core` compiles the page, session, and tab-set subsystems. `tai_presentation`
 links the vendored SDL3 library and consumes the same immutable display list as
-headless PNG output. The `--window` path starts a tabbed window, routes Chrome
-and page input through the active tab, and keeps the SDL event loop responsive
-while its loader thread handles document and subresource requests. The older
+headless PNG output. The `--window` path creates one `TaiBrowserApp` and
+presents its windows from a single SDL event loop: Ctrl+N opens another window,
+each event is routed to its window, whose Chrome and page input go through that
+window's active tab, and the loop stays responsive while the shared loader
+thread handles document and subresource requests. The older
 single-page presentation APIs remain available to callers.
 
 ## Test layout

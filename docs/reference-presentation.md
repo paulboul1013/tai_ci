@@ -11,6 +11,30 @@
 surface 繪製並上傳至獨立 texture；page 與 chrome texture 在 SDL scene 中組合。Headless
 `--screenshot` 契約仍是 page-only 800×532px，未變更。
 
+### 多視窗（Ctrl+N）
+
+`--window` 由 `tai_present_browser()` 在一個 SDL event loop 中呈現所有視窗（`src/presentation_tabs.c`）。
+每個視窗擁有自己的 SDL window／renderer／texture、地址編輯器與 `TaiTabSet`；所有視窗共用
+`TaiBrowserApp`（loader、cookie、書籤）。事件以 `SDL_GetWindowFromEvent()` 分派到所屬視窗，
+沒有對應視窗（含 `windowID=0`）的事件一律丟棄，與 Python 依 `windowID` 路由相同。
+
+- **Ctrl+N：** `SDL_EVENT_KEY_DOWN`、`key == SDLK_N`、`mod & SDL_KMOD_CTRL` 即開新視窗，
+  不看其他修飾鍵與地址欄焦點，且在地址欄按鍵處理之前判斷（Python 順序）；`repeat` 事件忽略
+  （刻意差異 D2）。新視窗 800×600、標題 `Tai Gar`、單一分頁載入 app 的 New Tab URL
+  （正式版 `https://browser.engineering/`，與 Python 相同）。原視窗的分頁、history、草稿與焦點不變。
+- **上限與失敗：** 最多 `TAI_PRES_MAX_WINDOWS`（10）個視窗；達上限或建立失敗只在 stderr 警告，
+  既有視窗繼續運作（刻意差異 D1、D3）。
+- **關閉：** `SDL_EVENT_WINDOW_CLOSE_REQUESTED` 只關閉該視窗（先銷毀其 tab set、取消載入，再釋放
+  SDL 資源）；沒有視窗時迴圈結束。`SDL_EVENT_QUIT`（含 SIGTERM，及 SDL3 在最後一個視窗關閉時
+  送出的 quit）關閉全部視窗。
+- **單視窗入口：** `tai_present_window_with_tabs()` 仍呈現呼叫端擁有的單一 tab set，不處理 Ctrl+N。
+- 視窗標題固定 `Tai Gar`（Python 顯示頁面標題），視窗位置由視窗系統決定（Python 置中），兩者皆
+  記錄於 `PORTING_PLAN.md`。
+
+驗證：`tests/new_window_integration.py` 以 dummy SDL 的 `test_new_window.c` 比對
+`tests/fixtures/new_window_oracle.json`（23 個檢查點）並檢查 10 視窗上限；真實視窗操作用
+`tests/tools/window_session.sh` 的 `windows`／`await`／`select`／`close`。
+
 舊 `tai_present_window_with_chrome` 單頁入口的 toolbar bottom/address y 依視窗寬度分段：≥232px 為 68.34/49.072，
 128–231px 為 82/62.732，79–127px 為 112/92.732，<79px 為 142/122.732。這些 transition
 與 Python `Chrome` probe 相同。單頁入口的 page viewport 高度為 `max(1, window_height - bottom)`；

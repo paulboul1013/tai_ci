@@ -99,12 +99,18 @@ private, incompatible node layouts.
   network state. Its geometry, rendering, and event-routing contract is recorded
   in [`docs/reference-presentation.md`](../reference-presentation.md).
 
-- `--window` now enters through `tai_present_window_with_tabs`. The presentation
-  adapter creates the SDL window before starting the initial navigation and
-  keeps polling the tab set while waiting for SDL events. It owns the address
-  editor, an owned copy of the active tab's last shown URL (used once per loop
-  iteration to discard the draft when that URL changes), chrome/page textures,
-  and all SDL resources on the window thread.
+- `--window` enters through `tai_present_browser(app, ...)` with a
+  `TaiBrowserApp` owned by `main`. `src/presentation_tabs.c` owns every window
+  on the SDL thread: per window the SDL window, renderer, chrome/page textures,
+  the address editor, an owned copy of the active tab's last shown URL (used
+  once per loop iteration to discard the draft when that URL changes), and a
+  `TaiTabSet` created in the app. A window is created before its initial
+  navigation starts. Each loop iteration routes one SDL event to its window,
+  closes windows that asked to close (tab set first, then SDL resources), opens
+  a Ctrl+N window, then pumps and repaints every window. The loop ends when no
+  window remains or on `SDL_EVENT_QUIT`, destroying all windows before
+  `SDL_Quit`; `main` destroys the app afterwards. `tai_present_window_with_tabs`
+  presents one caller-owned tab set through the same loop without Ctrl+N.
   The legacy `tai_present_window_with_chrome` remains available for the
   synchronous single-session adapter.
 - `TaiBrowserApp` is the process-wide state every window shares, matching
