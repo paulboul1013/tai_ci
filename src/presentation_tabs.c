@@ -58,32 +58,35 @@ static void window_destroy(PresWindow *w) {
 
 /* Python titles each presented frame with the active tab's committed title,
  * or the browser name before that tab commits or without a usable <title>. */
-static bool window_sync_title(PresWindow *w, const TaiTabSetView *view,
-                              char **error) {
+static void window_sync_title(PresWindow *w, const TaiTabSetView *view) {
   char *title = view->page ? tai_page_title(view->page) : NULL;
+  /* No usable <title>, or no memory to read it: show the browser name. Every
+   * repaint recomputes the title, so a failed read is retried. */
   if (!title || !*title) {
-    bool failed = view->page && !title;
     free(title);
-    title = failed ? NULL : tai_strdup(TAI_BROWSER_NAME);
+    title = tai_strdup(TAI_BROWSER_NAME);
   }
   if (!title) {
-    set_error(error, "window title allocation failed");
-    return false;
+    /* Nothing to cache either; forget the old title so the next repaint
+     * sets a real one again. */
+    (void)SDL_SetWindowTitle(w->window, TAI_BROWSER_NAME);
+    free(w->shown_title);
+    w->shown_title = NULL;
+    return;
   }
   if (w->shown_title && !strcmp(w->shown_title, title)) {
     free(title);
-    return true;
+    return;
   }
   /* A title the window system refuses is not worth stopping the browser;
    * leaving it uncached retries on the next repaint. */
   if (!SDL_SetWindowTitle(w->window, title)) {
     fprintf(stderr, "window title not set: %s\n", SDL_GetError());
     free(title);
-    return true;
+    return;
   }
   free(w->shown_title);
   w->shown_title = title;
-  return true;
 }
 
 /* Creates the native window, then starts the tab set's first navigation so
@@ -143,7 +146,7 @@ static PresWindow *window_open(TaiTabSet *tabs, bool owns_tabs,
                                          w->pixel_width, w->pixel_height,
                                          true, true, &w->editor, error))
     ok = false;
-  if (ok && !window_sync_title(w, &view, error)) ok = false;
+  if (ok) window_sync_title(w, &view);
   if (!ok) {
     window_destroy(w);
     return NULL;
@@ -352,9 +355,9 @@ static bool window_frame(PresWindow *w, char **error) {
                                      &w->chrome_texture, &view,
                                      w->pixel_width, w->pixel_height,
                                      w->page_changed, w->chrome_changed,
-                                     &w->editor, error) ||
-        !window_sync_title(w, &view, error))
+                                     &w->editor, error))
       return false;
+    window_sync_title(w, &view);
   }
   w->page_changed = w->chrome_changed = w->force_present = false;
   return true;

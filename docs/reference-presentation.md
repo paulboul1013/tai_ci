@@ -31,7 +31,8 @@ surface 繪製並上傳至獨立 texture；page 與 chrome texture 在 SDL scene
 - **視窗標題：** 每個視窗在建立時與每次重繪後，以 active 分頁已提交頁面的 `tai_page_title()`
   設定 SDL 標題；沒有已提交頁面或沒有可用 `<title>` 時用 `TAI_BROWSER_NAME`（`Tai Ci`，Python 為
   `Tai Gar`）。`PresWindow.shown_title` 快取上次設定的字串，只在改變時呼叫
-  `SDL_SetWindowTitle()`；設定失敗只在 stderr 警告。pending 期間保留舊頁面標題，背景分頁載入完成
+  `SDL_SetWindowTitle()`；設定失敗只在 stderr 警告。取標題時記憶體不足也顯示 `Tai Ci`，
+不中止瀏覽器，下次重繪再重試。pending 期間保留舊頁面標題，背景分頁載入完成
   不影響視窗標題。舊單頁入口只在建立時使用 `TAI_BROWSER_NAME`。
 - 視窗位置由視窗系統決定（Python 置中），記錄於 `PORTING_PLAN.md`。
 
