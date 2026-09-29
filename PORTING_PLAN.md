@@ -4,8 +4,8 @@
 
 **狀態：`VALIDATING`；下列四項都已實作並驗收（2026-09-28）。其後的
 [新視窗（Ctrl+N）](docs/new-window-plan.md) 已實作並驗收（2026-09-29），`VALIDATING`，見下方第 5 項。
-下一個工作項目：[視窗標題跟隨頁面與改名 Tai Ci](docs/window-title-plan.md)，`PLANNED`，決定已確認，
-待新 session 實作。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+其後的 [視窗標題跟隨頁面與改名 Tai Ci](docs/window-title-plan.md) 已實作並驗收（2026-09-29），
+`VALIDATING`，見下方第 6 項。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 下一個垂直切片
 
@@ -26,6 +26,11 @@
    拆出共用的 `TaiBrowserApp`（loader、cookie、書籤）與單一 SDL 迴圈管理多視窗；
    `tests/new_window_oracle_probe.py` 凍結 Python 9 個情境，`tests/new_window_integration.py`
    逐點比對 23 個檢查點。證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+6. **視窗標題跟隨頁面、改名 Tai Ci：已實作，`VALIDATING`（2026-09-29）。** 依
+   [計畫](docs/window-title-plan.md) 新增 `tai_page_title()`（Python `Tab.get_title` 規則），每個
+   `--window` 視窗顯示 active 分頁已提交頁面的標題；`tests/title_oracle_probe.py` 凍結 Python 8 個
+   情境，`tests/title_integration.py` 比對 18 種 markup 與 32 個視窗檢查點。證據見
+   [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 已知差異與範圍
 
@@ -45,7 +50,7 @@
 | 書籤跨重啟保存 | Python 只在執行期間以 `set` 保存。使用者於 2026-09-26 選擇共用且跨重啟保存：native 寫入 `$XDG_DATA_HOME/tai-browser/bookmarks`（預設 `~/.local/share/tai-browser/bookmarks`），每次切換都原子寫入。檔案無法讀取或格式錯誤時不阻擋啟動，只在 stderr 警告、不覆寫原檔，本次改為只存在記憶體。多個 browser process 同時使用時後寫者覆蓋（無檔案鎖、不重讀）；寫入在點擊處理中同步執行。寫入中途崩潰可能留下 `bookmarks.tmp.*`，目前不會自動清除。 |
 | 書籤連結 URL | Python 產生清單時 HTML 逸出 `href`，但其 parser 不解碼屬性，點擊含 `&` 的收藏會請求 `&amp;`（`tests/bookmarks_oracle_probe.py` 已記錄）。Native 只在內部書籤頁解碼 `href`，讓點擊請求原本收藏的 URL；一般網頁的屬性解析不變。 |
 | 新視窗 | Ctrl+N 行為、共用 cookie／書籤、事件路由與關閉與 Python 相同（`tests/new_window_integration.py`）。使用者 2026-09-29 決定：最多 10 個視窗，達上限不動作（Python 無上限）；按住 Ctrl+N 的 key repeat 不開視窗（Python 會連續開）；建立失敗只在 stderr 報錯、既有視窗繼續（Python 崩潰）。新視窗開 app 的 New Tab URL，正式版與 Python 同為 `https://browser.engineering/`。 |
-| 視窗標題與位置 | Python 把 SDL 視窗標題設為頁面標題，並把每個視窗置中（新視窗與舊視窗重疊）；native 標題固定 `Tai Gar`（`window_session.sh` 以此搜尋視窗），位置交給視窗系統。與新視窗工作前即存在，未納入該切片。 |
+| 視窗標題與位置 | 標題規則與 Python 相同：active 分頁已提交頁面的第一個非空 `<title>`（只串接直接子文字、依 Python `str.strip()` 去空白），錯誤頁、書籤頁、pending、切換分頁與多視窗皆比對通過。使用者 2026-09-29 決定改名：沒有可用標題時 native 顯示 `Tai Ci`（Python `Tai Gar`），User-Agent 送 `Tai_Ci/1.0`（Python `Tai_Gar/1.0`）。native JS 沒有 `innerHTML`，腳本改寫標題文字的情境無法重現（屬 JS mutation 缺口）；視窗每次重繪都重算標題。視窗位置仍交給視窗系統（Python 置中，新視窗與舊視窗重疊），不在範圍內。 |
 | 窄寬地址欄 | Tabbed Chrome 把地址欄寬度夾限為不超過視窗寬度，<100px 時仍看得到收藏星；Python 與單頁 Chrome 固定最小 100px，右端會超出視窗。安全頁面欄位右移 30px 後同樣夾限：Python 在 232–261px 與 <130px 時右端超出視窗，native 不超出。 |
 
 書籤、新視窗與外部網址啟動是不同邊界；書籤、history 與新視窗已實作。精確幾何與事件路由在 [presentation 契約](docs/reference-presentation.md)，page/session/SDL/loader 所有權在 [native runtime](docs/architecture/native-runtime.md)。

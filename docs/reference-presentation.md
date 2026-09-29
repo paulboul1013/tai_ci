@@ -20,7 +20,7 @@ surface 繪製並上傳至獨立 texture；page 與 chrome texture 在 SDL scene
 
 - **Ctrl+N：** `SDL_EVENT_KEY_DOWN`、`key == SDLK_N`、`mod & SDL_KMOD_CTRL` 即開新視窗，
   不看其他修飾鍵與地址欄焦點，且在地址欄按鍵處理之前判斷（Python 順序）；`repeat` 事件忽略
-  （刻意差異 D2）。新視窗 800×600、標題 `Tai Gar`、單一分頁載入 app 的 New Tab URL
+  （刻意差異 D2）。新視窗 800×600、單一分頁載入 app 的 New Tab URL
   （正式版 `https://browser.engineering/`，與 Python 相同）。原視窗的分頁、history、草稿與焦點不變。
 - **上限與失敗：** 最多 `TAI_PRES_MAX_WINDOWS`（10）個視窗；達上限或建立失敗只在 stderr 警告，
   既有視窗繼續運作（刻意差異 D1、D3）。
@@ -28,12 +28,18 @@ surface 繪製並上傳至獨立 texture；page 與 chrome texture 在 SDL scene
   SDL 資源）；沒有視窗時迴圈結束。`SDL_EVENT_QUIT`（含 SIGTERM，及 SDL3 在最後一個視窗關閉時
   送出的 quit）關閉全部視窗。
 - **單視窗入口：** `tai_present_window_with_tabs()` 仍呈現呼叫端擁有的單一 tab set，不處理 Ctrl+N。
-- 視窗標題固定 `Tai Gar`（Python 顯示頁面標題），視窗位置由視窗系統決定（Python 置中），兩者皆
-  記錄於 `PORTING_PLAN.md`。
+- **視窗標題：** 每個視窗在建立時與每次重繪後，以 active 分頁已提交頁面的 `tai_page_title()`
+  設定 SDL 標題；沒有已提交頁面或沒有可用 `<title>` 時用 `TAI_BROWSER_NAME`（`Tai Ci`，Python 為
+  `Tai Gar`）。`PresWindow.shown_title` 快取上次設定的字串，只在改變時呼叫
+  `SDL_SetWindowTitle()`；設定失敗只在 stderr 警告。pending 期間保留舊頁面標題，背景分頁載入完成
+  不影響視窗標題。舊單頁入口只在建立時使用 `TAI_BROWSER_NAME`。
+- 視窗位置由視窗系統決定（Python 置中），記錄於 `PORTING_PLAN.md`。
 
 驗證：`tests/new_window_integration.py` 以 dummy SDL 的 `test_new_window.c` 比對
 `tests/fixtures/new_window_oracle.json`（23 個檢查點）並檢查 10 視窗上限；真實視窗操作用
-`tests/tools/window_session.sh` 的 `windows`／`await`／`select`／`close`。
+`tests/tools/window_session.sh` 的 `windows`／`await`／`select`／`close`／`title`（以 PID 找視窗）。
+標題：`tests/title_integration.py` 以 `test_page_title.c` 與 dummy SDL 的 `test_title_window.c` 比對
+`tests/fixtures/title_oracle.json`。
 
 舊 `tai_present_window_with_chrome` 單頁入口的 toolbar bottom/address y 依視窗寬度分段：≥232px 為 68.34/49.072，
 128–231px 為 82/62.732，79–127px 為 112/92.732，<79px 為 142/122.732。這些 transition

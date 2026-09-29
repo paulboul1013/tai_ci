@@ -49,6 +49,12 @@ int main(int argc, char **argv) {
     assert(none && !strcmp(none, ""));
     free(none);
 
+    /* Invalid UTF-8 bytes are never whitespace and never overrun the strip. */
+    char *invalid = title_of(network, url,
+                             "<title> \xff x \xc3</title><p>y</p>");
+    assert(!strcmp(invalid, "\xff x \xc3"));
+    free(invalid);
+
     putchar('[');
     for (int index = 1; index < argc; index++) {
         char *markup = tai_read_file(argv[index], NULL);

@@ -152,6 +152,12 @@ single-page presentation APIs remain available to callers.
   and `test_history_window.c`, which replays the address-draft clicks in the
   dummy-SDL tabbed loop through the test-only `TaiPresTabsObserver` seam
   (`src/presentation_internal.h`).
+- `title_fixture.py` serves 127.0.0.1 pages covering `<title>` markup rules, a
+  gated page and a failing path; `title_oracle_probe.py` and
+  `fixtures/title_oracle.json` freeze Python window titles; `title_integration.py`
+  compares them with `test_page_title.c` (`tai_page_title()` per markup page)
+  and `test_title_window.c` (SDL titles in the dummy-SDL multi-window loop).
+  `fixtures/title_window/` serves the real-window check.
 - `tab_strip_differential.py` measures the live Python chrome for one and two
   tabs across widths and compares `tab_strip_probe.c`'s toolbar row positions,
   which move only when the tab strip actually wraps.

@@ -28,6 +28,7 @@ Pixel-perfect 只在字型、版本、backend 與環境固定時使用；優先�
 
 | Slice | Date | State | Summary (proven / main gap) | Detail |
 | --- | --- | --- | --- | --- |
+| 視窗標題跟隨頁面、改名 Tai Ci | 2026-09-29 | VALIDATING | `tai_page_title()` 依 Python `Tab.get_title` 規則，每個視窗顯示 active 分頁已提交頁面的標題，後備名稱 `Tai Ci`、User-Agent `Tai_Ci/1.0`（決定差異）；title oracle 8 情境、18 種 markup 與 32 個視窗檢查點相符；CTest 45/45、整套 ASan-UBSan-LSan 45/45、隔離網路 Xvfb 真實視窗（導覽／無標題／錯誤頁／分頁／Ctrl+N）、獨立審查通過；JS 改寫標題因 native 沒有 `innerHTML` 未比對 | [detail](docs/acceptance/2026-09-29-window-title.md) |
 | 新視窗（Ctrl+N） | 2026-09-29 | VALIDATING | 共用 loader／cookie／書籤的 `TaiBrowserApp` 與單一 SDL 多視窗迴圈；new-window oracle 9 情境、native 23 個檢查點相符（key repeat／上限／建立失敗為決定差異）；CTest 43/43、整套 ASan-UBSan-LSan 43/43、隔離網路 Xvfb 真實視窗 Ctrl+N／路由／共用書籤／逐一關閉、獨立審查與使用者 WSLg 手動操作（10 視窗）通過；建立失敗注入未驗證 | [detail](docs/acceptance/2026-09-29-new-window.md) |
 | Chrome 與 History 工作項目驗收 | 2026-09-28 | VALIDATING | 地址草稿改由 dummy SDL 分頁迴圈自動比對（37 個 oracle 檢查點）、憑證錯誤 history 補上斷言；CTest 40/40、整套 ASan-UBSan-LSan 40/40（3 項序列重跑）、Xvfb 單一 session 串接 tabs／history／書籤／失敗頁／resize、獨立審查通過；新視窗、外部開啟、完整 chrome 截圖比對未完成 | [detail](docs/acceptance/2026-09-28-chrome-history-acceptance.md) |
 | Chrome 與 History | 2026-09-26 | VALIDATING | history oracle 9 情境凍結，native 30 個檢查點逐欄相符（僅 pending 時 Back 為記錄差異）；之後的失敗改顯示錯誤頁、草稿改依 active tab URL 丟棄；CTest 40/40、ASan-UBSan-LSan 12/12、Xvfb 真實視窗與獨立審查通過；地址草稿 oracle 尚無自動逐欄比對 | [detail](docs/acceptance/2026-09-26-history.md) |

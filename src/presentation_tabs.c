@@ -74,9 +74,13 @@ static bool window_sync_title(PresWindow *w, const TaiTabSetView *view,
     free(title);
     return true;
   }
-  /* A title the window system refuses is not worth stopping the browser. */
-  if (!SDL_SetWindowTitle(w->window, title))
+  /* A title the window system refuses is not worth stopping the browser;
+   * leaving it uncached retries on the next repaint. */
+  if (!SDL_SetWindowTitle(w->window, title)) {
     fprintf(stderr, "window title not set: %s\n", SDL_GetError());
+    free(title);
+    return true;
+  }
   free(w->shown_title);
   w->shown_title = title;
   return true;
