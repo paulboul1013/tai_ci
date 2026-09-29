@@ -88,6 +88,12 @@ def error_head(error):
     return normalize_error(name, message)
 
 
+def dom_snapshot(nodes):
+    # oracle.dom_value shares each Element's live attribute dict; copy it so a
+    # later mutation cannot rewrite an earlier snapshot.
+    return json.loads(json.dumps(oracle.dom_value(nodes)))
+
+
 class StubMeasure:
     def time(self, _name):
         pass
@@ -186,7 +192,7 @@ class Runner:
         created = {"invalidations": tab.invalidations,
                    "raf_requests": tab.raf_requests,
                    "output": self.output,
-                   "dom": oracle.dom_value(tab.nodes)}
+                   "dom": dom_snapshot(tab.nodes)}
 
         dom = created["dom"]
         steps = []
@@ -197,7 +203,7 @@ class Runner:
             result["output"] = self.output
             result["invalidations"] = tab.invalidations - before[0]
             result["raf_requests"] = tab.raf_requests - before[1]
-            after = oracle.dom_value(tab.nodes)
+            after = dom_snapshot(tab.nodes)
             if after != dom:
                 result["dom"] = dom = after
             steps.append(result)

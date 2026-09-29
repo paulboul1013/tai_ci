@@ -1,0 +1,31 @@
+From: Tai Ci maintainers
+Subject: [PATCH] Fail compilation when a child function has no constant slot
+
+cpool_add() returns -1 when growing the constant pool fails, but its callers
+store that as the child function's parent_cpool_idx and keep parsing. After
+a single transient allocation failure the parse can still succeed, and
+js_create_function() then hits assert(cpool_idx >= 0) (abort; an
+out-of-bounds store with NDEBUG). It now frees the child function object,
+reports out of memory and takes its existing failure path.
+
+Upstream quickjs-ng df836d1 contains the defect.
+Found by the one-failure mode of Tai's runtime.js compile sweep
+(tests/test_quickjs_oom.c).
+---
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37000,8 +37000,13 @@
+         func_obj = js_create_function(ctx, fd1);
+         if (JS_IsException(func_obj))
+             goto fail;
++        /* cpool_add() fails without stopping the parser, leaving -1 */
++        if (cpool_idx < 0) {
++            JS_FreeValue(ctx, func_obj);
++            JS_ThrowOutOfMemory(ctx);
++            goto fail;
++        }
+         /* save it in the constant pool */
+-        assert(cpool_idx >= 0);
+         fd->cpool[cpool_idx] = func_obj;
+     }
+ 

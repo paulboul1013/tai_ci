@@ -280,8 +280,9 @@ static bool page_prepare_document(TaiPage *page, const TaiUrl *url,
         diagnostic(error, "page resource allocation failed");
         return false;
     }
-    page->javascript = tai_js_create(tai_document_root(page->document),
-                                     invalidated, page, error);
+    TaiJsHost host = {.invalidated = invalidated, .userdata = page};
+    page->javascript = tai_js_create(tai_document_root(page->document), &host,
+                                     error);
     return page->javascript != NULL;
 }
 

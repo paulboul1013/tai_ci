@@ -1,0 +1,46 @@
+From: Tai Ci maintainers
+Subject: [PATCH] Do not patch jump offsets into a failed resolve_labels buffer
+
+resolve_labels() records relocation addresses from bc_out.size while it
+emits the optimized byte code. When growing bc_out fails, DynBuf keeps its
+error flag and possibly a NULL buffer, but the label, jump shortening and
+offset patching code still wrote through bc_out.buf (SIGSEGV in put_u8).
+The writes are now skipped once bc_out is in error; the function already
+reports out of memory after the loop.
+
+Upstream quickjs-ng df836d1 contains the defect.
+Found by Tai's loader-thread allocation failure sweep (tabset_loader_oom)
+once the frozen runtime.js was embedded.
+---
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -35857,7 +35857,9 @@
+                 for(re = ls->first_reloc; re != NULL; re = re_next) {
+                     int diff = ls->addr - re->addr;
+                     re_next = re->next;
+-                    switch (re->size) {
++                    /* after an allocation failure the addresses may lie
++                       outside the buffer; the function fails below */
++                    switch (dbuf_error(&bc_out) ? 0 : re->size) {
+                     case 4:
+                         put_u32(bc_out.buf + re->addr, diff);
+                         break;
+@@ -36553,7 +36555,8 @@
+ 
+     /* more jump optimizations */
+     patch_offsets = 0;
+-    for (i = 0, jp = s->jump_slots; i < s->jump_count; i++, jp++) {
++    for (i = 0, jp = s->jump_slots;
++         !dbuf_error(&bc_out) && i < s->jump_count; i++, jp++) {
+         LabelSlot *ls;
+         JumpSlot *jp1;
+         int j, pos, diff, delta;
+@@ -36607,7 +36610,7 @@
+         }
+     }
+ 
+-    if (patch_offsets) {
++    if (patch_offsets && !dbuf_error(&bc_out)) {
+         JumpSlot *jp1;
+         int j;
+         for (j = 0, jp1 = s->jump_slots; j < s->jump_count; j++, jp1++) {

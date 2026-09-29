@@ -3,8 +3,15 @@
  * Fails each allocation made by JS_NewContext() in turn, then frees the
  * runtime. Freed blocks are poisoned and kept until the runtime is gone, so a
  * GC walk over a released object reads the poison pointer and faults even
- * without a sanitizer. Guards patches/quickjs/0001. */
+ * without a sanitizer. Guards patches/quickjs/0001.
+ *
+ * Then compiles the frozen runtime.js under each allocation failure of
+ * JS_Eval(), both failing every later allocation and failing only that one
+ * (the parser then keeps going). Guards patches/quickjs/0002 (unbalanced
+ * scopes after a failed push_scope) and 0003 (jump relocation writes into a
+ * failed buffer). */
 #include "quickjs.h"
+#include "tai_js_sources.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +31,7 @@ typedef struct Parked {
 
 typedef struct {
   long budget; /* <0 disarmed; allocations left before failures begin */
+  bool one_shot; /* fail only the allocation at budget, then disarm */
   bool injected;
   Parked *parked;
 } Allocator;
@@ -38,6 +46,7 @@ static bool should_fail(Allocator *state) {
   if (state->budget < 0) return false;
   if (state->budget == 0) {
     state->injected = true;
+    if (state->one_shot) state->budget = -1;
     return true;
   }
   state->budget--;
@@ -100,6 +109,34 @@ static void release_parked(Allocator *state) {
   }
 }
 
+static int sweep_eval(const JSMallocFunctions *functions, bool one_shot) {
+  const char *source = (const char *)tai_runtime_js;
+  for (point = 0; point < 1000000; ++point) {
+    Allocator state = {.budget = -1, .one_shot = one_shot};
+    JSRuntime *runtime = JS_NewRuntime2(functions, &state);
+    CHECK(runtime);
+    JSContext *context = JS_NewContext(runtime);
+    CHECK(context);
+    state.budget = point;
+    JSValue value = JS_Eval(context, source, strlen(source), "runtime.js",
+                            JS_EVAL_TYPE_GLOBAL);
+    state.budget = -1;
+    bool failed = JS_IsException(value);
+    JS_FreeValue(context, value);
+    JS_FreeContext(context);
+    JS_FreeRuntime(runtime);
+    release_parked(&state);
+    if (!state.injected) {
+      CHECK(!failed);
+      printf("runtime.js eval (%s): %ld allocation failure points\n",
+             one_shot ? "one failure" : "all later fail", point);
+      return 0;
+    }
+  }
+  CHECK(!"runtime.js eval never completed");
+  return 1;
+}
+
 int main(void) {
   const JSMallocFunctions functions = {
     .js_calloc = test_calloc,
@@ -121,7 +158,7 @@ int main(void) {
     if (!state.injected) {
       CHECK(context);
       printf("JS_NewContext: %ld allocation failure points\n", point);
-      return 0;
+      return sweep_eval(&functions, false) || sweep_eval(&functions, true);
     }
     /* Some failures are recoverable; either outcome must free cleanly. */
   }

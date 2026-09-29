@@ -108,6 +108,73 @@ bool tai_node_append(TaiNode *p, TaiNode *c) {
   c->parent = p;
   return true;
 }
+TaiNode *tai_document_create_element(TaiDocument *d, const char *tag,
+                                     TaiDomStatus *status) {
+  TaiDomStatus result = TAI_DOM_OK;
+  TaiNode *n = NULL;
+  if (!d || !tag)
+    result = TAI_DOM_WRONG_DOCUMENT;
+  else if (d->count >= TAI_DOCUMENT_SCRIPT_NODE_LIMIT)
+    result = TAI_DOM_NODE_LIMIT;
+  else if (!(n = node_new(d, TAI_ELEMENT, tag)))
+    result = TAI_DOM_NO_MEMORY;
+  if (status)
+    *status = result;
+  return n;
+}
+static void detach(TaiNode *c) {
+  TaiNode *old = c->parent;
+  if (!old)
+    return;
+  for (size_t i = 0; i < old->child_count; i++)
+    if (old->children[i] == c) {
+      memmove(old->children + i, old->children + i + 1,
+              (old->child_count - i - 1) * sizeof(*old->children));
+      old->child_count--;
+      break;
+    }
+  c->parent = NULL;
+}
+TaiDomStatus tai_node_insert_before(TaiNode *p, TaiNode *c, TaiNode *ref,
+                                    bool *changed) {
+  if (changed)
+    *changed = false;
+  if (!p || !c || p->document != c->document ||
+      (ref && ref->document != p->document))
+    return TAI_DOM_WRONG_DOCUMENT;
+  if (ref && ref->parent != p)
+    return TAI_DOM_REFERENCE_NOT_CHILD;
+  if (ref == c)
+    return TAI_DOM_OK;
+  for (TaiNode *n = p; n; n = n->parent)
+    if (n == c)
+      return TAI_DOM_CYCLE;
+  /* Reserve before detaching so a failure leaves the tree untouched. */
+  if (!grow((void **)&p->children, &p->child_capacity, p->child_count + 1,
+            sizeof(*p->children)))
+    return TAI_DOM_NO_MEMORY;
+  detach(c);
+  size_t index = p->child_count;
+  if (ref)
+    for (index = 0; p->children[index] != ref; index++)
+      ;
+  memmove(p->children + index + 1, p->children + index,
+          (p->child_count - index) * sizeof(*p->children));
+  p->children[index] = c;
+  p->child_count++;
+  c->parent = p;
+  if (changed)
+    *changed = true;
+  return TAI_DOM_OK;
+}
+TaiDomStatus tai_node_remove_child(TaiNode *p, TaiNode *c) {
+  if (!p || !c || p->document != c->document)
+    return TAI_DOM_WRONG_DOCUMENT;
+  if (c->parent != p)
+    return TAI_DOM_NOT_CHILD;
+  detach(c);
+  return TAI_DOM_OK;
+}
 static size_t space(const char *s) {
   utf8proc_int32_t c;
   utf8proc_ssize_t n = utf8proc_iterate((const uint8_t *)s, -1, &c);

@@ -1,6 +1,6 @@
 # JS DOM 補齊：整體計畫與交接
 
-**狀態：實作中（2026-09-29）。** 六項決定皆已確認；切片 0、1 完成，切片 2 起尚未開始。
+**狀態：實作中（2026-09-29）。** 六項決定皆已確認；切片 0–2 完成，切片 3 起尚未開始。
 計畫已經四路獨立驗證（oracle 實跑、native 程式碼、所有權設計、文件一致性），結果已併入本文。
 本工作處理 [ACCEPTANCE.md](../ACCEPTANCE.md) 的「JS-visible DOM mutation、query、event
 propagation/default prevention、XHR 與實際可用 scheduling APIs」，並滿足同檔「ASan 重複
@@ -173,6 +173,36 @@ bridge 內 ID 同步出現後補測。
   照允許清單執行。
 
 ### 切片 2：runtime 對齊、DOM mutation、ID 全域
+
+**狀態：完成（2026-09-29）。**
+- **Runtime：** `cmake/embed_text.cmake` 在建置時把凍結 `runtime.js` 與 `src/js_prelude.js`（D7 的
+  `dispatchEvent` 覆寫）原文嵌入 `tai_js_sources.h`；凍結檔一字未改。
+- **介面：** `tai_js_create(root, const TaiJsHost *, error)`；`TaiJsHost` 有 `invalidated`、
+  `node_removed`、`report`（NULL 時寫 stderr，D1），切片 5 再加 cookie／XHR。新增
+  `tai_js_eval_value` 供 probe 取回完成值。
+- **Handle：** 與 Python `get_handle` 相同，依首次使用編號、永不重用（不需要 D3）；只在 js.c 的
+  `handle_of`／`node_arg` 轉換。未知 handle 丟 `Error('Unknown node handle')`。
+- **DOM：** `tai_document_create_element`、`tai_node_insert_before`、`tai_node_remove_child` 回傳
+  `TaiDomStatus`，檢查順序同 Python，失敗時樹不變；D2 上限 1,000,000（只限腳本建立）。
+- **ID 全域：** 每次 mutation 後走訪整棵樹、呼叫 runtime.js 的 `sync_id_globals`。同步失敗只回報；
+  但無法攔截的錯誤（deadline 中斷）會往外傳，否則外層腳本永遠不會被中斷——這個缺陷由 ASan 下的
+  時間測試發現並修正。
+- **測試：** `tests/js_probe.c`＋`tests/js_dom_differential.py`（CTest `js_dom_differential`）：
+  12 個情境與 oracle 相符，14 個標為 pending（需要切片 3／5／6 的 bridge）；`listener_throws` 套用 D7
+  的預期答案。`test_js.c` 新增 mutation 回呼、巢狀 deadline（中斷不得被 resync 吞掉）、1 萬次 append
+  （Debug 0.51 s；ASan 建置改跑 2,000 次）、D2 上限；`test_dom.c` 新增狀態碼與上限。
+- **Oracle probe 修正：** `oracle.dom_value` 共用 Element 的屬性 dict，先前的快照會被後續修改改寫，
+  已改為深拷貝，並重新產生 fixture。
+- **QuickJS 修補 0002–0005：** 嵌入完整 runtime.js 後，`tabset_loader_oom` 在 parser 的 OOM 路徑
+  崩潰。`test_quickjs_oom` 新增 runtime.js 編譯掃描（失敗後全部失敗／只失敗一次兩種模式），另外找到
+  兩個缺陷。每個修補都已驗證：拿掉就會讓掃描失敗；五個修補依序套用可重現 `deps/`。見
+  `patches/README.md`。
+- **證據：** Debug CTest 48/48；`build-asan/` 全套 48/48（LSan 開啟，只排除文件記載的 fontconfig／
+  cairo 洩漏）。
+- **後續風險：** `collect_ids`、`collect_matches`、`tai_dom_json` 以遞迴走訪 DOM，而腳本現在能用
+  `appendChild` 建出任意深的樹。200,000 層巢狀 `<div>` 的既有 headless 載入跑超過 2 分鐘仍未結束
+  （已中止），所以深樹本來就是 native 的既有問題，不是切片 2 造成的。切片 7 決定要加深度上限還是
+  改成迭代走訪。
 
 - `src/js.c` 的內嵌 runtime 改為建置時嵌入凍結 `runtime.js` 原文（CMake 產生標頭；原檔只讀），加上
   一小段 native 專用前言（例如 `log` 導向）。若最後不能原文嵌入，逐項等價並在 `ARCHITECTURE.md`

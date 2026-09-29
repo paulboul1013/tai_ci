@@ -206,11 +206,8 @@
                 "attributes": {
                   "class": "c",
                   "data-x": "1",
-                  "data-y": "7",
-                  "id": "42",
-                  "style": "12",
-                  "title": "",
-                  "true": "false"
+                  "id": "a",
+                  "title": ""
                 },
                 "children": [
                   {
@@ -243,6 +240,33 @@
         ]
       },
       {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {
+                    "class": "c",
+                    "data-x": "1",
+                    "data-y": "7",
+                    "id": "a",
+                    "title": ""
+                  },
+                  "children": [
+                    {
+                      "text": "t"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
         "invalidations": 1,
         "output": [],
         "raf_requests": 0,
@@ -258,6 +282,34 @@
         "raf_requests": 0
       },
       {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {
+                    "class": "c",
+                    "data-x": "1",
+                    "data-y": "7",
+                    "id": "a",
+                    "title": "",
+                    "true": "false"
+                  },
+                  "children": [
+                    {
+                      "text": "t"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
         "invalidations": 1,
         "output": [],
         "raf_requests": 0,
@@ -270,6 +322,35 @@
         "value": ""
       },
       {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {
+                    "class": "c",
+                    "data-x": "1",
+                    "data-y": "7",
+                    "id": "a",
+                    "style": "color: red",
+                    "title": "",
+                    "true": "false"
+                  },
+                  "children": [
+                    {
+                      "text": "t"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
         "invalidations": 1,
         "output": [],
         "raf_requests": 0,
@@ -279,12 +360,70 @@
         ]
       },
       {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {
+                    "class": "c",
+                    "data-x": "1",
+                    "data-y": "7",
+                    "id": "a",
+                    "style": "12",
+                    "title": "",
+                    "true": "false"
+                  },
+                  "children": [
+                    {
+                      "text": "t"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
         "invalidations": 1,
         "output": [],
         "raf_requests": 0,
         "value": "12"
       },
       {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {
+                    "class": "c",
+                    "data-x": "1",
+                    "data-y": "7",
+                    "id": "42",
+                    "style": "12",
+                    "title": "",
+                    "true": "false"
+                  },
+                  "children": [
+                    {
+                      "text": "t"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
         "invalidations": 1,
         "output": [],
         "raf_requests": 0,
@@ -1182,7 +1321,7 @@
             "children": [
               {
                 "attributes": {
-                  "id": ""
+                  "id": "a"
                 },
                 "children": [
                   {
@@ -1203,6 +1342,29 @@
     },
     "steps": [
       {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {
+                    "id": "z"
+                  },
+                  "children": [
+                    {
+                      "text": "a"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
         "invalidations": 1,
         "output": [],
         "raf_requests": 0,
@@ -1223,6 +1385,29 @@
         ]
       },
       {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {
+                    "id": "y"
+                  },
+                  "children": [
+                    {
+                      "text": "a"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
         "invalidations": 1,
         "output": [],
         "raf_requests": 0,
@@ -1233,6 +1418,29 @@
         ]
       },
       {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {
+                    "id": ""
+                  },
+                  "children": [
+                    {
+                      "text": "a"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
         "invalidations": 1,
         "output": [],
         "raf_requests": 0,
@@ -1912,7 +2120,7 @@
             "children": [
               {
                 "attributes": {
-                  "id": "renamed"
+                  "id": "outer"
                 },
                 "children": [
                   {
@@ -1965,7 +2173,7 @@
               "children": [
                 {
                   "attributes": {
-                    "id": "renamed"
+                    "id": "outer"
                   },
                   "children": [],
                   "tag": "div"
@@ -2000,6 +2208,25 @@
         }
       },
       {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {
+                    "id": "renamed"
+                  },
+                  "children": [],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
         "invalidations": 1,
         "output": [
           {

@@ -61,7 +61,7 @@ static void test_listener_errors(void) {
     TaiDocument *doc = tai_html_parse(
         "<div id=outer><button id=b>go</button></div>", &error);
     assert(doc && !error);
-    TaiJsContext *js = tai_js_create(tai_document_root(doc), NULL, NULL, &error);
+    TaiJsContext *js = tai_js_create(tai_document_root(doc), NULL, &error);
     assert(js && !error);
     assert(tai_js_eval(js, "listeners.js",
         "var seen=[];"
@@ -143,7 +143,7 @@ static void test_other_thread_stack(void) {
     char *error = NULL;
     TaiDocument *doc = tai_html_parse("<p>x</p>", &error);
     assert(doc && !error);
-    TaiJsContext *js = tai_js_create(tai_document_root(doc), NULL, NULL, &error);
+    TaiJsContext *js = tai_js_create(tai_document_root(doc), NULL, &error);
     assert(js && !error);
     ThreadRun run = {.js = js};
     pthread_attr_t attributes;
@@ -161,7 +161,135 @@ static void test_other_thread_stack(void) {
     tai_document_destroy(doc);
 }
 
+typedef struct {
+    size_t invalidations;
+    size_t removed;
+    TaiNode *last_removed;
+} MutationLog;
+
+static void count_invalidation(void *opaque) {
+    ((MutationLog *)opaque)->invalidations++;
+}
+
+static void record_removal(void *opaque, TaiNode *node) {
+    MutationLog *log = opaque;
+    log->removed++;
+    log->last_removed = node;
+}
+
+static void test_mutation_callbacks(void) {
+    char *error = NULL;
+    TaiDocument *doc = tai_html_parse(
+        "<div id=one><b id=bold>b</b></div><div id=two></div>", &error);
+    assert(doc && !error);
+    MutationLog log = {0};
+    TaiJsHost host = {.invalidated = count_invalidation,
+                      .node_removed = record_removal, .userdata = &log};
+    TaiJsContext *js = tai_js_create(tai_document_root(doc), &host, &error);
+    assert(js && !error);
+    TaiNode *bold = find_element(tai_document_root(doc), "b");
+    /* Moving an attached node reports it; appending a new one does not. */
+    assert(tai_js_eval(js, "move.js", "var keep = bold; two.appendChild(keep)", &error));
+    assert(log.removed == 1 && log.last_removed == bold && log.invalidations == 1);
+    assert(tai_js_eval(js, "add.js",
+        "var n = document.createElement('i'); one.appendChild(n)", &error));
+    assert(log.removed == 1 && log.invalidations == 2);
+    assert(tai_js_eval(js, "remove.js", "two.removeChild(keep)", &error));
+    assert(log.removed == 2 && log.last_removed == bold && !bold->parent);
+    assert(log.invalidations == 3);
+    /* insertBefore(x, x) is a no-op in Python: no callbacks at all. */
+    assert(tai_js_eval(js, "noop.js", "one.insertBefore(n, n)", &error));
+    assert(log.removed == 2 && log.invalidations == 3);
+    assert(!tai_js_eval(js, "fail.js", "one.removeChild(keep)", &error));
+    assert(error && strstr(error, "Node is not a child of this parent"));
+    free(error);
+    error = NULL;
+    assert(log.invalidations == 3);
+    tai_js_destroy(js);
+    tai_document_destroy(doc);
+}
+
+/* A bridge call that re-enters JS (the ID global resync) must not reset the
+ * outer script's deadline. */
+static void test_nested_deadline(void) {
+    char *error = NULL;
+    TaiDocument *doc = tai_html_parse("<p id=a>x</p>", &error);
+    assert(doc && !error);
+    TaiJsContext *js = tai_js_create(tai_document_root(doc), NULL, &error);
+    assert(js && !error);
+    StderrCapture capture;
+    capture_begin(&capture);
+    double started = seconds_now();
+    bool ran = tai_js_eval(js, "loop.js",
+        "var el = a; while (true) el.setAttribute('id', 'x');", &error);
+    double elapsed = seconds_now() - started;
+    char *reported = capture_end(&capture);
+    assert(!ran && error && strstr(error, "interrupted"));
+    assert(elapsed >= 1.5 && elapsed < 10.0);
+    /* An interrupt landing inside the resync propagates to the script
+     * instead of being reported and swallowed. */
+    assert(!strstr(reported, "ID global sync failed"));
+    free(reported);
+    free(error);
+    tai_js_destroy(js);
+    tai_document_destroy(doc);
+}
+
+/* ID globals resync after every mutation by walking the whole document, as in
+ * Python. 10,000 appends must fit in half of the 2 s script budget in the
+ * Debug build; sanitizer builds run fewer and only check correctness. */
+#if defined(__SANITIZE_ADDRESS__)
+#define APPEND_COUNT "2000"
+#define APPEND_TOTAL 2000
+#define APPEND_LIMIT 2.0
+#else
+#define APPEND_COUNT "10000"
+#define APPEND_TOTAL 10000
+#define APPEND_LIMIT 1.0
+#endif
+static void test_append_cost(void) {
+    char *error = NULL;
+    TaiDocument *doc = tai_html_parse("<div id=root></div>", &error);
+    assert(doc && !error);
+    TaiJsContext *js = tai_js_create(tai_document_root(doc), NULL, &error);
+    assert(js && !error);
+    double started = seconds_now();
+    assert(tai_js_eval(js, "append.js",
+        "for (var i = 0; i < " APPEND_COUNT "; i++)"
+        " root.appendChild(document.createElement('span'));", &error));
+    double elapsed = seconds_now() - started;
+    fprintf(stderr, APPEND_COUNT " appends: %.3f s\n", elapsed);
+    assert(elapsed < APPEND_LIMIT);
+    assert(find_element(tai_document_root(doc), "div")->child_count ==
+           APPEND_TOTAL);
+    tai_js_destroy(js);
+    tai_document_destroy(doc);
+}
+
+/* D2: createElement fails with a JS error at the document node limit. */
+static void test_node_limit(void) {
+    char *error = NULL;
+    TaiDocument *doc = tai_html_parse("<p>x</p>", &error);
+    assert(doc && !error);
+    TaiJsContext *js = tai_js_create(tai_document_root(doc), NULL, &error);
+    assert(js && !error);
+    TaiDomStatus status = TAI_DOM_OK;
+    while (tai_document_node(doc, TAI_DOCUMENT_SCRIPT_NODE_LIMIT - 2) == NULL)
+        assert(tai_document_create_element(doc, "b", &status));
+    assert(tai_js_eval(js, "last.js", "var last = document.createElement('i')",
+                       &error));
+    assert(!tai_js_eval(js, "over.js", "document.createElement('i')", &error));
+    assert(error && strstr(error, "Document node limit reached"));
+    free(error);
+    tai_js_destroy(js);
+    tai_document_destroy(doc);
+}
+
 int main(void) {
+    test_mutation_callbacks();
+    test_nested_deadline();
+    test_append_cost();
+    test_node_limit();
     test_listener_errors();
     test_other_thread_stack();
     char *error = NULL;
@@ -169,8 +297,8 @@ int main(void) {
         "<div id='box'><p class='item'>old</p></div>", &error);
     assert(doc && !error);
     int invalidations = 0;
-    TaiJsContext *js = tai_js_create(tai_document_root(doc), invalidated,
-                                     &invalidations, &error);
+    TaiJsHost host = {.invalidated = invalidated, .userdata = &invalidations};
+    TaiJsContext *js = tai_js_create(tai_document_root(doc), &host, &error);
     assert(js && !error);
     assert(tai_js_eval(js, "test.js",
         "var p=document.querySelectorAll('.item')[0];"

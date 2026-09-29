@@ -1,0 +1,31 @@
+From: Tai Ci maintainers
+Subject: [PATCH] Do not resolve a function whose byte code buffer failed
+
+The parser records allocation failures as a sticky DynBuf error on
+fd->byte_code and keeps parsing. When a single allocation fails and later
+ones succeed, the parse can finish and js_create_function() ran
+resolve_variables()/resolve_labels() over the truncated buffer: skip_dead_code
+read past it (SIGSEGV) and update_label() hit its label assertion for the -1
+returned by new_label(). js_create_function() now reports out of memory
+before resolving.
+
+Upstream quickjs-ng df836d1 contains the defect.
+Found by the one-failure mode of Tai's runtime.js compile sweep
+(tests/test_quickjs_oom.c).
+---
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -37022,6 +37022,13 @@
+     }
+ #endif
+ 
++    /* the parser records allocation failures in the byte code buffer and
++       keeps going; never resolve a truncated buffer */
++    if (dbuf_error(&fd->byte_code)) {
++        JS_ThrowOutOfMemory(ctx);
++        goto fail;
++    }
++
+     if (resolve_variables(ctx, fd))
+         goto fail;
+ 

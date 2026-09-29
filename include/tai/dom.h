@@ -30,6 +30,29 @@ void tai_document_destroy(TaiDocument *doc);
 bool tai_node_set_inner_html(TaiNode *node, const char *html, char **error);
 bool tai_node_append(TaiNode *parent, TaiNode *child);
 TaiNode *tai_document_node(const TaiDocument *doc, size_t id);
+
+/* Script-driven mutation. Nodes created here are owned by the document like
+ * parsed ones and stay alive (possibly detached) until it is destroyed. */
+#define TAI_DOCUMENT_SCRIPT_NODE_LIMIT 1000000u
+typedef enum {
+    TAI_DOM_OK,
+    TAI_DOM_NO_MEMORY,
+    TAI_DOM_NODE_LIMIT,       /* document already holds the script limit */
+    TAI_DOM_WRONG_DOCUMENT,
+    TAI_DOM_CYCLE,            /* child is the parent or one of its ancestors */
+    TAI_DOM_NOT_CHILD,        /* removal target is not a child of parent */
+    TAI_DOM_REFERENCE_NOT_CHILD
+} TaiDomStatus;
+/* The tag is stored as given; callers fold case when their API requires it. */
+TaiNode *tai_document_create_element(TaiDocument *doc, const char *tag,
+    TaiDomStatus *status);
+/* Moves child (detaching it from any old parent) before reference, or to the
+ * end when reference is NULL. Python order: reference check, reference ==
+ * child is a successful no-op (*changed false), then the cycle check. Nothing
+ * changes unless TAI_DOM_OK is returned. */
+TaiDomStatus tai_node_insert_before(TaiNode *parent, TaiNode *child,
+    TaiNode *reference, bool *changed);
+TaiDomStatus tai_node_remove_child(TaiNode *parent, TaiNode *child);
 void tai_dom_json(FILE *out, const TaiNode *node, bool include_style);
 char *tai_view_source(const char *html, char **error);
 #endif

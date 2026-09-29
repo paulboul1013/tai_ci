@@ -63,7 +63,7 @@ Public interfaces generally share a name with their implementation; internal fil
 | `css.h` / `css.c` | CSS parsing、selectors、cascade、computed style |
 | `url.h` / `url.c` | URL parsing、resolution、origin and identity |
 | `network.h` / `network.c` | libcurl multi requests、responses、cache/cookies |
-| `js.h` / `js.c` | QuickJS-NG context、DOM bridge、event dispatch |
+| `js.h` / `js.c` | QuickJS-NG context、DOM bridge、event dispatch。建置時原文嵌入凍結 `tests/reference/runtime.js`，之後執行 native 前言 `src/js_prelude.js`（刻意差異，如 D7）；兩者經 `call_python(op, …)` 進入 C（`cmake/embed_text.cmake` 產生標頭）。handle 依首次使用編號、永不重用，只在 js.c 內轉換；owner 經 `TaiJsHost` 接收 invalidated／node_removed／report 回呼 |
 | `layout.h` / `layout.c` | block/line/text geometry and font measurement |
 | `render.h` / `render.c` | self-contained display list and Cairo PNG raster |
 | `presentation.h` / `presentation.c` | SDL3 window lifecycle, single-page event loop and public entry points |

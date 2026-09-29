@@ -52,11 +52,24 @@ set(SDL_TESTS OFF CACHE BOOL "" FORCE)
 set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(deps/SDL EXCLUDE_FROM_ALL)
 
+# js.c embeds the frozen runtime.js verbatim plus the native prelude.
+set(TAI_JS_SOURCES_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/tai_js_sources.h")
+set(TAI_JS_INPUTS
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/runtime.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/js_prelude.js")
+add_custom_command(OUTPUT "${TAI_JS_SOURCES_HEADER}"
+  COMMAND "${CMAKE_COMMAND}" "-DOUTPUT=${TAI_JS_SOURCES_HEADER}"
+    "-DINPUTS=${TAI_JS_INPUTS}" "-DNAMES=tai_runtime_js;tai_prelude_js"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_text.cmake"
+  DEPENDS ${TAI_JS_INPUTS} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_text.cmake"
+  COMMENT "Embedding JavaScript runtime sources" VERBATIM)
+
 add_library(tai_core src/core.c src/url.c src/dom.c src/css.c src/scheduler.c
   src/bookmarks.c
   src/js.c src/layout.c src/render.c src/network.c src/browser.c src/session.c
-  src/tabset.c)
+  src/tabset.c "${TAI_JS_SOURCES_HEADER}")
 target_include_directories(tai_core PUBLIC include)
+target_include_directories(tai_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_include_directories(tai_core PRIVATE "${UTF8PROC_INCLUDE_DIR}")
 target_link_libraries(tai_core PUBLIC "${UTF8PROC_LIBRARY}")
 target_link_libraries(tai_core PUBLIC m)
@@ -125,8 +138,15 @@ if(BUILD_TESTING)
   target_link_libraries(test_js PRIVATE tai_core)
   target_compile_options(test_js PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME javascript COMMAND test_js)
+  add_executable(js_probe tests/js_probe.c)
+  target_link_libraries(js_probe PRIVATE tai_core)
+  target_compile_options(js_probe PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME js_dom_differential COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/js_dom_differential.py" $<TARGET_FILE:js_probe>)
   add_executable(test_quickjs_oom tests/test_quickjs_oom.c)
   target_link_libraries(test_quickjs_oom PRIVATE qjs)
+  target_sources(test_quickjs_oom PRIVATE "${TAI_JS_SOURCES_HEADER}")
+  target_include_directories(test_quickjs_oom PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
   target_compile_options(test_quickjs_oom PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME quickjs_oom COMMAND test_quickjs_oom)
   add_executable(test_layout tests/test_layout.c)
