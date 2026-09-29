@@ -93,13 +93,14 @@ int main(int argc, char **argv) {
     (void)css_length;
     char *error = NULL;
     if (window) {
-        TaiTabSet *tabs = css ? tai_tabset_create(css, rtl, &error) : NULL;
-        bool success = tabs && tai_present_window_with_tabs(
-            tabs, url_text, TAI_SCREENSHOT_WIDTH, TAI_WINDOW_HEIGHT, &error);
+        TaiBrowserApp *app = css ? tai_browser_app_create(css, rtl, &error)
+                                 : NULL;
+        bool success = app && tai_present_browser(
+            app, url_text, TAI_SCREENSHOT_WIDTH, TAI_WINDOW_HEIGHT, &error);
         if (!success)
             fprintf(stderr, "window failed: %s\n",
                     error ? error : "tabbed window initialization failed");
-        tai_tabset_destroy(tabs);
+        tai_browser_app_destroy(app);
         free(css);
         free(error);
         return success ? 0 : 1;

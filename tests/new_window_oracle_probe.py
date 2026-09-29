@@ -309,8 +309,9 @@ def ctrl_n_basic(probe):
 def original_unaffected(probe):
     first = probe.open_first("/a", "page-a")
     probe.load(first, "/b", "page-b")
-    tab = first.new_tab(probe.browser.URL(probe.server.url("/c")))
-    probe.wait_heading(first, tab, "page-c")
+    # New Tab opens the home page, as the native New Tab button does.
+    tab = first.new_tab(probe.browser.URL(probe.server.url("/home")))
+    probe.wait_heading(first, tab, "home")
     probe.set_draft(first, "typed draft", True)
     before = probe.window_state(first)
     probe.ctrl_n(first)

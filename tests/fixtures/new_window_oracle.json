@@ -128,9 +128,9 @@
           "address_dirty": true,
           "address_focused": true,
           "bookmarked": false,
-          "heading": "page-c",
+          "heading": "home",
           "history": [
-            "http://127.0.0.1:<PORT>/c"
+            "http://127.0.0.1:<PORT>/home"
           ],
           "history_index": 0,
           "scroll": 0.0,
@@ -139,8 +139,8 @@
             600
           ],
           "tab_count": 2,
-          "title": "page-c",
-          "url": "http://127.0.0.1:<PORT>/c"
+          "title": "home",
+          "url": "http://127.0.0.1:<PORT>/home"
         },
         {
           "active_index": 0,
@@ -170,9 +170,9 @@
       "address_dirty": true,
       "address_focused": true,
       "bookmarked": false,
-      "heading": "page-c",
+      "heading": "home",
       "history": [
-        "http://127.0.0.1:<PORT>/c"
+        "http://127.0.0.1:<PORT>/home"
       ],
       "history_index": 0,
       "scroll": 0.0,
@@ -181,8 +181,8 @@
         600
       ],
       "tab_count": 2,
-      "title": "page-c",
-      "url": "http://127.0.0.1:<PORT>/c"
+      "title": "home",
+      "url": "http://127.0.0.1:<PORT>/home"
     }
   },
   "quit_all": {

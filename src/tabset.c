@@ -584,6 +584,10 @@ void tai_browser_app_destroy(TaiBrowserApp *app) {
     app_free_state(app);
 }
 
+const char *tai_browser_app_home_url(const TaiBrowserApp *app) {
+    return app ? app->home_url : NULL;
+}
+
 TaiTabSet *tai_tabset_create_in_app(TaiBrowserApp *app, char **error) {
     if (error) { free(*error); *error = NULL; }
     if (!app) {

@@ -125,6 +125,13 @@ static bool refresh_text_input(PresWindow *w, TaiTabSetView *view,
                                   error);
 }
 
+/* Python opens a window for any Ctrl+N, whatever else is held and wherever
+ * focus is; native ignores key repeat so holding the keys opens one. */
+static bool is_new_window_key(const SDL_Event *event) {
+  return event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_N &&
+         (event->key.mod & SDL_KMOD_CTRL) && !event->key.repeat;
+}
+
 /* Applies one SDL event addressed to w. Returns false on a fatal error. */
 static bool window_event(PresWindow *w, SDL_Event *event, char **error) {
   TaiTabSet *tabs = w->tabs;
@@ -353,23 +360,47 @@ static bool notify_observer(PresBrowser *b, PresFrame frame, void *opaque) {
   return frame(opaque, infos, b->count);
 }
 
+/* Ctrl+N: a new 800x600 window whose single tab opens the app's New Tab URL.
+ * Reaching the window limit or failing to create the window only warns; the
+ * open windows keep running. */
+static void open_new_window(PresBrowser *b) {
+  if (b->count >= TAI_PRES_MAX_WINDOWS) {
+    fprintf(stderr, "new window ignored: maximum of %d windows reached\n",
+            TAI_PRES_MAX_WINDOWS);
+    return;
+  }
+  char *error = NULL;
+  TaiTabSet *tabs = tai_tabset_create_in_app(b->app, &error);
+  PresWindow *w = tabs ? window_open(tabs, true, tai_browser_app_home_url(
+                                         b->app), b->width, b->height, &error)
+                       : NULL;
+  if (w) b->windows[b->count++] = w;
+  else
+    fprintf(stderr, "new window failed: %s\n",
+            error ? error : "window creation failed");
+  free(error);
+}
+
 /* Runs until every window is closed, SDL_EVENT_QUIT arrives or the observer
  * stops it. Windows are destroyed before returning. */
 static bool run_windows(PresBrowser *b, PresFrame frame, void *opaque,
                         char **error) {
   bool ok = true;
   while (ok && b->count) {
+    bool new_window = false;
     SDL_Event event;
     if (SDL_WaitEventTimeout(&event, 16)) {
       if (event.type == SDL_EVENT_QUIT) break;
       PresWindow *target = window_for_event(b, &event);
-      if (target && !window_event(target, &event, error)) {
+      new_window = target && b->app && is_new_window_key(&event);
+      if (target && !new_window && !window_event(target, &event, error)) {
         ok = false;
         break;
       }
     }
     for (size_t index = b->count; index-- > 0;)
       if (b->windows[index]->close_requested) close_window(b, index);
+    if (new_window) open_new_window(b);
     for (size_t index = 0; ok && index < b->count; index++)
       ok = window_frame(b->windows[index], error);
     if (ok && b->count && frame && !notify_observer(b, frame, opaque)) break;

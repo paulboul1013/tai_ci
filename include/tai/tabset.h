@@ -52,6 +52,8 @@ TaiBrowserApp *tai_browser_app_create_for_test(const char *default_css,
 /* Destroy every tab set created in the app first. Cancels queued work, joins
  * the loader and releases completions nobody collected. */
 void tai_browser_app_destroy(TaiBrowserApp *app);
+/* The New Tab URL, which a new window also opens. Borrowed from app. */
+const char *tai_browser_app_home_url(const TaiBrowserApp *app);
 /* One window's tab set borrowing app, which must outlive it. Tab IDs are
  * unique across the app. Each tab set's pump routes completions for the
  * app's other tab sets to them, and destroying a tab set cancels its loads
