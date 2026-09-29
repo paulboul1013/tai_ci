@@ -55,6 +55,13 @@ browser 仍未達 `COMPLETE`（外部開啟、完整 chrome 視覺比對等仍�
 新增 `windows`／`await`／`select`／`close`。另外，因為 Xvfb 沒有 window manager，點擊與截圖前
 會先把選定視窗提到最上層。
 
+## 使用者手動驗證（WSLg）
+
+使用者在 WSLg `:0` 以實體鍵盤與滑鼠手動操作兩次 session（127.0.0.1 fixture、私有
+`XDG_DATA_HOME`），回報全部正常。第二次紀錄：共開啟 10 個視窗並逐一關閉（10 筆
+`CLOSE_REQUESTED`），102 筆 key/text 事件的 windowid 都屬於各自的 SDL 視窗（2–11），
+`windowid=0` 為 0 筆；最後一個視窗關閉後 `rc=0`。新視窗在這兩次 session 中沒有網路隔離。
+
 ## 獨立審查
 
 `ownership-reviewer` 審查 `edc8659..HEAD` 的 `src`、`include`：沒有 correctness 或記憶體安全
@@ -65,6 +72,5 @@ browser 仍未達 `COMPLETE`（外部開啟、完整 chrome 視覺比對等仍�
 ## 未涵蓋
 
 - D3 的視窗建立失敗沒有故障注入測試，只經程式碼審查確認。
-- 有 window manager 時的焦點切換與 per-window text input，以及 WSLg／Wayland 的鍵盤路徑，
-  都未驗證（Xvfb 沒有 WM）。
+- WSLg 的焦點切換與 per-window 鍵盤輸入只有使用者手動驗證，沒有自動化。
 - 沒有像素比對，截圖只做目視檢查。
