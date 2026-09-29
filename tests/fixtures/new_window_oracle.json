@@ -1,0 +1,563 @@
+{
+  "close_one": {
+    "closed_first": {
+      "running": true,
+      "window_count": 1,
+      "windows": [
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/home",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": false,
+          "heading": "home",
+          "history": [
+            "http://127.0.0.1:<PORT>/home"
+          ],
+          "history_index": 0,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "home",
+          "url": "http://127.0.0.1:<PORT>/home"
+        }
+      ]
+    },
+    "closed_last": {
+      "running": false,
+      "window_count": 0
+    },
+    "second_navigates": {
+      "running": true,
+      "window_count": 1,
+      "windows": [
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/b",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": false,
+          "heading": "page-b",
+          "history": [
+            "http://127.0.0.1:<PORT>/home",
+            "http://127.0.0.1:<PORT>/b"
+          ],
+          "history_index": 1,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "page-b",
+          "url": "http://127.0.0.1:<PORT>/b"
+        }
+      ]
+    }
+  },
+  "ctrl_n_basic": {
+    "after": {
+      "running": true,
+      "window_count": 2,
+      "windows": [
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/a",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": false,
+          "heading": "page-a",
+          "history": [
+            "http://127.0.0.1:<PORT>/a"
+          ],
+          "history_index": 0,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "page-a",
+          "url": "http://127.0.0.1:<PORT>/a"
+        },
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/home",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": false,
+          "heading": "home",
+          "history": [
+            "http://127.0.0.1:<PORT>/home"
+          ],
+          "history_index": 0,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "home",
+          "url": "http://127.0.0.1:<PORT>/home"
+        }
+      ]
+    },
+    "requested_urls": [
+      "https://browser.engineering/"
+    ]
+  },
+  "modifiers": {
+    "ctrl_alt": 4,
+    "ctrl_m": 5,
+    "ctrl_shift": 3,
+    "key_repeat": 5,
+    "plain_n": 1,
+    "right_ctrl": 2
+  },
+  "original_unaffected": {
+    "after": {
+      "running": true,
+      "window_count": 2,
+      "windows": [
+        {
+          "active_index": 1,
+          "address": "typed draft",
+          "address_dirty": true,
+          "address_focused": true,
+          "bookmarked": false,
+          "heading": "page-c",
+          "history": [
+            "http://127.0.0.1:<PORT>/c"
+          ],
+          "history_index": 0,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 2,
+          "title": "page-c",
+          "url": "http://127.0.0.1:<PORT>/c"
+        },
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/home",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": false,
+          "heading": "home",
+          "history": [
+            "http://127.0.0.1:<PORT>/home"
+          ],
+          "history_index": 0,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "home",
+          "url": "http://127.0.0.1:<PORT>/home"
+        }
+      ]
+    },
+    "before": {
+      "active_index": 1,
+      "address": "typed draft",
+      "address_dirty": true,
+      "address_focused": true,
+      "bookmarked": false,
+      "heading": "page-c",
+      "history": [
+        "http://127.0.0.1:<PORT>/c"
+      ],
+      "history_index": 0,
+      "scroll": 0.0,
+      "size": [
+        800,
+        600
+      ],
+      "tab_count": 2,
+      "title": "page-c",
+      "url": "http://127.0.0.1:<PORT>/c"
+    }
+  },
+  "quit_all": {
+    "running": false,
+    "window_count": 2
+  },
+  "routing": {
+    "clicked": {
+      "running": true,
+      "window_count": 2,
+      "windows": [
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/b",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": false,
+          "heading": "page-b",
+          "history": [
+            "http://127.0.0.1:<PORT>/links",
+            "http://127.0.0.1:<PORT>/b"
+          ],
+          "history_index": 1,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "page-b",
+          "url": "http://127.0.0.1:<PORT>/b"
+        },
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/b",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": false,
+          "heading": "page-b",
+          "history": [
+            "http://127.0.0.1:<PORT>/home",
+            "http://127.0.0.1:<PORT>/b"
+          ],
+          "history_index": 1,
+          "scroll": 100.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "page-b",
+          "url": "http://127.0.0.1:<PORT>/b"
+        }
+      ]
+    },
+    "entered": {
+      "running": true,
+      "window_count": 2,
+      "windows": [
+        {
+          "active_index": 0,
+          "address": "first draft",
+          "address_dirty": true,
+          "address_focused": true,
+          "bookmarked": false,
+          "heading": "links",
+          "history": [
+            "http://127.0.0.1:<PORT>/links"
+          ],
+          "history_index": 0,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "links",
+          "url": "http://127.0.0.1:<PORT>/links"
+        },
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/b",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": false,
+          "heading": "page-b",
+          "history": [
+            "http://127.0.0.1:<PORT>/home",
+            "http://127.0.0.1:<PORT>/b"
+          ],
+          "history_index": 1,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "page-b",
+          "url": "http://127.0.0.1:<PORT>/b"
+        }
+      ]
+    },
+    "typed": {
+      "running": true,
+      "window_count": 2,
+      "windows": [
+        {
+          "active_index": 0,
+          "address": "first draft",
+          "address_dirty": true,
+          "address_focused": true,
+          "bookmarked": false,
+          "heading": "links",
+          "history": [
+            "http://127.0.0.1:<PORT>/links"
+          ],
+          "history_index": 0,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "links",
+          "url": "http://127.0.0.1:<PORT>/links"
+        },
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/b",
+          "address_dirty": true,
+          "address_focused": true,
+          "bookmarked": false,
+          "heading": "home",
+          "history": [
+            "http://127.0.0.1:<PORT>/home"
+          ],
+          "history_index": 0,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "home",
+          "url": "http://127.0.0.1:<PORT>/home"
+        }
+      ]
+    },
+    "unknown_window_count": 2,
+    "wheel": {
+      "running": true,
+      "window_count": 2,
+      "windows": [
+        {
+          "active_index": 0,
+          "address": "first draft",
+          "address_dirty": true,
+          "address_focused": true,
+          "bookmarked": false,
+          "heading": "links",
+          "history": [
+            "http://127.0.0.1:<PORT>/links"
+          ],
+          "history_index": 0,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "links",
+          "url": "http://127.0.0.1:<PORT>/links"
+        },
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/b",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": false,
+          "heading": "page-b",
+          "history": [
+            "http://127.0.0.1:<PORT>/home",
+            "http://127.0.0.1:<PORT>/b"
+          ],
+          "history_index": 1,
+          "scroll": 100.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "page-b",
+          "url": "http://127.0.0.1:<PORT>/b"
+        }
+      ]
+    }
+  },
+  "shared_bookmarks": {
+    "first_list_has_c": true,
+    "first_on_c": {
+      "running": true,
+      "window_count": 2,
+      "windows": [
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/c",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": true,
+          "heading": "page-c",
+          "history": [
+            "http://127.0.0.1:<PORT>/a",
+            "http://127.0.0.1:<PORT>/c"
+          ],
+          "history_index": 1,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "page-c",
+          "url": "http://127.0.0.1:<PORT>/c"
+        },
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/c",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": true,
+          "heading": "page-c",
+          "history": [
+            "http://127.0.0.1:<PORT>/home",
+            "http://127.0.0.1:<PORT>/c"
+          ],
+          "history_index": 1,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "page-c",
+          "url": "http://127.0.0.1:<PORT>/c"
+        }
+      ]
+    },
+    "toggled": {
+      "running": true,
+      "window_count": 2,
+      "windows": [
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/a",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": false,
+          "heading": "page-a",
+          "history": [
+            "http://127.0.0.1:<PORT>/a"
+          ],
+          "history_index": 0,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "page-a",
+          "url": "http://127.0.0.1:<PORT>/a"
+        },
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/c",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": true,
+          "heading": "page-c",
+          "history": [
+            "http://127.0.0.1:<PORT>/home",
+            "http://127.0.0.1:<PORT>/c"
+          ],
+          "history_index": 1,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "page-c",
+          "url": "http://127.0.0.1:<PORT>/c"
+        }
+      ]
+    }
+  },
+  "shared_cookies": {
+    "second_requests": [
+      {
+        "cookie": "nw=shared",
+        "method": "GET",
+        "path": "/cookie-check"
+      }
+    ]
+  },
+  "third_window": {
+    "after": {
+      "running": true,
+      "window_count": 3,
+      "windows": [
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/a",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": false,
+          "heading": "page-a",
+          "history": [
+            "http://127.0.0.1:<PORT>/a"
+          ],
+          "history_index": 0,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "page-a",
+          "url": "http://127.0.0.1:<PORT>/a"
+        },
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/b",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": false,
+          "heading": "page-b",
+          "history": [
+            "http://127.0.0.1:<PORT>/home",
+            "http://127.0.0.1:<PORT>/b"
+          ],
+          "history_index": 1,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "page-b",
+          "url": "http://127.0.0.1:<PORT>/b"
+        },
+        {
+          "active_index": 0,
+          "address": "http://127.0.0.1:<PORT>/home",
+          "address_dirty": false,
+          "address_focused": false,
+          "bookmarked": false,
+          "heading": "home",
+          "history": [
+            "http://127.0.0.1:<PORT>/home"
+          ],
+          "history_index": 0,
+          "scroll": 0.0,
+          "size": [
+            800,
+            600
+          ],
+          "tab_count": 1,
+          "title": "home",
+          "url": "http://127.0.0.1:<PORT>/home"
+        }
+      ]
+    },
+    "requested_urls": [
+      "https://browser.engineering/",
+      "https://browser.engineering/"
+    ]
+  }
+}

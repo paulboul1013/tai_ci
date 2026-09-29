@@ -207,6 +207,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/https_oracle_probe.py" --check)
   add_test(NAME history_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/history_oracle_probe.py" --check)
+  add_test(NAME new_window_oracle_probe COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/new_window_oracle_probe.py" --check)
   add_executable(test_tabset_history tests/test_tabset_history.c)
   target_link_libraries(test_tabset_history PRIVATE tai_core)
   target_compile_options(test_tabset_history PRIVATE -Wall -Wextra -Wpedantic -Werror)
