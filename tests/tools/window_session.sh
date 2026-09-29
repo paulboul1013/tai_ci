@@ -5,8 +5,11 @@
 #         [--data-home DIR] [--size WxH] [--bin PATH]
 #   click X Y | key KEYS...(NAME*N repeats) | type TEXT | wheel up|down [N] | resize W H
 #   shot NAME [--crop WxH+X+Y] | events [PATTERN] | requests | status | stop
+#   windows | await N | select N|WID | close   (Ctrl+N multi-window sessions)
 # Only processes started by `start` are ever signalled; every action re-checks
-# that the saved window id still belongs to the saved browser PID.
+# that the selected window id still belongs to the saved browser PID. `select`
+# picks the Nth of the browser's windows (creation order) for later actions;
+# `close` asks only the selected window to close (WM_DELETE_WINDOW).
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -117,9 +120,68 @@ cmd_start() {
 }
 
 focus() { xdotool windowfocus "$WID" 2>/dev/null || true; }
+# Pointer input goes to whichever window is on top at the screen point; with
+# several browser windows (and no WM on Xvfb) raise the selected one first.
+front() { xdotool windowraise "$WID" 2>/dev/null || true; sleep 0.2; }
+
+# The browser's own 'Tai Gar' windows, oldest first (X ids grow per client).
+owned_windows() {
+  local w; for w in $(xdotool search --name '^Tai Gar$' 2>/dev/null || true); do
+    [[ $(xdotool getwindowpid "$w" 2>/dev/null || true) == "$PID" ]] && echo "$w"
+  done | sort -n
+}
+
+cmd_windows() { load; alive "$PID" || die "browser pid $PID not running (rc=$(get rc))"
+  local i=0 w; for w in $(owned_windows); do i=$((i + 1))
+    echo "$i $w$([[ $w == "$WID" ]] && echo ' *' || true)"; done
+  echo "windows=$i"; }
+cmd_await() { (($# == 1)) || die "await N"; load
+  local n=0; for _ in $(seq 100); do
+    alive "$PID" || die "browser pid $PID exited (rc=$(get rc))"
+    n=$(owned_windows | wc -l); [[ $n == "$1" ]] && { sleep 1; echo "windows=$n ok"; return; }
+    sleep 0.1; done
+  die "expected $1 windows, found $n"; }
+cmd_select() { (($# == 1)) || die "select N|WID"; load
+  local w=$1; if ((w < 1000)); then w=$(owned_windows | sed -n "${1}p"); fi
+  [[ -n $w ]] || die "no window $1"; put wid "$w"; check; echo "selected wid=$WID"; }
+cmd_close() { check
+  # libX11 through ctypes: python-xlib cannot reach Xvfb's abstract socket.
+  python3 - "$WID" <<'PY'
+import ctypes, ctypes.util, sys
+x = ctypes.CDLL(ctypes.util.find_library("X11"))
+x.XOpenDisplay.restype = ctypes.c_void_p
+x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+x.XInternAtom.restype = ctypes.c_ulong
+x.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+x.XSendEvent.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int,
+                         ctypes.c_long, ctypes.c_void_p]
+x.XFlush.argtypes = [ctypes.c_void_p]
+x.XCloseDisplay.argtypes = [ctypes.c_void_p]
+class ClientMessage(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_int), ("serial", ctypes.c_ulong),
+                ("send_event", ctypes.c_int), ("display", ctypes.c_void_p),
+                ("window", ctypes.c_ulong), ("message_type", ctypes.c_ulong),
+                ("format", ctypes.c_int), ("l", ctypes.c_long * 5)]
+class Event(ctypes.Union):
+    _fields_ = [("xclient", ClientMessage), ("pad", ctypes.c_long * 24)]
+d = x.XOpenDisplay(None)
+if not d:
+    sys.exit("cannot open display")
+event = Event()
+event.xclient.type = 33  # ClientMessage
+event.xclient.window = int(sys.argv[1])
+event.xclient.message_type = x.XInternAtom(d, b"WM_PROTOCOLS", 0)
+event.xclient.format = 32
+event.xclient.l[0] = x.XInternAtom(d, b"WM_DELETE_WINDOW", 0)
+if not x.XSendEvent(d, int(sys.argv[1]), 0, 0, ctypes.byref(event)):
+    sys.exit("XSendEvent failed")
+x.XFlush(d)
+x.XCloseDisplay(d)
+PY
+  settle; echo "close $WID requested"; }
 
 cmd_click() { (($# == 2)) || die "click X Y"; check
-  xdotool mousemove --window "$WID" "$1" "$2" click 1; settle; echo "click $1,$2 ok"; }
+  front; xdotool mousemove --window "$WID" "$1" "$2" click 1; settle; echo "click $1,$2 ok"; }
 # key accepts NAME*N as shorthand for N repeats (e.g. BackSpace*40).
 cmd_key() { (($#)) || die "key KEYS..."; check; focus
   local k keys=()
@@ -134,7 +196,7 @@ cmd_type() { (($# == 1)) || die "type TEXT"; check; focus
 cmd_wheel() {
   local dir=${1:-}; local n=${2:-1} b
   case $dir in down) b=5;; up) b=4;; *) die "wheel up|down [N]";; esac
-  check
+  check; front
   xdotool mousemove --window "$WID" 400 300 click --repeat "$n" --delay 20 "$b"
   settle; echo "wheel $dir x$n ok"; }
 cmd_resize() { (($# == 2)) || die "resize W H"; check
@@ -146,6 +208,9 @@ cmd_shot() {
   [[ ${1:-} == --crop ]] && crop=$2
   check
   local out=$DIR/$name.png
+  # Without a compositor xwd reads screen pixels, so another window must not
+  # cover the selected one.
+  front
   xwd -silent -id "$WID" -out "$DIR/$name.xwd"
   convert "$DIR/$name.xwd" ${crop:+-crop "$crop" +repage} "$out"; rm -f "$DIR/$name.xwd"
   local info; info=$(convert "$out" -format '%wx%h sd=%[fx:standard_deviation]' info:)
@@ -205,7 +270,7 @@ cmd_stop() {
 }
 
 case $CMD in
-  start|click|key|type|wheel|resize|shot|events|requests|status|stop) "cmd_$CMD" "$@";;
-  -h|--help|help) sed -n '2,9p' "$0";;
+  start|click|key|type|wheel|resize|shot|events|requests|status|stop|windows|await|select|close) "cmd_$CMD" "$@";;
+  -h|--help|help) sed -n '2,12p' "$0";;
   *) die "unknown command $CMD";;
 esac
