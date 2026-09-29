@@ -161,6 +161,30 @@ private, incompatible node layouts.
   shutdown cancels queued work, joins the loader, then drains completions.
   Destruction runs on the window owner after it has stopped issuing
   operations. No loader path touches SDL.
+- `document.cookie` and synchronous XHR (JS DOM slice 5, design in
+  [`docs/js-cookie-xhr-design.md`](../js-cookie-xhr-design.md)). The cookie
+  jar is a separate `TaiCookieJar` with its own mutex, created by the app
+  before the loader starts and destroyed after it is joined; the loader's
+  network and every page borrow it, and the lock covers memory operations
+  only. A page reaches the network only through its injected `TaiPageNet`
+  (request, checkpoint, cancelled, jar). Load-time scripts run on the loader
+  inside a poll callback and use the loader's network directly through
+  `tai_network_request_until`, whose restricted poll dispatches only its own
+  request and event-time XHR, so no other page's script ever runs nested
+  (depth is fixed at one). Between polls and between load-time scripts the
+  loader submits queued event-time XHR; a cancelled task or a stopping app
+  aborts the XHR within one poll interval and stops the script
+  (`TaiPageNet.cancelled`, lock-free, polled by the JS interrupt handler).
+  When `tai_tabset_pump` takes a completed page, before resize or commit, it
+  switches the page's net to the app's event net, because the load-time net
+  names the task freed right after. Event-time scripts run on the SDL thread:
+  an XHR puts an `XhrJob` on the SDL thread's stack into the app's queue and
+  waits on `xhr_condition` with no time limit; the loader finishes every
+  accepted job exactly once (response, 30 s total limit across redirects,
+  network failure, or loader exit) and never waits for the SDL thread. While
+  it waits, no window repaints or handles input (D9). Headless and
+  single-session pages use the caller's network on the caller's thread and
+  must be destroyed before it.
 - A navigation snapshots its Referer from the same tab's committed page URL;
   if it supersedes a pending navigation, it uses that provisional URL, matching
   Python's capture-before-assignment behavior. Other tabs never supply a

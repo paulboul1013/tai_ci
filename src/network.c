@@ -1,7 +1,9 @@
+#define _POSIX_C_SOURCE 200809L
 #include "tai/network.h"
 #include <ctype.h>
 #include <curl/curl.h>
 #include <errno.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,13 +38,22 @@ struct TaiRequest {
   size_t capacity, header_bytes;
   unsigned redirects;
   bool ready, active;
+  bool nested; /* dispatched by a restricted (nested) poll too */
+  bool waited;  /* a request_until caller waits for it: always dispatched */
   char curl_error[CURL_ERROR_SIZE];
   struct TaiRequest *next;
+};
+/* The jar is the only network state shared between threads: its mutex
+ * guards memory operations only, never libcurl calls or callbacks. */
+struct TaiCookieJar {
+  pthread_mutex_t mutex;
+  Cookie *cookies;
 };
 struct TaiNetwork {
   CURLM *multi;
   TaiRequest *requests;
-  Cookie *cookies;
+  TaiCookieJar *jar;
+  bool owns_jar;
   Cache *cache;
   char *ca_file;
   size_t pending;
@@ -99,13 +110,13 @@ static void cookie_free(Cookie *c) {
   tai_map_clear(&c->params);
   free(c);
 }
-static Cookie **cookie_slot(TaiNetwork *n, const char *host) {
+static Cookie **cookie_slot(TaiCookieJar *n, const char *host) {
   Cookie **p = &n->cookies;
   while (*p && strcmp((*p)->host, host))
     p = &(*p)->next;
   return p;
 }
-static Cookie *cookie_valid(TaiNetwork *n, const char *host) {
+static Cookie *cookie_valid(TaiCookieJar *n, const char *host) {
   Cookie **p = cookie_slot(n, host);
   if (*p && (*p)->has_expiry && (*p)->expires <= time(NULL)) {
     Cookie *c = *p;
@@ -114,7 +125,7 @@ static Cookie *cookie_valid(TaiNetwork *n, const char *host) {
   }
   return *p;
 }
-static bool cookie_store(TaiNetwork *n, const char *host, const char *value,
+static bool cookie_store(TaiCookieJar *n, const char *host, const char *value,
                          bool js) {
   if (!host || !*host)
     return true;
@@ -200,14 +211,41 @@ static bool cookie_store(TaiNetwork *n, const char *host, const char *value,
     cookie_free(old);
   return true;
 }
-bool tai_network_cookie_set(TaiNetwork *n, const char *host,
-                            const char *value) {
-  return n && value && cookie_store(n, host, value, true);
+TaiCookieJar *tai_cookie_jar_create(void) {
+  TaiCookieJar *jar = calloc(1, sizeof(*jar));
+  if (jar && pthread_mutex_init(&jar->mutex, NULL) != 0) {
+    free(jar);
+    return NULL;
+  }
+  return jar;
 }
-char *tai_network_cookie_get(TaiNetwork *n, const char *host) {
-  if (!n || !host || !*host)
-    return tai_strdup("");
-  Cookie *c = cookie_valid(n, host);
+void tai_cookie_jar_destroy(TaiCookieJar *jar) {
+  if (!jar)
+    return;
+  while (jar->cookies) {
+    Cookie *c = jar->cookies;
+    jar->cookies = c->next;
+    cookie_free(c);
+  }
+  pthread_mutex_destroy(&jar->mutex);
+  free(jar);
+}
+static bool jar_store(TaiCookieJar *jar, const char *host, const char *value,
+                      bool js) {
+  pthread_mutex_lock(&jar->mutex);
+  bool ok = cookie_store(jar, host, value, js);
+  pthread_mutex_unlock(&jar->mutex);
+  return ok;
+}
+bool tai_cookie_jar_js_set(TaiCookieJar *jar, const char *host,
+                           const char *value) {
+  return jar && value && jar_store(jar, host, value, true);
+}
+bool tai_cookie_jar_http_set(TaiCookieJar *jar, const char *host,
+                             const char *value) {
+  return jar && value && jar_store(jar, host, value, false);
+}
+static char *cookie_serialize(const Cookie *c) {
   if (!c || tai_map_get(&c->params, "httponly"))
     return tai_strdup("");
   size_t len = strlen(c->value);
@@ -227,6 +265,39 @@ char *tai_network_cookie_get(TaiNetwork *n, const char *host) {
     }
   }
   return s;
+}
+char *tai_cookie_jar_js_get(TaiCookieJar *jar, const char *host) {
+  if (!jar || !host || !*host)
+    return tai_strdup("");
+  pthread_mutex_lock(&jar->mutex);
+  char *s = cookie_serialize(cookie_valid(jar, host));
+  pthread_mutex_unlock(&jar->mutex);
+  return s;
+}
+/* The Cookie header for q, copied out of the jar; *value stays NULL when no
+ * cookie applies. Returns false only on allocation failure. */
+static bool jar_request_cookie(TaiCookieJar *jar, const TaiRequest *q,
+                               char **value) {
+  *value = NULL;
+  pthread_mutex_lock(&jar->mutex);
+  Cookie *cookie = cookie_valid(jar, tai_url_host(q->url));
+  bool ok = true;
+  if (cookie) {
+    const char *site = tai_map_get(&cookie->params, "samesite");
+    bool allow = !(q->payload && q->referrer && site && !strcmp(site, "lax") &&
+                   strcmp(tai_url_host(q->referrer), tai_url_host(q->url)));
+    if (allow)
+      ok = (*value = tai_strdup(cookie->value)) != NULL;
+  }
+  pthread_mutex_unlock(&jar->mutex);
+  return ok;
+}
+bool tai_network_cookie_set(TaiNetwork *n, const char *host,
+                            const char *value) {
+  return n && tai_cookie_jar_js_set(n->jar, host, value);
+}
+char *tai_network_cookie_get(TaiNetwork *n, const char *host) {
+  return n ? tai_cookie_jar_js_get(n->jar, host) : tai_strdup("");
 }
 /* Keep valid UTF-8 unchanged; replace malformed input as Python
  * decode(errors='replace'). */
@@ -523,12 +594,13 @@ static bool start(TaiRequest *q) {
     if (!ok)
       return false;
   }
-  Cookie *cookie = cookie_valid(q->network, tai_url_host(q->url));
+  char *cookie = NULL;
+  if (!jar_request_cookie(q->network->jar, q, &cookie))
+    return false;
   if (cookie) {
-    const char *site = tai_map_get(&cookie->params, "samesite");
-    bool allow = !(q->payload && q->referrer && site && !strcmp(site, "lax") &&
-                   strcmp(tai_url_host(q->referrer), tai_url_host(q->url)));
-    if (allow && !add_header(q, "Cookie", cookie->value))
+    bool ok = add_header(q, "Cookie", cookie);
+    free(cookie);
+    if (!ok)
       return false;
   }
   /* Disable libcurl's extra Accept and POST content type to retain oracle
@@ -666,7 +738,7 @@ static void complete_transfer(TaiRequest *q, CURLcode code) {
   easy_clear(q);
   const char *cookie = tai_map_get(&q->response->headers, "set-cookie");
   if (cookie &&
-      !cookie_store(q->network, tai_url_host(q->url), cookie, false)) {
+      !jar_store(q->network->jar, tai_url_host(q->url), cookie, false)) {
     fail(q, "out of memory");
     return;
   }
@@ -727,14 +799,15 @@ static void complete_transfer(TaiRequest *q, CURLcode code) {
   cache_store(q);
   q->ready = true;
 }
-TaiNetwork *tai_network_create(void) {
-  if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK)
+TaiNetwork *tai_network_create_with_jar(TaiCookieJar *jar) {
+  if (!jar || curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK)
     return NULL;
   TaiNetwork *n = calloc(1, sizeof(*n));
   if (!n) {
     curl_global_cleanup();
     return NULL;
   }
+  n->jar = jar;
   n->multi = curl_multi_init();
   if (!n->multi) {
     free(n);
@@ -742,6 +815,19 @@ TaiNetwork *tai_network_create(void) {
     return NULL;
   }
   return n;
+}
+TaiNetwork *tai_network_create(void) {
+  TaiCookieJar *jar = tai_cookie_jar_create();
+  TaiNetwork *n = tai_network_create_with_jar(jar);
+  if (!n) {
+    tai_cookie_jar_destroy(jar);
+    return NULL;
+  }
+  n->owns_jar = true;
+  return n;
+}
+TaiCookieJar *tai_network_cookie_jar(TaiNetwork *n) {
+  return n ? n->jar : NULL;
 }
 void tai_network_destroy(TaiNetwork *n) {
   if (!n)
@@ -751,11 +837,8 @@ void tai_network_destroy(TaiNetwork *n) {
     n->requests = q->next;
     request_free(q);
   }
-  while (n->cookies) {
-    Cookie *c = n->cookies;
-    n->cookies = c->next;
-    cookie_free(c);
-  }
+  if (n->owns_jar)
+    tai_cookie_jar_destroy(n->jar);
   while (n->cache) {
     Cache *c = n->cache;
     n->cache = c->next;
@@ -828,7 +911,19 @@ void tai_network_cancel(TaiNetwork *n, TaiRequest *q) {
   }
 }
 size_t tai_network_pending(const TaiNetwork *n) { return n ? n->pending : 0; }
-bool tai_network_poll(TaiNetwork *n, int wait_ms) {
+void tai_network_allow_nested(TaiRequest *request) {
+  if (request)
+    request->nested = true;
+}
+/* A restricted poll drives every transfer but dispatches only requests a
+ * request_until caller waits for and requests marked nested; other ready
+ * requests stay listed for the outer poll, so no other page's script runs
+ * nested. A flag, not a pointer compare, so a freed and reused address never
+ * aliases the waited request. */
+static bool dispatchable(const TaiRequest *q, bool restricted) {
+  return q->ready && (!restricted || q->waited || q->nested);
+}
+static bool network_poll(TaiNetwork *n, int wait_ms, bool restricted) {
   if (!n)
     return false;
   int active = 0;
@@ -836,7 +931,7 @@ bool tai_network_poll(TaiNetwork *n, int wait_ms) {
     return false;
   bool ready = false;
   for (TaiRequest *q = n->requests; q; q = q->next)
-    if (q->ready)
+    if (dispatchable(q, restricted))
       ready = true;
   if (active && !ready && wait_ms > 0) {
     if (curl_multi_poll(n->multi, NULL, 0, wait_ms, NULL) != CURLM_OK)
@@ -857,7 +952,7 @@ bool tai_network_poll(TaiNetwork *n, int wait_ms) {
   /* Detach before calling application code, so callbacks can submit/cancel. */
   for (;;) {
     TaiRequest **slot = &n->requests;
-    while (*slot && !(*slot)->ready)
+    while (*slot && !dispatchable(*slot, restricted))
       slot = &(*slot)->next;
     if (!*slot)
       break;
@@ -876,22 +971,73 @@ bool tai_network_poll(TaiNetwork *n, int wait_ms) {
   }
   return true;
 }
+bool tai_network_poll(TaiNetwork *n, int wait_ms) {
+  return network_poll(n, wait_ms, false);
+}
+bool tai_network_poll_nested(TaiNetwork *n, int wait_ms) {
+  return network_poll(n, wait_ms, true);
+}
 static void sync_done(void *user, TaiResponse *response) {
   *(TaiResponse **)user = response;
 }
-TaiResponse *tai_network_request(TaiNetwork *n, const TaiUrl *url,
-                                 const TaiUrl *referrer, const char *payload,
-                                 const char *origin, const char *policy) {
+static double seconds_now(void) {
+  struct timespec now;
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+    return 0.0;
+  return (double)now.tv_sec + (double)now.tv_nsec / 1e9;
+}
+TaiResponse *tai_network_request_until(
+    TaiNetwork *n, const TaiUrl *url, const TaiUrl *referrer,
+    const char *payload, const char *origin, const char *policy,
+    double timeout_seconds, bool (*service)(void *userdata), void *userdata,
+    TaiWaitStatus *status) {
+  TaiWaitStatus ignored;
+  if (!status)
+    status = &ignored;
+  *status = TAI_WAIT_FAILED;
   TaiResponse *response = NULL;
+  double deadline = timeout_seconds > 0.0 ? seconds_now() + timeout_seconds
+                                          : 0.0;
   TaiRequest *q = tai_network_submit(n, url, referrer, payload, origin, policy,
                                      sync_done, &response);
   if (!q)
     return NULL;
+  q->waited = true;
   while (!response) {
-    if (!tai_network_poll(n, 100)) {
+    if (service && !service(userdata)) {
       tai_network_cancel(n, q);
+      *status = TAI_WAIT_CANCELLED;
+      return NULL;
+    }
+    if (deadline > 0.0 && seconds_now() >= deadline) {
+      tai_network_cancel(n, q);
+      *status = TAI_WAIT_TIMED_OUT;
+      return NULL;
+    }
+    int wait_ms = 100;
+    if (deadline > 0.0) {
+      double left = (deadline - seconds_now()) * 1000.0;
+      if (left < wait_ms)
+        wait_ms = left < 1.0 ? 1 : (int)left;
+    }
+    /* response is set only by this request's callback, which a restricted
+     * poll may run; q is gone once it has. */
+    if (!network_poll(n, wait_ms, true)) {
+      if (!response)
+        tai_network_cancel(n, q);
+      else {
+        tai_response_destroy(response);
+        response = NULL;
+      }
       return NULL;
     }
   }
+  *status = TAI_WAIT_DONE;
   return response;
+}
+TaiResponse *tai_network_request(TaiNetwork *n, const TaiUrl *url,
+                                 const TaiUrl *referrer, const char *payload,
+                                 const char *origin, const char *policy) {
+  return tai_network_request_until(n, url, referrer, payload, origin, policy,
+                                   0.0, NULL, NULL, NULL);
 }

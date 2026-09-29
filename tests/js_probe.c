@@ -1,6 +1,10 @@
 /* Native runner for tests/js_dom_cases.py, driven by tests/js_dom_differential.py.
  *
- *   js_probe HTML_FILE STEPS_FILE
+ *   js_probe HTML_FILE STEPS_FILE [URL [HOST=SET-COOKIE]...]
+ *
+ * URL is the document URL whose host keys document.cookie (none: no host,
+ * like Python's StubTab without a URL); each HOST=SET-COOKIE seeds the jar
+ * as a Set-Cookie header would.
  *
  * STEPS_FILE holds NUL-terminated fields: "js" SOURCE | "dispatch" TYPE
  * SELECTOR | "raf". SOURCE is already wrapped by js_dom_cases.step_source(),
@@ -9,6 +13,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tai/css.h"
 #include "tai/js.h"
+#include "tai/network.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,7 +23,24 @@ typedef struct {
     size_t invalidations;
     size_t removed;
     bool first_output;
+    TaiCookieJar *jar;
+    TaiUrl *url;
 } Counters;
+
+static TaiJsHostStatus cookie_get(void *opaque, char **value) {
+    Counters *counters = opaque;
+    *value = tai_cookie_jar_js_get(counters->jar,
+        counters->url ? tai_url_host(counters->url) : "");
+    return *value ? TAI_JS_HOST_OK : TAI_JS_HOST_NO_MEMORY;
+}
+
+static TaiJsHostStatus cookie_set(void *opaque, const char *value) {
+    Counters *counters = opaque;
+    if (!counters->url) return TAI_JS_HOST_OK;
+    return tai_cookie_jar_js_set(counters->jar, tai_url_host(counters->url),
+                                 value)
+        ? TAI_JS_HOST_OK : TAI_JS_HOST_NO_MEMORY;
+}
 
 static void invalidated(void *opaque) { ((Counters *)opaque)->invalidations++; }
 
@@ -64,8 +86,9 @@ static const char *next_field(const char **cursor, const char *end) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 3) {
-        fputs("usage: js_probe HTML_FILE STEPS_FILE\n", stderr);
+    if (argc < 3) {
+        fputs("usage: js_probe HTML_FILE STEPS_FILE [URL [HOST=SET-COOKIE]...]\n",
+              stderr);
         return 2;
     }
     size_t html_length = 0, steps_length = 0;
@@ -78,9 +101,22 @@ int main(int argc, char **argv) {
         return 1;
     }
     TaiNode *root = tai_document_root(document);
-    Counters counters = {.first_output = true};
+    Counters counters = {.first_output = true,
+                         .jar = tai_cookie_jar_create()};
+    if (argc > 3) counters.url = tai_url_parse(argv[3]);
+    if (!counters.jar || (argc > 3 && !counters.url)) {
+        fputs("js_probe: cannot set up the cookie jar or URL\n", stderr);
+        return 1;
+    }
+    for (int index = 4; index < argc; index++) {
+        char *seed = argv[index], *equals = strchr(seed, '=');
+        if (!equals) return 2;
+        *equals = '\0';
+        if (!tai_cookie_jar_http_set(counters.jar, seed, equals + 1)) return 1;
+    }
     TaiJsHost host = {.invalidated = invalidated, .node_removed = node_removed,
-                      .report = reported, .userdata = &counters};
+                      .report = reported, .cookie_get = cookie_get,
+                      .cookie_set = cookie_set, .userdata = &counters};
 
     fputs("{\"created\":{\"output\":[", stdout);
     TaiJsContext *js = tai_js_create(root, &host, &error);
@@ -153,6 +189,8 @@ int main(int argc, char **argv) {
     }
     fputs("]}\n", stdout);
     tai_js_destroy(js);
+    tai_url_destroy(counters.url);
+    tai_cookie_jar_destroy(counters.jar);
     tai_document_destroy(document);
     free(html);
     free(steps);

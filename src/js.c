@@ -26,6 +26,7 @@ struct TaiJsContext {
     TaiNode *root;
     TaiJsHost host;
     double deadline;
+    double extended; /* seconds of XHR blocking added to this deadline */
     unsigned depth; /* nested JS entries; only the outermost sets the deadline */
     TaiNode **handle_nodes;          /* handle -> node */
     size_t handle_count, handle_capacity;
@@ -42,6 +43,7 @@ static double seconds_now(void) {
 static int interrupt_handler(JSRuntime *runtime, void *opaque) {
     (void)runtime;
     TaiJsContext *js = opaque;
+    if (js->host.cancelled && js->host.cancelled(js->host.userdata)) return 1;
     return js->deadline > 0.0 && seconds_now() >= js->deadline;
 }
 
@@ -54,6 +56,7 @@ static void enter_js(TaiJsContext *js) {
     if (js->depth++ == 0) {
         JS_UpdateStackTop(js->runtime);
         js->deadline = seconds_now() + 2.0;
+        js->extended = 0.0;
     }
 }
 
@@ -541,6 +544,102 @@ static JSValue op_inner_html_set(TaiJsContext *js, int argc, JSValueConst *argv)
     return after_mutation(js, true);
 }
 
+static JSValue host_failure(JSContext *context, TaiJsHostStatus status,
+                            char *message, const char *fallback) {
+    JSValue thrown = status == TAI_JS_HOST_NO_MEMORY
+        ? JS_ThrowOutOfMemory(context)
+        : JS_ThrowPlainError(context, "%s", message ? message : fallback);
+    free(message);
+    return thrown;
+}
+
+/* Python document_cookie_get: the host applies the per-host jar rules. */
+static JSValue op_cookie_get(TaiJsContext *js, int argc, JSValueConst *argv) {
+    (void)argc;
+    (void)argv;
+    if (!js->host.cookie_get) return JS_NewString(js->context, "");
+    char *value = NULL;
+    TaiJsHostStatus status = js->host.cookie_get(js->host.userdata, &value);
+    if (status != TAI_JS_HOST_OK || !value) {
+        free(value);
+        return host_failure(js->context, status == TAI_JS_HOST_OK
+                                ? TAI_JS_HOST_NO_MEMORY : status,
+                            NULL, "document.cookie failed");
+    }
+    JSValue result = JS_NewString(js->context, value);
+    free(value);
+    return result;
+}
+
+/* runtime.js has already called value.toString(). */
+static JSValue op_cookie_set(TaiJsContext *js, int argc, JSValueConst *argv) {
+    (void)argc;
+    if (!js->host.cookie_set) return JS_UNDEFINED;
+    const char *value = JS_ToCString(js->context, argv[0]);
+    if (!value) return JS_EXCEPTION;
+    TaiJsHostStatus status = js->host.cookie_set(js->host.userdata, value);
+    JS_FreeCString(js->context, value);
+    if (status != TAI_JS_HOST_OK)
+        return host_failure(js->context, status, NULL, "document.cookie failed");
+    return JS_UNDEFINED;
+}
+
+/* Python XMLHttpRequest_send(method, url, body): method is only a label. A
+ * non-string URL (open() never called) or body fails in Python's request. */
+static JSValue op_xhr_send(TaiJsContext *js, int argc, JSValueConst *argv) {
+    (void)argc;
+    JSContext *context = js->context;
+    if (!js->host.xhr_send)
+        return JS_ThrowPlainError(context, "XMLHttpRequest is not available");
+    if (!JS_IsString(argv[1]))
+        return JS_ThrowPlainError(context, "XMLHttpRequest URL must be a string");
+    if (!JS_IsNull(argv[2]) && !JS_IsString(argv[2]))
+        return JS_ThrowPlainError(context,
+                                  "XMLHttpRequest body must be a string or null");
+    const char *url = JS_ToCString(context, argv[1]);
+    const char *body = url && JS_IsString(argv[2])
+        ? JS_ToCString(context, argv[2]) : NULL;
+    if (!url || (JS_IsString(argv[2]) && !body)) {
+        JS_FreeCString(context, url);
+        return JS_EXCEPTION;
+    }
+    char *response = NULL, *message = NULL;
+    double started = seconds_now();
+    TaiJsHostStatus status = js->host.xhr_send(js->host.userdata, url, body,
+                                               &response, &message);
+    /* Blocking on the network does not count against the script limit, up
+     * to 30 s per outermost entry so a retry loop still ends. */
+    double blocked = seconds_now() - started;
+    if (blocked > 30.0 - js->extended) blocked = 30.0 - js->extended;
+    if (blocked > 0.0 && js->deadline > 0.0) {
+        js->deadline += blocked;
+        js->extended += blocked;
+    }
+    JS_FreeCString(context, body);
+    JS_FreeCString(context, url);
+    /* QuickJS polls the interrupt handler only every few thousand
+     * operations, which a loop of slow requests may take minutes to reach:
+     * check the deadline and cancellation now, as that interrupt would. */
+    if (interrupt_handler(js->runtime, js)) {
+        free(response);
+        free(message);
+        JS_ThrowInternalError(context, "interrupted");
+        JSValue interrupted = JS_GetException(context);
+        JS_SetUncatchableError(context, interrupted);
+        return JS_Throw(context, interrupted);
+    }
+    if (status == TAI_JS_HOST_OK && response) {
+        free(message);
+        JSValue result = JS_NewString(context, response);
+        free(response);
+        return result;
+    }
+    free(response);
+    return host_failure(context, status == TAI_JS_HOST_OK
+                            ? TAI_JS_HOST_NO_MEMORY : status,
+                        message, "XMLHttpRequest failed");
+}
+
 static const struct {
     const char *name;
     int arguments; /* after the operation name */
@@ -559,6 +658,9 @@ static const struct {
     {"innerHTML_get", 1, op_inner_html_get},
     {"innerHTML_set", 2, op_inner_html_set},
     {"outerHTML_get", 1, op_outer_html_get},
+    {"document_cookie_get", 0, op_cookie_get},
+    {"document_cookie_set", 1, op_cookie_set},
+    {"XMLHttpRequest_send", 3, op_xhr_send},
 };
 
 static JSValue call_python(JSContext *context, JSValueConst this_value,

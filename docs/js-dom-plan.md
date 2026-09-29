@@ -1,6 +1,6 @@
 # JS DOM 補齊：整體計畫與交接
 
-**狀態：實作中（2026-09-29）。** 六項決定皆已確認；切片 0–4 完成，切片 5 起尚未開始。
+**狀態：實作中（2026-09-29）。** 六項決定皆已確認；切片 0–5 完成，切片 6 起尚未開始。
 計畫已經四路獨立驗證（oracle 實跑、native 程式碼、所有權設計、文件一致性），結果已併入本文。
 本工作處理 [ACCEPTANCE.md](../ACCEPTANCE.md) 的「JS-visible DOM mutation、query、event
 propagation/default prevention、XHR 與實際可用 scheduling APIs」，並滿足同檔「ASan 重複
@@ -328,7 +328,8 @@ bridge 內 ID 同步出現後補測。
   但 loader 是單一 poll 迴圈，同步 XHR 會暫停所有分頁的載入，需量測並記錄。
 - **事件期**（SDL 執行緒）：透過 request/response 佇列交給 loader，loader 以獨立 job 處理；
   SDL 端用 `pthread_cond_timedwait` 等待，檢查 `stopping`、task 取消與總時限。**loader 永不等待 SDL
-  執行緒**，避免環形等待。
+  執行緒**，避免環形等待。等待期間不處理 SDL 事件，所有視窗無回應，最長到 libcurl 30 秒總時限
+  （D9，決定 2）。
 - **同步載入路徑**（`session.c`、`main.c` 的 `tai_page_load_request`，headless CLI）在呼叫者執行緒直接使用
   network，host 由該路徑注入。
 - **Deadline：** XHR 阻塞時間不計入 2 秒 JS 上限。
@@ -399,11 +400,12 @@ bridge 內 ID 同步出現後補測。
 | D1 | `log` 與 crash 訊息輸出到 stderr（Python stdout） | native JSON CLI 以 stdout 輸出結果 |
 | D2 | 文件節點數上限 | Python 靠 GC 回收 detached 節點，native 保留到文件銷毀 |
 | D3 | `node.handle` 數值 | 只有確認頁面不可觀察時才列 |
-| D4 | 載入期同步 XHR 會暫停其他分頁載入 | native 單一 loader 迴圈 |
+| D4 | 載入期同步 XHR 期間新的導覽要等它結束才開始；已送出的傳輸照常推進，其他分頁已完成的下載延到 XHR 結束才處理（巢狀 poll 只派送自己的請求與事件期 XHR） | native 單一 loader 迴圈；設計見 [cookie／XHR 設計](js-cookie-xhr-design.md) 10.2 |
 | D5 | 提供 `setTimeout`、`setInterval`／`clearInterval`、非同步 XHR（凍結 oracle 不可用） | 原版 `7d536e0` 意外移除 JS 包裝；使用者 2026-09-29 決定補回 |
 | D6 | 執行 inline `<script>`（Python 只執行有 `src` 的 script），與外部 script 依 source 順序執行；頁面有 CSP `default-src` 時不執行 inline script | 真實網頁大量依賴 inline script；使用者 2026-09-29 決定保留。oracle 比對的頁面含 inline script 時，該腳本造成的 DOM 變化不在 Python 答案內，測試頁面以外部 script 為主 |
 | D7 | Listener 丟錯只影響該 listener：同節點其他 listener 與冒泡照常執行，先前的 `preventDefault` 有效（Python 會中斷整個派送、default action 一律照做） | 真實瀏覽器語意；使用者 2026-09-29 決定。oracle 比對只對「丟錯 listener」情境套用此規則 |
 | D8 | 移除含焦點 input 的子樹時清除焦點（Python 焦點留在脫離的節點，按鍵仍改它的值） | 真實瀏覽器語意；使用者 2026-09-29 指定為切片 4 範圍 |
+| D9 | 事件期同步 XHR 等待期間所有視窗無回應（不重繪、不處理輸入、無法關閉），最長約 30 秒傳輸總時限（跨重新導向）加上 loader 正在執行的單一載入期 script 時間（Python 只卡該 Tab，視窗照常）；設計見 [cookie／XHR 設計](js-cookie-xhr-design.md) 10.5 | native JS 在 SDL 執行緒執行；使用者 2026-09-29 選擇接受（決定 2） |
 
 ## 不在本工作範圍
 
@@ -414,8 +416,12 @@ bridge 內 ID 同步出現後補測。
 1. **Timer 與非同步 XHR：補回。** `setTimeout`、`setInterval`／`clearInterval` 與非同步 XHR 都提供
    （切片 6b，刻意差異 D5）。理由：原版 `7d536e0` 意外移除，且 ACCEPTANCE 要求「實際可用
    scheduling APIs」。`setInterval`／`clearInterval` 原版從未有 JS 包裝（非誤刪），使用者另行確認一併補上。
-2. **cookie／同步 XHR 的執行緒：** 採切片 5 的注入介面＋佇列設計；事件期 XHR 期間該視窗不重繪
-   （與 Python 同步 XHR 阻塞 Tab 相同）。
+2. **cookie／同步 XHR 的執行緒：** 採切片 5 的注入介面＋佇列設計。原理由寫「事件期 XHR 期間該視窗
+   不重繪，與 Python 同步 XHR 阻塞 Tab 相同」，經對照 oracle 修正：Python 的同步 XHR
+   （`JSContext.XMLHttpRequest_send` → `network.run_sync`）只卡該 Tab 的主執行緒，視窗執行緒仍重繪、
+   可切分頁與關閉；native 的 JS 在 SDL 執行緒執行，等待期間**所有視窗**都不重繪、不處理輸入、無法
+   關閉，最長到 libcurl 總時限 30 秒（連線 10 秒）。使用者 2026-09-29 在三個選項（接受卡住／等待中只
+   處理關閉／每分頁獨立 JS 執行緒）中選擇**接受卡住**，記為刻意差異 D9。
 3. **`log` 與 crash 訊息：** 輸出到 stderr（D1）。
 4. **文件節點數上限：** 1,000,000，超過丟 JS 錯誤（D2）。
 5. **Inline script：保留執行，CSP 下阻擋**，記為刻意差異 D6。比照真實瀏覽器：頁面有有效的 CSP

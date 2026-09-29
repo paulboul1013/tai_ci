@@ -5,7 +5,9 @@ The frozen Python browser (a real BrowserApp and Tab under SDL's dummy video
 driver) loads the tests/js_page_fixture.py pages from a 127.0.0.1 server and
 replays its scenarios: load-time mutation, click listeners that mutate the
 DOM and the title, a throwing listener, a fragment link whose listener moves
-the target, and a keydown listener that removes the focused input. Each
+the target, a keydown listener that removes the focused input, and
+synchronous XHR with document.cookie (load time, in a click listener, under
+CSP and Referrer-Policy, and against a server slower than 2 s). Each
 checkpoint is taken after a committed frame. The Tab viewport size is recorded
 so the native side lays the pages out at the same size.
 
@@ -77,8 +79,10 @@ def checkpoint(probe, window, tab):
     title = probe.tab_call(window, tab, tab.get_title)
     focus = tab.focus.attributes.get("id") if tab.focus else None
     return {
-        # dom_value shares the live attribute dicts: copy them now.
-        "dom": json.loads(json.dumps(oracle.dom_value(tab.nodes))),
+        # dom_value shares the live attribute dicts: copy them now. XHR
+        # results carry fixture URLs, so the port is normalized.
+        "dom": json.loads(probe.server.normalize(
+            json.dumps(oracle.dom_value(tab.nodes)))),
         "title": "" if title == "Tai Gar" else title,
         "scroll": tab.scroll,
         "url": probe.server.normalize(str(tab.url)),

@@ -49,6 +49,9 @@ struct TaiPage {
     char *fragment_change;
     TaiUrl *fragment_previous_url;
     double fragment_previous_scroll;
+    TaiPageNet net;
+    TaiMap *csp_origins;     /* NULL: no valid CSP default-src */
+    char *referrer_policy;   /* Python normalize_referrer_policy; NULL: none */
 };
 
 static bool diagnostic(char **error, const char *message) {
@@ -238,6 +241,124 @@ static void node_removed(void *opaque, TaiNode *node) {
         }
 }
 
+/* ---- document.cookie and XMLHttpRequest (Python JSContext) ---------------- */
+
+static TaiJsHostStatus page_cookie_get(void *opaque, char **value) {
+    TaiPage *page = opaque;
+    const char *host = tai_url_host(page->url);
+    *value = page->net.cookies && *host
+        ? tai_cookie_jar_js_get(page->net.cookies, host) : tai_strdup("");
+    return *value ? TAI_JS_HOST_OK : TAI_JS_HOST_NO_MEMORY;
+}
+
+static TaiJsHostStatus page_cookie_set(void *opaque, const char *value) {
+    TaiPage *page = opaque;
+    const char *host = tai_url_host(page->url);
+    if (!page->net.cookies || !*host) return TAI_JS_HOST_OK;
+    return tai_cookie_jar_js_set(page->net.cookies, host, value)
+        ? TAI_JS_HOST_OK : TAI_JS_HOST_NO_MEMORY;
+}
+
+static TaiJsHostStatus host_error(char **message, const char *text) {
+    *message = tai_strdup(text);
+    return *message ? TAI_JS_HOST_ERROR : TAI_JS_HOST_NO_MEMORY;
+}
+
+/* Python XMLHttpRequest_send: resolve against the page URL, CSP, Origin on
+ * cross-origin requests and the CORS check on their response. */
+static TaiJsHostStatus page_xhr_send(void *opaque, const char *text,
+                                     const char *body, char **out,
+                                     char **message) {
+    TaiPage *page = opaque;
+    if (!page->net.request)
+        return host_error(message, "XMLHttpRequest is not available");
+    TaiUrl *target = tai_url_resolve(page->url, text);
+    if (!target) return host_error(message, "XMLHttpRequest URL is invalid");
+    if (!allowed(page->csp_origins, target)) {
+        tai_url_destroy(target);
+        return host_error(message, "Cross-origin XHR blocked by CSP");
+    }
+    const char *page_origin = tai_url_origin(page->url);
+    bool cross = strcmp(tai_url_origin(target), page_origin) != 0;
+    TaiResponse *response = page->net.request(
+        page->net.userdata, target, page->url, body,
+        cross ? page_origin : NULL, page->referrer_policy, message);
+    tai_url_destroy(target);
+    if (!response)
+        return *message ? TAI_JS_HOST_ERROR : TAI_JS_HOST_NO_MEMORY;
+    TaiJsHostStatus status = TAI_JS_HOST_OK;
+    if (response->error) {
+        status = host_error(message, response->error);
+    } else if (cross) {
+        const char *allow = tai_map_get(&response->headers,
+                                        "access-control-allow-origin");
+        if (!allow || (strcmp(allow, page_origin) && strcmp(allow, "*")))
+            status = host_error(message, "Cross-origin XHR blocked by CORS");
+    }
+    if (status == TAI_JS_HOST_OK) {
+        *out = response->body ? response->body : tai_strdup("");
+        response->body = NULL;
+        if (!*out) status = TAI_JS_HOST_NO_MEMORY;
+    }
+    tai_response_destroy(response);
+    return status;
+}
+
+static bool page_js_cancelled(void *opaque) {
+    TaiPage *page = opaque;
+    return page->net.cancelled && page->net.cancelled(page->net.userdata);
+}
+
+char *tai_page_net_wait_message(TaiWaitStatus status) {
+    switch (status) {
+    case TAI_WAIT_CANCELLED: return tai_strdup("XMLHttpRequest cancelled");
+    case TAI_WAIT_TIMED_OUT: return tai_strdup("XMLHttpRequest timed out");
+    case TAI_WAIT_DONE:
+    case TAI_WAIT_FAILED: break;
+    }
+    return tai_strdup("XMLHttpRequest failed");
+}
+
+TaiResponse *tai_page_net_direct_request(void *network, const TaiUrl *url,
+    const TaiUrl *referrer, const char *payload, const char *origin,
+    const char *referrer_policy, char **message) {
+    TaiWaitStatus status = TAI_WAIT_FAILED;
+    TaiResponse *response = tai_network_request_until(
+        network, url, referrer, payload, origin, referrer_policy,
+        TAI_XHR_TIMEOUT_SECONDS, NULL, NULL, &status);
+    if (!response) *message = tai_page_net_wait_message(status);
+    return response;
+}
+
+void tai_page_set_net(TaiPage *page, const TaiPageNet *net) {
+    if (!page) return;
+    page->net = net ? *net : (TaiPageNet){0};
+}
+
+static void title_strip(char *text);
+
+/* Python normalize_referrer_policy: strip, casefold, keep two values. */
+static bool referrer_policy(const TaiMap *headers, char **policy) {
+    *policy = NULL;
+    const char *value = tai_map_get(headers, "referrer-policy");
+    if (!value) return true;
+    char *stripped = tai_strdup(value);
+    if (!stripped) return false;
+    title_strip(stripped);
+    utf8proc_uint8_t *folded = NULL;
+    utf8proc_ssize_t size = utf8proc_map((const utf8proc_uint8_t *)stripped, 0,
+        &folded, UTF8PROC_NULLTERM | UTF8PROC_STABLE | UTF8PROC_CASEFOLD);
+    free(stripped);
+    if (size < 0) return false;
+    if (!strcmp((char *)folded, "no-referrer") ||
+        !strcmp((char *)folded, "same-origin")) {
+        *policy = (char *)folded;
+    } else {
+        free(folded);
+    }
+    return true;
+}
+
 static bool node_connected(const TaiPage *page, const TaiNode *node) {
     while (node->parent) node = node->parent;
     return node == tai_document_root(page->document);
@@ -292,24 +413,41 @@ static bool page_prepare_document(TaiPage *page, const TaiUrl *url,
         diagnostic(error, "content security policy allocation failed");
         return false;
     }
-    bool collected = collect_resources(tai_document_root(page->document), url,
-                                       origins, resources, resource_count);
-    if (origins) { tai_map_clear(origins); free(origins); }
-    if (!collected) {
+    page->csp_origins = origins; /* XHR checks it for the page's lifetime */
+    if (!referrer_policy(&response->headers, &page->referrer_policy)) {
+        diagnostic(error, "referrer policy allocation failed");
+        return false;
+    }
+    if (!collect_resources(tai_document_root(page->document), url, origins,
+                           resources, resource_count)) {
         diagnostic(error, "page resource allocation failed");
         return false;
     }
     TaiJsHost host = {.invalidated = invalidated,
-                      .node_removed = node_removed, .userdata = page};
+                      .node_removed = node_removed,
+                      .cookie_get = page_cookie_get,
+                      .cookie_set = page_cookie_set,
+                      .xhr_send = page_xhr_send,
+                      .cancelled = page_js_cancelled, .userdata = page};
     page->javascript = tai_js_create(tai_document_root(page->document), &host,
                                      error);
     return page->javascript != NULL;
+}
+
+/* Between load-time scripts the owner may service other work or report that
+ * the load was cancelled (then the rest is skipped). */
+static bool page_checkpoint(TaiPage *page, char **error) {
+    if (!page->net.checkpoint || page->net.checkpoint(page->net.userdata))
+        return true;
+    return diagnostic(error, "navigation cancelled");
 }
 
 static bool page_apply_resources(TaiPage *page, Resource *resources,
                                  size_t resource_count, char **error) {
     for (size_t index = 0; index < resource_count; index++) {
         Resource *resource = &resources[index];
+        if (resource->kind == RESOURCE_SCRIPT && !page_checkpoint(page, error))
+            return false;
         const char *content = resource->body;
         if (resource->url) {
             if (!resource->response || resource->response->error) continue;
@@ -329,6 +467,7 @@ static bool page_apply_resources(TaiPage *page, Resource *resources,
 }
 
 static bool page_finish_visual(TaiPage *page, char **error) {
+    if (!page_checkpoint(page, error)) return false;
     /* Load-time scripts have finished; the first frame below includes them. */
     page->dirty = false;
     if (!tai_css_style(tai_document_root(page->document), page->styles, error))
@@ -356,6 +495,10 @@ TaiPage *tai_page_load_request(TaiNetwork *network, const TaiUrl *url,
     Resource *resources = NULL;
     size_t resource_count = 0;
     if (!page) goto fail;
+    /* Loading and later events both run on this, the network's, thread. */
+    page->net = (TaiPageNet){.request = tai_page_net_direct_request,
+                             .cookies = tai_network_cookie_jar(network),
+                             .userdata = network};
     response = tai_network_request(network, url, referrer, payload, NULL, NULL);
     if (!response) {
         diagnostic(error, "network response allocation failed");
@@ -584,7 +727,8 @@ static void page_load_request_done(void *opaque, TaiResponse *response) {
 TaiPageLoad *tai_page_load_async(TaiNetwork *network, const TaiUrl *url,
     const TaiUrl *referrer, const char *payload, const char *default_css,
     double viewport_width, double viewport_height, bool rtl,
-    TaiPageLoadDone done, void *userdata, char **error) {
+    const TaiPageNet *net, TaiPageLoadDone done, void *userdata,
+    char **error) {
     if (error) { free(*error); *error = NULL; }
     if (!network || !url || !default_css || !done) {
         diagnostic(error, "invalid asynchronous page load input");
@@ -617,6 +761,7 @@ TaiPageLoad *tai_page_load_async(TaiNetwork *network, const TaiUrl *url,
         page_load_destroy(load);
         return NULL;
     }
+    tai_page_set_net(load->page, net);
     TaiPageLoadRequest *request = calloc(1, sizeof(*request));
     if (!request) {
         page_load_destroy(load);
@@ -687,8 +832,8 @@ static bool decode_internal_links(TaiNode *node) {
 
 TaiPageLoad *tai_page_load_async_markup(TaiNetwork *network, const TaiUrl *url,
     const char *markup, const char *default_css, double viewport_width,
-    double viewport_height, bool rtl, TaiPageLoadDone done, void *userdata,
-    char **error) {
+    double viewport_height, bool rtl, const TaiPageNet *net,
+    TaiPageLoadDone done, void *userdata, char **error) {
     if (error) { free(*error); *error = NULL; }
     if (!network || !url || strcmp(tai_url_scheme(url), "about") ||
         tai_url_view_source(url) || !markup || !default_css || !done) {
@@ -698,6 +843,7 @@ TaiPageLoad *tai_page_load_async_markup(TaiNetwork *network, const TaiUrl *url,
     TaiPage *page = page_create(url, viewport_width, viewport_height, rtl,
                                 error);
     if (!page) return NULL;
+    tai_page_set_net(page, net);
 
     TaiResponse response = {.body = (char *)markup, .length = strlen(markup),
                             .status = 200};
@@ -777,6 +923,11 @@ void tai_page_destroy(TaiPage *page) {
     tai_js_destroy(page->javascript);
     tai_css_destroy(page->styles);
     tai_document_destroy(page->document);
+    if (page->csp_origins) {
+        tai_map_clear(page->csp_origins);
+        free(page->csp_origins);
+    }
+    free(page->referrer_policy);
     tai_url_destroy(page->url);
     free(page);
 }

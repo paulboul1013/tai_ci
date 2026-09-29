@@ -20,9 +20,47 @@ typedef enum {
   TAI_PAGE_KEY_RETURN
 } TaiPageKey;
 
+/* How a page's scripts reach the network: document.cookie and synchronous
+ * XMLHttpRequest. The owner that runs the page's JS injects it; every
+ * pointer is borrowed and must outlive the page's use of it.
+ *   request     sends one request and blocks until it completes, on the
+ *               thread running the page's JS. Returns an owned response (a
+ *               transport failure sets response->error), or NULL with an
+ *               owned *message (NULL means out of memory)
+ *   checkpoint  called between load-time scripts; may service other work.
+ *               false means the load was cancelled: the remaining scripts
+ *               are skipped and the load fails. May be NULL
+ *   cancelled   lock-free; true stops the running script. May be NULL
+ *   cookies     the shared jar; NULL makes document.cookie read "" */
+typedef struct {
+    TaiResponse *(*request)(void *userdata, const TaiUrl *url,
+                            const TaiUrl *referrer, const char *payload,
+                            const char *origin, const char *referrer_policy,
+                            char **message);
+    bool (*checkpoint)(void *userdata);
+    bool (*cancelled)(void *userdata);
+    TaiCookieJar *cookies;
+    void *userdata;
+} TaiPageNet;
+/* Total time limit of one synchronous XMLHttpRequest, across redirects. */
+#define TAI_XHR_TIMEOUT_SECONDS 30.0
+/* The owned JS error message for a request that did not complete, or NULL
+ * when allocation fails. */
+char *tai_page_net_wait_message(TaiWaitStatus status);
+/* A TaiPageNet.request for userdata = a TaiNetwork used directly on its
+ * owner thread (headless and single-page paths). */
+TaiResponse *tai_page_net_direct_request(void *network, const TaiUrl *url,
+    const TaiUrl *referrer, const char *payload, const char *origin,
+    const char *referrer_policy, char **message);
+/* Replaces the page's net (copied; the pointed-to objects are not). Only the
+ * thread that currently owns the page may call it, never while its JS runs. */
+void tai_page_set_net(TaiPage *page, const TaiPageNet *net);
+
 /* Async page construction is driven only by the TaiNetwork owner thread. The
  * load borrows network until completion or cancellation; the network must
- * outlive that operation.
+ * outlive that operation. net (may be NULL: no XHR, no cookies) is copied
+ * into the page for its load-time scripts; the owner replaces it with
+ * tai_page_set_net before the page runs JS on another thread.
  * Completion transfers page and owned error to done. A non-NULL page with
  * network_failure=true is the Python-compatible Network or Certificate Error
  * document for the requested URL.
@@ -32,7 +70,7 @@ typedef void (*TaiPageLoadDone)(void *userdata, TaiPage *page,
 TaiPageLoad *tai_page_load_async(TaiNetwork *network, const TaiUrl *url,
     const TaiUrl *referrer, const char *payload, const char *default_css,
     double viewport_width, double viewport_height, bool rtl,
-    TaiPageLoadDone done, void *userdata, char **error);
+    const TaiPageNet *net, TaiPageLoadDone done, void *userdata, char **error);
 /* Builds generated HTML at an about: URL through the normal document, inline
  * resource, style, layout and display paths. The markup is borrowed only for
  * this call. External resource references are not fetched. Valid input always
@@ -41,15 +79,17 @@ TaiPageLoad *tai_page_load_async(TaiNetwork *network, const TaiUrl *url,
  * create the page invokes no callback and sets *error. */
 TaiPageLoad *tai_page_load_async_markup(TaiNetwork *network, const TaiUrl *url,
     const char *markup, const char *default_css, double viewport_width,
-    double viewport_height, bool rtl, TaiPageLoadDone done, void *userdata,
-    char **error);
+    double viewport_height, bool rtl, const TaiPageNet *net,
+    TaiPageLoadDone done, void *userdata, char **error);
 /* Cancels all outstanding document/subresource requests and destroys partial
  * construction. Must run on the same thread that started the load, while the
  * borrowed network is still alive. */
 void tai_page_load_async_cancel(TaiPageLoad *load);
 
 /* Loads a stable page state synchronously for headless use. Network ownership
- * remains with the caller. default_css is copied through the parsed stylesheet.
+ * remains with the caller. The page's scripts use network and its cookie jar
+ * directly on the calling thread, so the page must be destroyed before the
+ * network and its JS must run on the network's owner thread. default_css is copied through the parsed stylesheet.
  * The page owns URL, response-derived DOM, CSS, JS and layout in destruction
  * order. External resources are discovered once in source order. */
 TaiPage *tai_page_load(TaiNetwork *network, const TaiUrl *url,

@@ -250,6 +250,13 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/js_dom_integration.py"
     $<TARGET_FILE:js_page_probe>
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
+  add_executable(test_tabset_xhr tests/test_tabset_xhr.c)
+  target_link_libraries(test_tabset_xhr PRIVATE tai_core)
+  target_compile_options(test_tabset_xhr PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME tabset_xhr COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/tabset_xhr_integration.py"
+    $<TARGET_FILE:test_tabset_xhr>
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
   add_executable(test_page_title tests/test_page_title.c)
   target_link_libraries(test_page_title PRIVATE tai_core)
   target_compile_options(test_page_title PRIVATE -Wall -Wextra -Wpedantic -Werror)

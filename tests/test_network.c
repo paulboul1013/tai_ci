@@ -1,7 +1,14 @@
+#define _POSIX_C_SOURCE 200809L
 #include "tai/network.h"
+#include <arpa/inet.h>
 #include <assert.h>
+#include <netinet/in.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <time.h>
+#include <unistd.h>
 static int calls;
 static void done(void *user, TaiResponse *r) {
   (void)user;
@@ -67,6 +74,121 @@ static void integration(TaiNetwork *n, const char *base) {
     assert(tai_network_poll(n, 100));
   assert(calls == 4);
   tai_url_destroy(u);
+}
+/* Two threads share one jar while a third uses it through a network: the
+ * jar's mutex must keep every read consistent (ASan catches races that
+ * corrupt the list; TSan is not in the toolchain). */
+typedef struct {
+  TaiCookieJar *jar;
+  const char *host;
+} JarWorker;
+static void *jar_worker(void *opaque) {
+  JarWorker *worker = opaque;
+  for (int i = 0; i < 20000; i++) {
+    char value[64];
+    snprintf(value, sizeof(value), "n=%d; SameSite=Lax", i);
+    assert(tai_cookie_jar_js_set(worker->jar, worker->host, value));
+    char *read = tai_cookie_jar_js_get(worker->jar, worker->host);
+    assert(read && !strncmp(read, "n=", 2) && strstr(read, "samesite=lax"));
+    free(read);
+    if (i % 100 == 0)
+      assert(tai_cookie_jar_http_set(worker->jar, worker->host,
+                                     "n=http; Expires=Thu, 01 Jan 1970 "
+                                     "00:00:00 GMT"));
+  }
+  return NULL;
+}
+static void shared_jar(void) {
+  TaiCookieJar *jar = tai_cookie_jar_create();
+  assert(jar);
+  TaiNetwork *n = tai_network_create_with_jar(jar);
+  assert(n && tai_network_cookie_jar(n) == jar);
+  JarWorker a = {jar, "a.test"}, b = {jar, "b.test"};
+  pthread_t ta, tb;
+  assert(!pthread_create(&ta, NULL, jar_worker, &a));
+  assert(!pthread_create(&tb, NULL, jar_worker, &b));
+  for (int i = 0; i < 20000; i++) {
+    char *read = tai_network_cookie_get(n, i % 2 ? "a.test" : "b.test");
+    assert(read);
+    free(read);
+  }
+  assert(!pthread_join(ta, NULL) && !pthread_join(tb, NULL));
+  /* The network borrows the jar: destroying it leaves the jar usable. */
+  tai_network_destroy(n);
+  assert(tai_cookie_jar_http_set(jar, "c.test", "sid=1; HttpOnly"));
+  char *hidden = tai_cookie_jar_js_get(jar, "c.test");
+  assert(hidden && !*hidden);
+  free(hidden);
+  assert(tai_cookie_jar_js_set(jar, "c.test", "sid=2"));
+  tai_cookie_jar_destroy(jar);
+}
+static void count_done(void *user, TaiResponse *r) {
+  (*(int *)user)++;
+  tai_response_destroy(r);
+}
+/* A restricted poll leaves other completions for the outer poll unless
+ * they were marked nested. */
+static void restricted_poll(void) {
+  TaiNetwork *n = tai_network_create();
+  TaiUrl *u = tai_url_parse("data:text/plain,x");
+  assert(n && u);
+  int other = 0, nested = 0;
+  assert(tai_network_submit(n, u, NULL, NULL, NULL, NULL, count_done, &other));
+  TaiRequest *marked =
+      tai_network_submit(n, u, NULL, NULL, NULL, NULL, count_done, &nested);
+  assert(marked);
+  tai_network_allow_nested(marked);
+  TaiWaitStatus status = TAI_WAIT_FAILED;
+  TaiResponse *r = tai_network_request_until(n, u, NULL, NULL, NULL, NULL, 0.0,
+                                             NULL, NULL, &status);
+  assert(r && status == TAI_WAIT_DONE && !strcmp(r->body, "x"));
+  tai_response_destroy(r);
+  assert(other == 0 && nested == 1 && tai_network_pending(n) == 1);
+  assert(tai_network_poll_nested(n, 0) && other == 0);
+  assert(tai_network_poll(n, 0) && other == 1 && !tai_network_pending(n));
+  tai_url_destroy(u);
+  tai_network_destroy(n);
+}
+/* A peer that accepts but never answers: only cancellation or the total
+ * limit ends the wait. */
+static int service_calls;
+static bool give_up_after_three(void *user) {
+  (void)user;
+  return ++service_calls < 3;
+}
+static double now_seconds(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (double)t.tv_sec + (double)t.tv_nsec / 1e9;
+}
+static void stalled_requests(void) {
+  int listener = socket(AF_INET, SOCK_STREAM, 0);
+  assert(listener >= 0);
+  struct sockaddr_in address = {.sin_family = AF_INET,
+                                .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+  socklen_t length = sizeof(address);
+  assert(!bind(listener, (struct sockaddr *)&address, sizeof(address)) &&
+         !listen(listener, 8) &&
+         !getsockname(listener, (struct sockaddr *)&address, &length));
+  char text[64];
+  snprintf(text, sizeof(text), "http://127.0.0.1:%d/", ntohs(address.sin_port));
+  TaiNetwork *n = tai_network_create();
+  TaiUrl *u = tai_url_parse(text);
+  assert(n && u);
+  TaiWaitStatus status = TAI_WAIT_DONE;
+  assert(!tai_network_request_until(n, u, NULL, NULL, NULL, NULL, 0.0,
+                                    give_up_after_three, NULL, &status));
+  assert(status == TAI_WAIT_CANCELLED && service_calls == 3 &&
+         !tai_network_pending(n));
+  double started = now_seconds();
+  assert(!tai_network_request_until(n, u, NULL, NULL, NULL, NULL, 0.3, NULL,
+                                    NULL, &status));
+  double waited = now_seconds() - started;
+  assert(status == TAI_WAIT_TIMED_OUT && waited >= 0.29 && waited < 2.0 &&
+         !tai_network_pending(n));
+  tai_url_destroy(u);
+  tai_network_destroy(n);
+  close(listener);
 }
 int main(int argc, char **argv) {
   TaiNetwork *n = tai_network_create();
@@ -135,6 +257,9 @@ int main(int argc, char **argv) {
     assert(tai_network_submit(n, u, NULL, NULL, NULL, NULL, done, NULL));
     assert(tai_network_poll(n, 0));
     assert(calls == 1);
+    shared_jar();
+    restricted_poll();
+    stalled_requests();
   }
   tai_url_destroy(u);
   tai_network_destroy(n);

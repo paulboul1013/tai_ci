@@ -1,16 +1,23 @@
 /* Native half of tests/js_dom_integration.py: loads one tests/js_page_fixture.py
  * page and replays its actions through the public TaiPage input seam.
  *
- *   js_page_probe CSS WIDTH HEIGHT URL ACTION...
+ *   js_page_probe [--tabset] CSS WIDTH HEIGHT URL ACTION...
  *
  * ACTION is click:ID, type:TEXT or state:LABEL (see js_page_fixture.py). The
- * output is one JSON object mapping each label to its checkpoint. */
-#include "tai/browser.h"
+ * output is one JSON object mapping each label to its checkpoint.
+ *
+ * By default the page loads synchronously on this thread (the headless path:
+ * scripts use the network directly). --tabset loads it through a TaiTabSet:
+ * load-time scripts run on the loader thread, and the actions run here, as
+ * on the SDL thread, so event-time XHR goes through the loader's queue. */
+#define _POSIX_C_SOURCE 200809L
+#include "tai/tabset.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static TaiNode *find_id(TaiNode *node, const char *id) {
   const char *value =
@@ -123,27 +130,61 @@ static bool run_action(TaiPage *page, const char *action, bool *first,
   return false;
 }
 
+static TaiPage *tabset_page(TaiTabSet *tabs, const char *url, double width,
+                            double height, char **error) {
+  if (!tai_tabset_start(tabs, url, width, height, error)) return NULL;
+  TaiTabSetView view = {0};
+  for (int attempt = 0; attempt < 6000; attempt++) {
+    bool changed = false;
+    if (!tai_tabset_pump(tabs, &changed, error) ||
+        !tai_tabset_view(tabs, &view))
+      return NULL;
+    if (!view.loading) return view.page;
+    struct timespec pause = {0, 10000000};
+    nanosleep(&pause, NULL);
+  }
+  fputs("page did not load within 60 s\n", stderr);
+  return NULL;
+}
+
 int main(int argc, char **argv) {
+  bool use_tabset = argc > 1 && !strcmp(argv[1], "--tabset");
+  if (use_tabset) {
+    argv++;
+    argc--;
+  }
   if (argc < 5) {
-    fputs("usage: js_page_probe CSS WIDTH HEIGHT URL ACTION...\n", stderr);
+    fputs("usage: js_page_probe [--tabset] CSS WIDTH HEIGHT URL ACTION...\n",
+          stderr);
     return 2;
   }
   size_t css_length = 0;
   char *css = tai_read_file(argv[1], &css_length);
   char *error = NULL;
-  TaiNetwork *network = tai_network_create();
+  double width = strtod(argv[2], NULL), height = strtod(argv[3], NULL);
+  TaiNetwork *network = NULL;
+  TaiTabSet *tabs = NULL;
   TaiUrl *url = tai_url_parse(argv[4]);
-  TaiPage *page = css && network && url
-                      ? tai_page_load(network, url, css, strtod(argv[2], NULL),
-                                      strtod(argv[3], NULL), false, &error)
-                      : NULL;
+  TaiPage *page = NULL;
+  if (css && url && use_tabset) {
+    tabs = tai_tabset_create_with_home_url(css, false, "about:blank", &error);
+    page = tabs ? tabset_page(tabs, argv[4], width, height, &error) : NULL;
+  } else if (css && url) {
+    network = tai_network_create();
+    page = network ? tai_page_load(network, url, css, width, height, false,
+                                   &error)
+                   : NULL;
+  }
   bool ok = page != NULL, first = true;
   if (ok) fputc('{', stdout);
   for (int index = 5; ok && index < argc; index++)
     ok = run_action(page, argv[index], &first, &error);
   if (ok) puts("}");
   else fprintf(stderr, "js_page_probe failed: %s\n", error ? error : "");
-  tai_page_destroy(page);
+  /* The tab set owns its committed page; the headless page goes before the
+   * network its scripts use. */
+  if (tabs) tai_tabset_destroy(tabs);
+  else tai_page_destroy(page);
   tai_url_destroy(url);
   tai_network_destroy(network);
   free(css);

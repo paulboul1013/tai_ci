@@ -8,7 +8,10 @@ tests/js_page_probe.c loads each tests/js_page_fixture.py page from a
 actions: load-time mutation, click listeners that change the DOM and the
 title, a throwing listener, a fragment link whose listener moves the target
 (the scroll uses the rebuilt layout) and a keydown listener that removes the
-focused input.
+focused input; and synchronous XHR with document.cookie (slice 5). Every
+scenario runs twice: headless (scripts use the network on the probe's
+thread) and --tabset (load-time scripts on the loader thread, event-time
+XHR queued to it from the probe's thread, as from the SDL thread).
 
 Intentional difference applied, with the reason:
 * D8, focus.after_key.focus: removing the focused input blurs it (real
@@ -62,14 +65,18 @@ def main():
     checkpoints = 0
     server = js_page_fixture.JsPageServer()
     try:
-        for name, path, _heading, actions in js_page_fixture.SCENARIOS:
+        for mode, (name, path, _heading, actions) in (
+                (mode, scenario) for mode in ((), ("--tabset",))
+                for scenario in js_page_fixture.SCENARIOS):
+            label = name + (mode[0] if mode else "")
             result = subprocess.run(
-                [probe, css, repr(viewport["width"]), repr(viewport["height"]),
-                 server.url(path), *arguments(actions)],
+                [probe, *mode, css, repr(viewport["width"]),
+                 repr(viewport["height"]), server.url(path),
+                 *arguments(actions)],
                 capture_output=True, text=True, timeout=60)
             if result.returncode != 0:
                 failures.append("{}: probe failed: {}".format(
-                    name, result.stderr.strip()))
+                    label, result.stderr.strip()))
                 continue
             native = json.loads(server.normalize(result.stdout))
             expected = copy.deepcopy(oracle["scenarios"][name])
@@ -78,9 +85,9 @@ def main():
                     expected[step]["focus"] = None
             if set(native) != set(expected):
                 failures.append("{}: checkpoints {} vs oracle {}".format(
-                    name, sorted(native), sorted(expected)))
+                    label, sorted(native), sorted(expected)))
             for step in sorted(set(native) & set(expected)):
-                compare("{}.{}".format(name, step), expected[step],
+                compare("{}.{}".format(label, step), expected[step],
                         native[step], failures)
                 checkpoints += 1
     finally:
@@ -88,7 +95,7 @@ def main():
     if failures:
         raise SystemExit("JS page differences:\n  " + "\n  ".join(failures))
     print("native JS pages match tests/fixtures/js_page_oracle.json "
-          "({} scenarios, {} checkpoints)".format(
+          "({} scenarios in 2 modes, {} checkpoints)".format(
               len(js_page_fixture.SCENARIOS), checkpoints))
 
 

@@ -689,6 +689,751 @@
         "title": "Throw",
         "url": "http://127.0.0.1:<PORT>/throw"
       }
+    },
+    "xhr": {
+      "loaded": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "XHR"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/xhr.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "xhr"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "out"
+                  },
+                  "children": [
+                    {
+                      "attributes": {
+                        "class": "get",
+                        "data-v": "ok:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr|c=-|b=-|q=-"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "post",
+                        "data-v": "ok:m=POST|o=-|r=http://127.0.0.1:<PORT>/xhr|c=-|b=a=1&b=2|q=-"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "post-empty",
+                        "data-v": "ok:m=POST|o=-|r=http://127.0.0.1:<PORT>/xhr|c=-|b=|q=-"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "relative",
+                        "data-v": "ok:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr|c=-|b=-|q=q=1"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "fragment",
+                        "data-v": "ok:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr|c=-|b=-|q=-"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "js-cookie",
+                        "data-v": "ok:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr|c=k=v|b=-|q=-"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "set-cookie",
+                        "data-v": "ok:set"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cookie-after",
+                        "data-v": "srv=1; path=/"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "http-only",
+                        "data-v": "ok:set"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cookie-hidden",
+                        "data-v": ""
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cookie-kept",
+                        "data-v": "ok:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr|c=sid=s|b=-|q=-"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cross-page",
+                        "data-v": "ok:m=GET|o=http://127.0.0.1:<PORT>|r=http://127.0.0.1:<PORT>/xhr|c=-|b=-|q=acao=page"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cross-star",
+                        "data-v": "ok:m=POST|o=http://127.0.0.1:<PORT>|r=http://127.0.0.1:<PORT>/xhr|c=-|b=p|q=acao=star"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cross-wrong",
+                        "data-v": "error:cors"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cross-none",
+                        "data-v": "error:cors"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "redirect",
+                        "data-v": "error:other"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "redirect-absolute",
+                        "data-v": "ok:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr|c=sid=s|b=-|q=from=redirect"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "missing",
+                        "data-v": "ok:missing"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "refused",
+                        "data-v": "error:other"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "data",
+                        "data-v": "error:cors"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "no-open",
+                        "data-v": "error:other"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "async",
+                        "data-v": "error:other"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "label",
+                        "data-v": "ok:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr|c=sid=s|b=-|q=-"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "XHR",
+        "url": "http://127.0.0.1:<PORT>/xhr"
+      }
+    },
+    "xhr_click": {
+      "first_click": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Fetched 1"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/xhr-click.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "xhr click"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "target"
+                  },
+                  "children": [
+                    {
+                      "text": "Fetch"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "id": "out"
+                  },
+                  "children": [
+                    {
+                      "attributes": {
+                        "class": "click",
+                        "data-v": "ok:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr-click|c=tab=1|b=-|q=n=1"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cross",
+                        "data-v": "ok:m=GET|o=http://127.0.0.1:<PORT>|r=http://127.0.0.1:<PORT>/xhr-click|c=-|b=-|q=acao=star"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cookie",
+                        "data-v": "tab=1"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "Fetched 1",
+        "url": "http://127.0.0.1:<PORT>/xhr-click"
+      },
+      "loaded": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "XHR click"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/xhr-click.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "xhr click"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "target"
+                  },
+                  "children": [
+                    {
+                      "text": "Fetch"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "id": "out"
+                  },
+                  "children": [],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "XHR click",
+        "url": "http://127.0.0.1:<PORT>/xhr-click"
+      },
+      "second_click": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Fetched 2"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/xhr-click.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "xhr click"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "target"
+                  },
+                  "children": [
+                    {
+                      "text": "Fetch"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "id": "out"
+                  },
+                  "children": [
+                    {
+                      "attributes": {
+                        "class": "click",
+                        "data-v": "ok:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr-click|c=tab=1|b=-|q=n=1"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cross",
+                        "data-v": "ok:m=GET|o=http://127.0.0.1:<PORT>|r=http://127.0.0.1:<PORT>/xhr-click|c=-|b=-|q=acao=star"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cookie",
+                        "data-v": "tab=1"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "click",
+                        "data-v": "ok:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr-click|c=tab=1|b=-|q=n=2"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cross",
+                        "data-v": "ok:m=GET|o=http://127.0.0.1:<PORT>|r=http://127.0.0.1:<PORT>/xhr-click|c=-|b=-|q=acao=star"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cookie",
+                        "data-v": "tab=1"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "Fetched 2",
+        "url": "http://127.0.0.1:<PORT>/xhr-click"
+      }
+    },
+    "xhr_csp": {
+      "loaded": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "XHR CSP"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/xhr-csp.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "xhr csp"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "out"
+                  },
+                  "children": [
+                    {
+                      "attributes": {
+                        "class": "same",
+                        "data-v": "ok:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr-csp|c=-|b=-|q=-"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cross",
+                        "data-v": "error:csp"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "XHR CSP",
+        "url": "http://127.0.0.1:<PORT>/xhr-csp"
+      }
+    },
+    "xhr_norefer": {
+      "loaded": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "XHR no referrer"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/xhr-norefer.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "xhr no referrer"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "out"
+                  },
+                  "children": [
+                    {
+                      "attributes": {
+                        "class": "same",
+                        "data-v": "ok:m=GET|o=-|r=-|c=-|b=-|q=-"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cross",
+                        "data-v": "ok:m=GET|o=http://127.0.0.1:<PORT>|r=-|c=-|b=-|q=acao=star"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "XHR no referrer",
+        "url": "http://127.0.0.1:<PORT>/xhr-norefer"
+      }
+    },
+    "xhr_slow": {
+      "loaded": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "XHR slow"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/xhr-slow.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "xhr slow"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "out"
+                  },
+                  "children": [
+                    {
+                      "attributes": {
+                        "class": "slow",
+                        "data-v": "ok:slow"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "after",
+                        "data-v": "done"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "XHR slow",
+        "url": "http://127.0.0.1:<PORT>/xhr-slow"
+      }
     }
   },
   "viewport": {

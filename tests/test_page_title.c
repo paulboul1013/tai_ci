@@ -26,7 +26,7 @@ static char *title_of(TaiNetwork *network, const TaiUrl *url,
     MarkupResult result = {0};
     char *error = NULL;
     TaiPageLoad *load = tai_page_load_async_markup(
-        network, url, markup, "", 320.0, 160.0, false, markup_done, &result,
+        network, url, markup, "", 320.0, 160.0, false, NULL, markup_done, &result,
         &error);
     if (load || error || !result.called || !result.page || result.error) {
         fprintf(stderr, "markup load failed: %s\n",

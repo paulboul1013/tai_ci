@@ -353,7 +353,153 @@ static void test_node_limit(void) {
     tai_document_destroy(doc);
 }
 
+/* Slice 5 host callbacks: document.cookie and XMLHttpRequest reach the host;
+ * its status codes become JS errors, blocking time extends the deadline up
+ * to 30 s, and cancelled() stops even a script that catches every error. */
+typedef struct {
+    char cookie[64];
+    int xhr_calls;
+    double block_seconds;   /* each xhr_send sleeps this long */
+    TaiJsHostStatus status; /* what xhr_send returns */
+    bool cancel_after_xhr;
+    bool cancelled;
+} FakeHost;
+
+static void sleep_seconds(double seconds) {
+    struct timespec pause = {(time_t)seconds,
+                             (long)((seconds - (double)(time_t)seconds) * 1e9)};
+    nanosleep(&pause, NULL);
+}
+
+static TaiJsHostStatus fake_cookie_get(void *opaque, char **value) {
+    *value = strdup(((FakeHost *)opaque)->cookie);
+    return *value ? TAI_JS_HOST_OK : TAI_JS_HOST_NO_MEMORY;
+}
+
+static TaiJsHostStatus fake_cookie_set(void *opaque, const char *value) {
+    FakeHost *host = opaque;
+    if (!strcmp(value, "fail")) return TAI_JS_HOST_ERROR;
+    snprintf(host->cookie, sizeof(host->cookie), "%s", value);
+    return TAI_JS_HOST_OK;
+}
+
+static TaiJsHostStatus fake_xhr(void *opaque, const char *url,
+                                const char *body, char **response,
+                                char **message) {
+    FakeHost *host = opaque;
+    host->xhr_calls++;
+    if (host->block_seconds > 0.0) sleep_seconds(host->block_seconds);
+    if (host->cancel_after_xhr) host->cancelled = true;
+    if (host->status == TAI_JS_HOST_ERROR) {
+        *message = strdup("blocked here");
+        return TAI_JS_HOST_ERROR;
+    }
+    if (host->status == TAI_JS_HOST_NO_MEMORY) return TAI_JS_HOST_NO_MEMORY;
+    char text[256];
+    snprintf(text, sizeof(text), "%s|%s", url, body ? body : "(null)");
+    *response = strdup(text);
+    return TAI_JS_HOST_OK;
+}
+
+static bool fake_cancelled(void *opaque) {
+    return ((FakeHost *)opaque)->cancelled;
+}
+
+static char *eval_text(TaiJsContext *js, const char *code) {
+    char *result = NULL, *error = NULL;
+    bool ok = tai_js_eval_value(js, "host.js", code, &result, &error);
+    if (!ok) {
+        fprintf(stderr, "unexpected failure of %s: %s\n", code, error);
+        abort();
+    }
+    free(error);
+    return result;
+}
+
+static void expect_text(TaiJsContext *js, const char *code, const char *want) {
+    char *got = eval_text(js, code);
+    if (strcmp(got, want)) {
+        fprintf(stderr, "%s: expected %s, got %s\n", code, want, got);
+        abort();
+    }
+    free(got);
+}
+
+#define XHR(body) "var x = new XMLHttpRequest(); x.open('GET', 'u', false);" \
+    " x.send(" body "); x.responseText"
+#define CAUGHT(code) "(function(){ try { " code "; return 'none'; }" \
+    " catch (e) { return e.name + ':' + e.message; } })()"
+
+static void test_host_callbacks(void) {
+    char *error = NULL;
+    TaiDocument *doc = tai_html_parse("<p>x</p>", &error);
+    assert(doc && !error);
+    /* Without host callbacks: cookie reads "", writes are ignored, XHR fails. */
+    TaiJsContext *bare = tai_js_create(tai_document_root(doc), NULL, &error);
+    assert(bare && !error);
+    expect_text(bare, "document.cookie = 'a=1'; document.cookie", "");
+    expect_text(bare, CAUGHT(XHR("")),
+                "Error:XMLHttpRequest is not available");
+    tai_js_destroy(bare);
+
+    FakeHost fake = {.cookie = "k=v"};
+    TaiJsHost host = {.cookie_get = fake_cookie_get,
+                      .cookie_set = fake_cookie_set, .xhr_send = fake_xhr,
+                      .cancelled = fake_cancelled, .userdata = &fake};
+    TaiJsContext *js = tai_js_create(tai_document_root(doc), &host, &error);
+    assert(js && !error);
+    expect_text(js, "document.cookie", "k=v");
+    expect_text(js, "document.cookie = 42; document.cookie", "42");
+    expect_text(js, CAUGHT("document.cookie = 'fail'"),
+                "Error:document.cookie failed");
+    /* send() and send(undefined) pass null; method is only a label. */
+    expect_text(js, XHR(""), "u|(null)");
+    expect_text(js, XHR("undefined"), "u|(null)");
+    expect_text(js, XHR("'a=1'"), "u|a=1");
+    expect_text(js, CAUGHT(XHR("5")),
+                "Error:XMLHttpRequest body must be a string or null");
+    expect_text(js, CAUGHT("new XMLHttpRequest().send()"),
+                "Error:XMLHttpRequest URL must be a string");
+    fake.status = TAI_JS_HOST_ERROR;
+    expect_text(js, CAUGHT(XHR("")), "Error:blocked here");
+    fake.status = TAI_JS_HOST_NO_MEMORY;
+    expect_text(js, CAUGHT(XHR("")), "InternalError:out of memory");
+    fake.status = TAI_JS_HOST_OK;
+
+    /* 2.5 s of blocking inside a 2 s budget: the script still finishes. */
+    fake.block_seconds = 0.5;
+    fake.xhr_calls = 0;
+    expect_text(js, "for (var i = 0; i < 5; i++) { " XHR("") "; } i", "5");
+    assert(fake.xhr_calls == 5);
+
+    /* The extension stops at 30 s: a loop of 1.5 s requests gets 32 s. */
+    fake.block_seconds = 1.5;
+    fake.xhr_calls = 0;
+    double started = seconds_now();
+    assert(!tai_js_eval(js, "loop.js",
+        "while (true) { try { " XHR("") "; } catch (e) {} }", &error));
+    double elapsed = seconds_now() - started;
+    assert(error && strstr(error, "interrupted"));
+    free(error);
+    error = NULL;
+    assert(elapsed >= 31.0 && elapsed < 36.0 && fake.xhr_calls >= 20);
+    fprintf(stderr, "XHR loop interrupted after %.1f s, %d requests\n",
+            elapsed, fake.xhr_calls);
+
+    /* cancelled() interrupts uncatchably, right after the XHR returns. */
+    fake.block_seconds = 0.0;
+    fake.cancel_after_xhr = true;
+    fake.xhr_calls = 0;
+    assert(!tai_js_eval(js, "cancel.js",
+        "while (true) { try { " XHR("") "; } catch (e) {} }", &error));
+    assert(error && strstr(error, "interrupted") && fake.xhr_calls == 1);
+    free(error);
+    tai_js_destroy(js);
+    tai_document_destroy(doc);
+}
+
 int main(void) {
+    test_host_callbacks();
     test_mutation_callbacks();
     test_inner_html();
     test_nested_deadline();

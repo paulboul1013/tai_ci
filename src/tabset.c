@@ -9,9 +9,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 typedef enum { LOAD_NAVIGATION, LOAD_HISTORY } LoadKind;
 
+typedef struct Loader Loader;
+typedef struct XhrJob XhrJob;
 typedef struct LoadTask LoadTask;
 typedef struct TabSlot TabSlot;
 typedef struct Completion Completion;
@@ -39,6 +42,7 @@ struct LoadTask {
     double height;
     atomic_bool cancelled;
     bool completed;
+    Loader *loader; /* set when the loader starts the task; loader-only */
     TaiPageLoad *page_load;
     Completion completion;
     LoadTask *queue_next;
@@ -81,6 +85,48 @@ struct TaiBrowserApp {
     LoadTask *active_loads;
     Completion *completed_head;
     Completion *completed_tail;
+
+    /* Synchronous XHR from JS on the SDL thread (event time): jobs queue
+     * here for the loader, which owns the network; the SDL thread waits on
+     * xhr_condition. The loader never waits for the SDL thread. */
+    pthread_cond_t xhr_condition;
+    bool xhr_condition_ready;
+    bool xhr_closed; /* the loader no longer takes jobs */
+    XhrJob *xhr_head;
+    XhrJob *xhr_tail;
+    /* Mirrors stopping for lock-free checks in the JS interrupt handler. */
+    atomic_bool stopping_flag;
+    /* Shared with every page and the loader's network; created before the
+     * loader starts, destroyed after it is joined. */
+    TaiCookieJar *cookies;
+    TaiPageNet event_net;
+};
+
+/* One event-time XHR. It lives on the waiting SDL thread's stack, which
+ * returns only after done, so the loader may use it until then. The request
+ * inputs are borrowed from that thread and immutable while it waits. */
+struct XhrJob {
+    const TaiUrl *url;
+    const TaiUrl *referrer;
+    const char *payload;
+    const char *origin;
+    const char *policy;
+    double deadline;        /* total limit, from queueing */
+    TaiResponse *response;  /* written by the loader before done */
+    const char *failure;    /* static message when response is NULL */
+    bool done;              /* app->mutex */
+    XhrJob *next;           /* app->mutex: the queue */
+    Loader *loader;         /* loader-only from here on */
+    TaiRequest *request;
+    XhrJob *loader_next;    /* in-flight list */
+};
+
+/* Loader-thread state, on the loader's stack. */
+struct Loader {
+    TaiBrowserApp *app;
+    TaiNetwork *network;
+    bool network_failed;
+    XhrJob *inflight;
 };
 
 /* One window's tabs. It borrows its app unless it was created by one of the
@@ -182,8 +228,162 @@ static void queue_push_locked(TaiBrowserApp *app, LoadTask *task) {
     pthread_cond_signal(&app->condition);
 }
 
-static void load_task_start(TaiBrowserApp *app, LoadTask *task,
-                            TaiNetwork *network, bool network_failed) {
+static double seconds_now(void) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0.0;
+    return (double)now.tv_sec + (double)now.tv_nsec / 1e9;
+}
+
+/* ---- event-time XHR jobs (loader side) --------------------------------- */
+
+/* Hands the result to the waiting SDL thread; the job is gone afterwards. */
+static void xhr_finish(TaiBrowserApp *app, XhrJob *job, TaiResponse *response,
+                       const char *failure) {
+    pthread_mutex_lock(&app->mutex);
+    job->response = response;
+    job->failure = failure;
+    job->done = true;
+    pthread_cond_broadcast(&app->xhr_condition);
+    pthread_mutex_unlock(&app->mutex);
+}
+
+static void xhr_unlink(Loader *loader, XhrJob *job) {
+    XhrJob **slot = &loader->inflight;
+    while (*slot && *slot != job) slot = &(*slot)->loader_next;
+    if (*slot) *slot = job->loader_next;
+}
+
+static void xhr_done(void *opaque, TaiResponse *response) {
+    XhrJob *job = opaque;
+    Loader *loader = job->loader;
+    xhr_unlink(loader, job);
+    xhr_finish(loader->app, job, response,
+               response ? NULL : "XMLHttpRequest failed");
+}
+
+/* Submits queued jobs. Their requests may complete inside a nested poll
+ * (a load-time XHR or a checkpoint between load-time scripts), so an
+ * event-time XHR does not wait for a whole page load. */
+static void loader_take_jobs(Loader *loader) {
+    TaiBrowserApp *app = loader->app;
+    pthread_mutex_lock(&app->mutex);
+    XhrJob *jobs = app->xhr_head;
+    app->xhr_head = app->xhr_tail = NULL;
+    pthread_mutex_unlock(&app->mutex);
+    while (jobs) {
+        XhrJob *job = jobs;
+        jobs = job->next;
+        job->loader = loader;
+        if (loader->network_failed) {
+            xhr_finish(app, job, NULL, "network polling failed");
+            continue;
+        }
+        job->request = tai_network_submit(loader->network, job->url,
+            job->referrer, job->payload, job->origin, job->policy, xhr_done,
+            job);
+        if (!job->request) {
+            xhr_finish(app, job, NULL, "XMLHttpRequest failed");
+            continue;
+        }
+        tai_network_allow_nested(job->request);
+        job->loader_next = loader->inflight;
+        loader->inflight = job;
+    }
+}
+
+/* Cancels in-flight jobs past their deadline, or all of them. */
+static void loader_expire_jobs(Loader *loader, const char *failure) {
+    double now = failure ? 0.0 : seconds_now();
+    XhrJob **slot = &loader->inflight;
+    while (*slot) {
+        XhrJob *job = *slot;
+        if (!failure && now < job->deadline) {
+            slot = &job->loader_next;
+            continue;
+        }
+        *slot = job->loader_next;
+        tai_network_cancel(loader->network, job->request);
+        xhr_finish(loader->app, job, NULL,
+                   failure ? failure : "XMLHttpRequest timed out");
+    }
+}
+
+static void loader_service(Loader *loader) {
+    loader_take_jobs(loader);
+    loader_expire_jobs(loader, NULL);
+}
+
+/* ---- load-time page net (loader side) ---------------------------------- */
+
+static bool task_cancelled(void *opaque) {
+    LoadTask *task = opaque;
+    return atomic_load_explicit(&task->cancelled, memory_order_acquire) ||
+           atomic_load_explicit(&task->loader->app->stopping_flag,
+                                memory_order_acquire);
+}
+
+/* Between polls of a load-time XHR: keep event-time jobs moving and stop
+ * within one poll interval once the task is cancelled. */
+static bool loader_request_service(void *opaque) {
+    LoadTask *task = opaque;
+    loader_service(task->loader);
+    return !task_cancelled(task);
+}
+
+static TaiResponse *loader_request(void *opaque, const TaiUrl *url,
+    const TaiUrl *referrer, const char *payload, const char *origin,
+    const char *policy, char **message) {
+    LoadTask *task = opaque;
+    TaiWaitStatus status = TAI_WAIT_CANCELLED;
+    TaiResponse *response = task_cancelled(task) ? NULL
+        : tai_network_request_until(task->loader->network, url, referrer,
+              payload, origin, policy, TAI_XHR_TIMEOUT_SECONDS,
+              loader_request_service, task, &status);
+    if (!response) *message = tai_page_net_wait_message(status);
+    return response;
+}
+
+static bool loader_checkpoint(void *opaque) {
+    LoadTask *task = opaque;
+    Loader *loader = task->loader;
+    loader_service(loader);
+    if (loader->inflight && !tai_network_poll_nested(loader->network, 0))
+        loader->network_failed = true;
+    return !task_cancelled(task);
+}
+
+/* ---- event-time page net (SDL side) ------------------------------------ */
+
+static TaiResponse *app_xhr_request(void *opaque, const TaiUrl *url,
+    const TaiUrl *referrer, const char *payload, const char *origin,
+    const char *policy, char **message) {
+    TaiBrowserApp *app = opaque;
+    XhrJob job = {.url = url, .referrer = referrer, .payload = payload,
+                  .origin = origin, .policy = policy};
+    pthread_mutex_lock(&app->mutex);
+    if (app->stopping || app->xhr_closed) {
+        pthread_mutex_unlock(&app->mutex);
+        *message = tai_strdup("XMLHttpRequest failed: browser is closing");
+        return NULL;
+    }
+    job.deadline = seconds_now() + TAI_XHR_TIMEOUT_SECONDS;
+    if (app->xhr_tail) app->xhr_tail->next = &job;
+    else app->xhr_head = &job;
+    app->xhr_tail = &job;
+    pthread_cond_signal(&app->condition);
+    /* D9: every window stops responding until the loader answers. The
+     * loader finishes each job: on completion, deadline, failure or exit. */
+    while (!job.done) pthread_cond_wait(&app->xhr_condition, &app->mutex);
+    pthread_mutex_unlock(&app->mutex);
+    if (!job.response) *message = tai_strdup(job.failure);
+    return job.response;
+}
+
+static void load_task_start(Loader *loader, LoadTask *task) {
+    TaiBrowserApp *app = loader->app;
+    TaiNetwork *network = loader->network;
+    bool network_failed = loader->network_failed;
+    task->loader = loader;
     if (network_failed || atomic_load_explicit(&task->cancelled,
                                                memory_order_acquire)) {
         completion_append(app, task, NULL, false,
@@ -202,12 +402,16 @@ static void load_task_start(TaiBrowserApp *app, LoadTask *task,
         return;
     }
     char *error = NULL;
+    TaiPageNet net = {.request = loader_request,
+                      .checkpoint = loader_checkpoint,
+                      .cancelled = task_cancelled,
+                      .cookies = app->cookies, .userdata = task};
     TaiPageLoad *load = task->internal_markup
         ? tai_page_load_async_markup(network, url, task->internal_markup,
-            app->default_css, task->width, task->height, app->rtl,
+            app->default_css, task->width, task->height, app->rtl, &net,
             page_load_done, task, &error)
         : tai_page_load_async(network, url, referrer, task->body,
-            app->default_css, task->width, task->height, app->rtl,
+            app->default_css, task->width, task->height, app->rtl, &net,
             page_load_done, task, &error);
     tai_url_destroy(url);
     tai_url_destroy(referrer);
@@ -260,7 +464,7 @@ static void cancel_or_reap_loads(TaiBrowserApp *app, TaiNetwork *network,
 
 static void *loader_main(void *opaque) {
     TaiBrowserApp *app = opaque;
-    TaiNetwork *network = tai_network_create();
+    TaiNetwork *network = tai_network_create_with_jar(app->cookies);
     if (network && app->ca_file &&
         !tai_network_set_ca_file(network, app->ca_file)) {
         tai_network_destroy(network);
@@ -273,19 +477,24 @@ static void *loader_main(void *opaque) {
     pthread_mutex_unlock(&app->mutex);
     if (!network) return NULL;
 
-    bool network_failed = false;
+    Loader loader = {.app = app, .network = network};
     for (;;) {
         pthread_mutex_lock(&app->mutex);
-        while (!app->stopping && !app->queued_head && !app->active_loads)
+        while (!app->stopping && !app->queued_head && !app->active_loads &&
+               !app->xhr_head && !loader.inflight)
             pthread_cond_wait(&app->condition, &app->mutex);
         bool stopping = app->stopping;
         LoadTask *task = queued_take(app);
         pthread_mutex_unlock(&app->mutex);
 
-        if (task) load_task_start(app, task, network, network_failed);
-        if (app->active_loads) {
-            if (!tai_network_poll(network, 16)) network_failed = true;
-            cancel_or_reap_loads(app, network, network_failed || stopping);
+        if (task) load_task_start(&loader, task);
+        loader_service(&loader);
+        if (app->active_loads || loader.inflight) {
+            if (!tai_network_poll(network, 16)) loader.network_failed = true;
+            if (loader.network_failed)
+                loader_expire_jobs(&loader, "network polling failed");
+            cancel_or_reap_loads(app, network,
+                                 loader.network_failed || stopping);
         }
 
         pthread_mutex_lock(&app->mutex);
@@ -293,6 +502,14 @@ static void *loader_main(void *opaque) {
         pthread_mutex_unlock(&app->mutex);
         if (done) break;
     }
+    /* No SDL thread can be waiting here (it is the one stopping the app),
+     * but every accepted job must still finish. */
+    pthread_mutex_lock(&app->mutex);
+    app->xhr_closed = true;
+    pthread_mutex_unlock(&app->mutex);
+    loader.network_failed = true;
+    loader_take_jobs(&loader);
+    loader_expire_jobs(&loader, "browser is closing");
     tai_network_destroy(network);
     return NULL;
 }
@@ -504,8 +721,24 @@ static TaiBrowserApp *app_create(const char *default_css, bool rtl,
         return NULL;
     }
     app->condition_ready = true;
-    if (pthread_create(&app->loader_thread, NULL, loader_main, app) != 0) {
-        set_error(error, "page loader thread creation failed");
+    atomic_init(&app->stopping_flag, false);
+    if (pthread_cond_init(&app->xhr_condition, NULL) != 0) {
+        set_error(error, "browser condition initialization failed");
+        pthread_cond_destroy(&app->condition);
+        pthread_mutex_destroy(&app->mutex);
+        app_free_state(app);
+        return NULL;
+    }
+    app->xhr_condition_ready = true;
+    app->cookies = tai_cookie_jar_create();
+    app->event_net = (TaiPageNet){.request = app_xhr_request,
+                                  .cookies = app->cookies, .userdata = app};
+    if (!app->cookies ||
+        pthread_create(&app->loader_thread, NULL, loader_main, app) != 0) {
+        set_error(error, app->cookies ? "page loader thread creation failed"
+                                      : "cookie jar allocation failed");
+        tai_cookie_jar_destroy(app->cookies);
+        pthread_cond_destroy(&app->xhr_condition);
         pthread_cond_destroy(&app->condition);
         pthread_mutex_destroy(&app->mutex);
         app_free_state(app);
@@ -564,6 +797,7 @@ void tai_browser_app_destroy(TaiBrowserApp *app) {
     if (app->loader_started) {
         pthread_mutex_lock(&app->mutex);
         app->stopping = true;
+        atomic_store_explicit(&app->stopping_flag, true, memory_order_release);
         /* Every tab set is gone, so nothing may start another load. */
         for (LoadTask *task = app->queued_head; task; task = task->queue_next)
             atomic_store_explicit(&task->cancelled, true,
@@ -579,6 +813,9 @@ void tai_browser_app_destroy(TaiBrowserApp *app) {
         task_destroy(queued);
         queued = next;
     }
+    /* The loader and every page that borrowed the jar are gone. */
+    tai_cookie_jar_destroy(app->cookies);
+    if (app->xhr_condition_ready) pthread_cond_destroy(&app->xhr_condition);
     if (app->condition_ready) pthread_cond_destroy(&app->condition);
     if (app->mutex_ready) pthread_mutex_destroy(&app->mutex);
     app_free_state(app);
@@ -882,6 +1119,9 @@ bool tai_tabset_pump(TaiTabSet *tabs, bool *changed, char **error) {
              * Python shows it at the requested URL and history position. */
             TaiPage *candidate = items->page;
             items->page = NULL;
+            /* The page's load-time net names the task freed below; from now
+             * on its JS runs on this thread and queues XHR for the loader. */
+            if (candidate) tai_page_set_net(candidate, &tabs->app->event_net);
             if (candidate) {
                 if ((tai_page_viewport_width(candidate) != tabs->width ||
                      tai_page_viewport_height(candidate) != tabs->height) &&

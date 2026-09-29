@@ -19,16 +19,38 @@ typedef struct {
                           it has no JSON form); NULL otherwise */
 } TaiJsReport;
 
+typedef enum {
+    TAI_JS_HOST_OK,
+    TAI_JS_HOST_ERROR,    /* JS gets Error(message) */
+    TAI_JS_HOST_NO_MEMORY /* JS gets an out-of-memory error */
+} TaiJsHostStatus;
+
 /* Callbacks from the JS layer into its owner; every member may be NULL. They
- * run synchronously on the thread executing JS and must not re-enter it.
+ * run synchronously on the thread executing JS and must not re-enter this
+ * context.
  *   invalidated   the DOM changed; the owner rebuilds style/layout later
  *   node_removed  node (and its subtree) left its parent; it may be
  *                 re-attached elsewhere by the same operation
- *   report        diagnostics; NULL writes them to stderr (D1) */
+ *   report        diagnostics; NULL writes them to stderr (D1)
+ *   cookie_get    document.cookie; *value is owned by the caller. NULL reads ""
+ *   cookie_set    document.cookie = value. NULL ignores the write
+ *   xhr_send      synchronous XMLHttpRequest.send: url as given to open(),
+ *                 body NULL for null. On OK *response, otherwise *message
+ *                 (may stay NULL), is owned by the caller. The time it blocks
+ *                 does not count against the script time limit, up to 30 s
+ *                 per outermost entry. NULL throws Error
+ *   cancelled     polled by the interrupt handler: true stops the running
+ *                 script uncatchably. Must be cheap and lock-free */
 typedef struct {
     void (*invalidated)(void *userdata);
     void (*node_removed)(void *userdata, TaiNode *node);
     void (*report)(void *userdata, const TaiJsReport *report);
+    TaiJsHostStatus (*cookie_get)(void *userdata, char **value);
+    TaiJsHostStatus (*cookie_set)(void *userdata, const char *value);
+    TaiJsHostStatus (*xhr_send)(void *userdata, const char *url,
+                                const char *body, char **response,
+                                char **message);
+    bool (*cancelled)(void *userdata);
     void *userdata;
 } TaiJsHost;
 

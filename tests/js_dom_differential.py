@@ -35,8 +35,6 @@ FIXTURE = ROOT / "tests" / "fixtures" / "js_dom_oracle.json"
 PENDING = {
     "raf_batches": "slice 6 (requestAnimationFrame)",
     "raf_throws": "slice 6 (requestAnimationFrame)",
-    "cookie": "slice 5 (document.cookie)",
-    "cookie_http_only_existing": "slice 5 (document.cookie)",
 }
 
 
@@ -103,7 +101,15 @@ def run_native(probe, case, directory):
         else:
             fields += list(step)
     steps_path.write_bytes(b"".join(f.encode() + b"\0" for f in fields))
-    completed = subprocess.run([probe, str(html_path), str(steps_path)],
+    command = [probe, str(html_path), str(steps_path)]
+    if case.get("url"):
+        command.append(case["url"])
+        for host, (cookie, params) in case.get("cookie_jar", {}).items():
+            parts = [cookie] + [key if value == "true" else
+                                "{}={}".format(key, value)
+                                for key, value in params.items()]
+            command.append("{}={}".format(host, "; ".join(parts)))
+    completed = subprocess.run(command,
                                capture_output=True, text=True, timeout=60)
     if completed.returncode != 0:
         raise AssertionError("js_probe failed for {}: {}".format(

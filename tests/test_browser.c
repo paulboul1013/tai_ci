@@ -267,7 +267,7 @@ int main(void) {
     TaiPageLoad *internal_load = tai_page_load_async_markup(
         network, internal_url, internal_markup,
         "html {display:block} body {display:block} p {display:block}",
-        320.0, 160.0, false, markup_done, &internal, &error);
+        320.0, 160.0, false, NULL, markup_done, &internal, &error);
     assert(!internal_load && !error && internal.called && internal.page &&
            !internal.error && !internal.network_failure);
     memset(internal_markup, 'X', sizeof(internal_markup) - 1);
@@ -286,7 +286,7 @@ int main(void) {
     MarkupResult rejected = {0};
     assert(ordinary_url);
     assert(!tai_page_load_async_markup(network, ordinary_url,
-        "<p>wrong scheme</p>", "", 320.0, 160.0, false,
+        "<p>wrong scheme</p>", "", 320.0, 160.0, false, NULL,
         markup_done, &rejected, &error));
     assert(error && !rejected.called);
     free(error);
