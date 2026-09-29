@@ -506,7 +506,7 @@ static bool start(TaiRequest *q) {
     return false;
   if (!add_header(q, "Host", tai_url_host(q->url)) ||
       !add_header(q, "Connection", q->payload ? "close" : "keep-alive") ||
-      !add_header(q, "User-Agent", "Tai_Gar/1.0"))
+      !add_header(q, "User-Agent", "Tai_Ci/1.0"))
     return false;
   if (q->origin && !add_header(q, "Origin", q->origin))
     return false;

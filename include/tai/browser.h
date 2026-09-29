@@ -7,7 +7,7 @@
 #include "tai/render.h"
 
 /* The browser's name: the window title before a page commits and for pages
- * without a usable <title>. Python calls itself "Tai Gar". */
+ * without a usable <title>. The Python oracle uses its own name. */
 #define TAI_BROWSER_NAME "Tai Ci"
 
 typedef struct TaiPage TaiPage;

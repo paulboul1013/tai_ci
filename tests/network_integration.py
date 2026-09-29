@@ -38,6 +38,9 @@ try:
             # curl chooses a different ordering; HTTP fields are case insensitive.
             a['headers']={k.lower():v for k,v in a['headers'].items()}
             b['headers']={k.lower():v for k,v in b['headers'].items()}
+            # Intentional difference (PORTING_PLAN.md): native is Tai Ci.
+            assert b['headers'].get('user-agent')=='Tai_Gar/1.0',b
+            b['headers']['user-agent']='Tai_Ci/1.0'
             assert a==b,(a,b)
         else: assert actual['body']==body,(actual,body)
     loop=json.loads(subprocess.run([sys.argv[1],base+'/loop'],check=True,capture_output=True,text=True).stdout)

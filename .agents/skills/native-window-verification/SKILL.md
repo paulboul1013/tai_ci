@@ -14,8 +14,9 @@ arrows, text, Backspace/Return, focus, resize).
 The repository owner authorizes, for every session: building, CTest, Python
 oracles, a fixture server bound **only to 127.0.0.1**, `tai-browser --window`,
 SDL/X11 synthetic mouse, wheel, keyboard, focus, resize and screenshots, and
-closing **only the `Tai Gar` window this session launched** after its X11 id
-is matched to the launched PID. Whole-desktop captures or input to other
+closing **only the browser windows this session launched** after their X11
+ids are matched to the launched PID (titles follow the page; the fallback is
+`Tai Ci`). Whole-desktop captures or input to other
 applications are out of scope. Sandbox approval is separate: if the platform
 blocks a scoped command, retry the same command with its escalation mechanism
 and a short justification; if refused, record the limit and the layers that

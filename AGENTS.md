@@ -55,7 +55,7 @@ ctest --test-dir build --output-on-failure -j 3                    # 全部（�
 
 儲存庫擁有者授權後續 session 直接執行：建置、CTest、Python oracle、僅綁定 `127.0.0.1` 的
 fixture server、`tai-browser --window`、SDL 合成輸入，以及對 agent 本次啟動、且已核對 PID 的
-`Tai Gar` 視窗進行滑鼠、滾輪、鍵盤、焦點、resize、截圖與關閉。不需逐次徵求同意。程序與證據標準見
+browser 視窗（標題隨頁面改變，預設 `Tai Ci`）進行滑鼠、滾輪、鍵盤、焦點、resize、截圖與關閉。不需逐次徵求同意。程序與證據標準見
 `native-window-verification` skill（`tests/tools/window_session.sh`）。
 
 **僅 Codex：** 使用者授權不等於平台 sandbox 核准。遇 sandbox 阻擋時，對同一指令使用
