@@ -6,6 +6,10 @@
 #include "tai/network.h"
 #include "tai/render.h"
 
+/* The browser's name: the window title before a page commits and for pages
+ * without a usable <title>. Python calls itself "Tai Gar". */
+#define TAI_BROWSER_NAME "Tai Ci"
+
 typedef struct TaiPage TaiPage;
 typedef struct TaiPageLoad TaiPageLoad;
 typedef struct TaiNavigationIntent TaiNavigationIntent;

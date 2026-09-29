@@ -14,6 +14,8 @@ typedef struct {
   bool owns_tabs;
   AddressEditor editor;
   AddressWatch address_watch;
+  /* The title last given to SDL, so SDL is called only when it changes. */
+  char *shown_title;
   int pixel_width;
   int pixel_height;
   /* Page viewports end at the chrome bottom, which moves when the tab strip
@@ -46,11 +48,38 @@ static void window_destroy(PresWindow *w) {
   if (w->owns_tabs) tai_tabset_destroy(w->tabs);
   free(w->editor.text);
   free(w->address_watch.url);
+  free(w->shown_title);
   SDL_DestroyTexture(w->chrome_texture);
   SDL_DestroyTexture(w->page_texture);
   SDL_DestroyRenderer(w->renderer);
   SDL_DestroyWindow(w->window);
   free(w);
+}
+
+/* Python titles each presented frame with the active tab's committed title,
+ * or the browser name before that tab commits or without a usable <title>. */
+static bool window_sync_title(PresWindow *w, const TaiTabSetView *view,
+                              char **error) {
+  char *title = view->page ? tai_page_title(view->page) : NULL;
+  if (!title || !*title) {
+    bool failed = view->page && !title;
+    free(title);
+    title = failed ? NULL : tai_strdup(TAI_BROWSER_NAME);
+  }
+  if (!title) {
+    set_error(error, "window title allocation failed");
+    return false;
+  }
+  if (w->shown_title && !strcmp(w->shown_title, title)) {
+    free(title);
+    return true;
+  }
+  /* A title the window system refuses is not worth stopping the browser. */
+  if (!SDL_SetWindowTitle(w->window, title))
+    fprintf(stderr, "window title not set: %s\n", SDL_GetError());
+  free(w->shown_title);
+  w->shown_title = title;
+  return true;
 }
 
 /* Creates the native window, then starts the tab set's first navigation so
@@ -68,7 +97,7 @@ static PresWindow *window_open(TaiTabSet *tabs, bool owns_tabs,
   w->tabs = tabs;
   w->owns_tabs = owns_tabs;
   w->focused = true;
-  w->window = SDL_CreateWindow("Tai Gar", width, height,
+  w->window = SDL_CreateWindow(TAI_BROWSER_NAME, width, height,
       SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   w->renderer = w->window ? SDL_CreateRenderer(w->window, NULL) : NULL;
   w->editor.text = tai_strdup("");
@@ -110,6 +139,7 @@ static PresWindow *window_open(TaiTabSet *tabs, bool owns_tabs,
                                          w->pixel_width, w->pixel_height,
                                          true, true, &w->editor, error))
     ok = false;
+  if (ok && !window_sync_title(w, &view, error)) ok = false;
   if (!ok) {
     window_destroy(w);
     return NULL;
@@ -318,7 +348,8 @@ static bool window_frame(PresWindow *w, char **error) {
                                      &w->chrome_texture, &view,
                                      w->pixel_width, w->pixel_height,
                                      w->page_changed, w->chrome_changed,
-                                     &w->editor, error))
+                                     &w->editor, error) ||
+        !window_sync_title(w, &view, error))
       return false;
   }
   w->page_changed = w->chrome_changed = w->force_present = false;

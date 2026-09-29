@@ -6,8 +6,6 @@ real presentation loop under SDL's dummy driver), answers its commands and
 compares every checkpoint with tests/fixtures/new_window_oracle.json.
 
 Not compared, with the reason:
-* Window title: Python shows the page title, native keeps "Tai Gar" (an
-  existing difference, PORTING_PLAN.md).
 * requested_urls: Python's handle_new_window asks for
   https://browser.engineering/, which the probe redirects to /home; native
   opens the app's New Tab URL, which the test sets to /home (decision D4).
@@ -29,7 +27,7 @@ FIXTURE = ROOT / "tests" / "fixtures" / "new_window_oracle.json"
 sys.path.insert(0, str(ROOT / "tests"))
 import new_window_fixture  # noqa: E402
 
-SKIPPED_KEYS = {"title"}
+SKIPPED_KEYS = set()
 SKIPPED_STEPS = {"requested_urls"}
 
 

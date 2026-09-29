@@ -221,9 +221,13 @@ if(BUILD_TESTING)
   add_executable(test_page_title tests/test_page_title.c)
   target_link_libraries(test_page_title PRIVATE tai_core)
   target_compile_options(test_page_title PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_executable(test_title_window tests/test_title_window.c)
+  target_link_libraries(test_title_window PRIVATE tai_presentation)
+  target_compile_options(test_title_window PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME title_integration COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/title_integration.py"
-    $<TARGET_FILE:test_page_title>)
+    $<TARGET_FILE:test_page_title> $<TARGET_FILE:test_title_window>
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
   add_executable(test_new_window tests/test_new_window.c)
   target_link_libraries(test_new_window PRIVATE tai_presentation)
   target_compile_options(test_new_window PRIVATE -Wall -Wextra -Wpedantic -Werror)

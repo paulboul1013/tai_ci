@@ -234,9 +234,13 @@ static void window_json(const TaiPresWindowInfo *window) {
   int width = 0, height = 0;
   SDL_Window *native = SDL_GetWindowFromID(window->window_id);
   CHECK(native && SDL_GetWindowSize(native, &width, &height));
+  const char *window_title = SDL_GetWindowTitle(native);
+  CHECK(window_title);
   char title[256];
   bool has_heading = heading(&view, title, sizeof(title));
-  printf("{\"size\": [%d, %d], \"tab_count\": %zu, \"active_index\": %zu, "
+  printf("{\"title\": ");
+  json_string(window_title);
+  printf(", \"size\": [%d, %d], \"tab_count\": %zu, \"active_index\": %zu, "
          "\"url\": ", width, height, view.tab_count, view.active_index);
   json_string(view.url ? view.url : "");
   printf(", \"heading\": ");

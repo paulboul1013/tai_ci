@@ -14,7 +14,7 @@ static bool present_window_internal(
     set_error(error, SDL_GetError());
     return false;
   }
-  SDL_Window *window = SDL_CreateWindow("Tai Gar", width, height,
+  SDL_Window *window = SDL_CreateWindow(TAI_BROWSER_NAME, width, height,
       SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   SDL_Renderer *renderer = window ? SDL_CreateRenderer(window, NULL) : NULL;
   SDL_Texture *page_texture = NULL;
