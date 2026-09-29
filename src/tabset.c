@@ -24,8 +24,9 @@ struct Completion {
     Completion *next;
 };
 
+/* A task names its tab only by ID, never by TaiTabSet pointer: the tab set
+ * may be destroyed while the shared loader still owns the task. */
 struct LoadTask {
-    struct TaiTabSet *owner;
     uint64_t tab_id;
     uint64_t generation;
     char *url;
@@ -51,20 +52,20 @@ struct TabSlot {
     LoadTask *active_task;
 };
 
-struct TaiTabSet {
+/* Process-wide state shared by every window's tab set. The registry, tab IDs,
+ * bookmarks and configuration belong to the SDL owner thread; the loader
+ * thread owns the network and touches only the mutex-protected queues and
+ * the immutable configuration strings. */
+struct TaiBrowserApp {
     const char *default_css;
     char *home_url;
     char *ca_file;
     TaiBookmarks *bookmarks;
     bool rtl;
-    double width;
-    double height;
-    bool started;
-    TabSlot *slots;
-    size_t count;
-    size_t capacity;
-    size_t active;
     uint64_t next_tab_id;
+    TaiTabSet **tabsets;
+    size_t tabset_count;
+    size_t tabset_capacity;
 
     pthread_t loader_thread;
     pthread_mutex_t mutex;
@@ -80,6 +81,23 @@ struct TaiTabSet {
     LoadTask *active_loads;
     Completion *completed_head;
     Completion *completed_tail;
+};
+
+/* One window's tabs. It borrows its app unless it was created by one of the
+ * single-window constructors, which own a private app. */
+struct TaiTabSet {
+    TaiBrowserApp *app;
+    bool owns_app;
+    double width;
+    double height;
+    bool started;
+    TabSlot *slots;
+    size_t count;
+    size_t capacity;
+    size_t active;
+    /* Completions routed to this tab set by another tab set's pump. */
+    Completion *inbox_head;
+    Completion *inbox_tail;
 };
 
 static bool set_error(char **error, const char *message) {
@@ -107,19 +125,19 @@ static void completion_prepare(LoadTask *task, TaiPage *page,
     task->completed = true;
 }
 
-static void completion_publish(TaiTabSet *tabs, LoadTask *task) {
+static void completion_publish(TaiBrowserApp *app, LoadTask *task) {
     Completion *completion = &task->completion;
-    pthread_mutex_lock(&tabs->mutex);
-    if (tabs->completed_tail) tabs->completed_tail->next = completion;
-    else tabs->completed_head = completion;
-    tabs->completed_tail = completion;
-    pthread_mutex_unlock(&tabs->mutex);
+    pthread_mutex_lock(&app->mutex);
+    if (app->completed_tail) app->completed_tail->next = completion;
+    else app->completed_head = completion;
+    app->completed_tail = completion;
+    pthread_mutex_unlock(&app->mutex);
 }
 
-static void completion_append(TaiTabSet *tabs, LoadTask *task, TaiPage *page,
+static void completion_append(TaiBrowserApp *app, LoadTask *task, TaiPage *page,
                               bool network_failure, char *error) {
     completion_prepare(task, page, network_failure, error);
-    completion_publish(tabs, task);
+    completion_publish(app, task);
 }
 
 static void page_load_done(void *opaque, TaiPage *page,
@@ -132,43 +150,43 @@ static void page_load_done(void *opaque, TaiPage *page,
     completion_prepare(task, page, network_failure, error);
 }
 
-static void active_remove(TaiTabSet *tabs, LoadTask **slot) {
+static void active_remove(TaiBrowserApp *app, LoadTask **slot) {
     LoadTask *task = *slot;
     *slot = task->active_next;
     task->active_next = NULL;
-    (void)tabs;
+    (void)app;
 }
 
-static LoadTask *queued_take(TaiTabSet *tabs) {
-    LoadTask *task = tabs->queued_head;
+static LoadTask *queued_take(TaiBrowserApp *app) {
+    LoadTask *task = app->queued_head;
     if (!task) return NULL;
-    tabs->queued_head = task->queue_next;
-    if (!tabs->queued_head) tabs->queued_tail = NULL;
+    app->queued_head = task->queue_next;
+    if (!app->queued_head) app->queued_tail = NULL;
     task->queue_next = NULL;
     return task;
 }
 
-static void queue_push(TaiTabSet *tabs, LoadTask *task) {
-    pthread_mutex_lock(&tabs->mutex);
-    if (tabs->queued_tail) tabs->queued_tail->queue_next = task;
-    else tabs->queued_head = task;
-    tabs->queued_tail = task;
-    pthread_cond_signal(&tabs->condition);
-    pthread_mutex_unlock(&tabs->mutex);
+static void queue_push(TaiBrowserApp *app, LoadTask *task) {
+    pthread_mutex_lock(&app->mutex);
+    if (app->queued_tail) app->queued_tail->queue_next = task;
+    else app->queued_head = task;
+    app->queued_tail = task;
+    pthread_cond_signal(&app->condition);
+    pthread_mutex_unlock(&app->mutex);
 }
 
-static void queue_push_locked(TaiTabSet *tabs, LoadTask *task) {
-    if (tabs->queued_tail) tabs->queued_tail->queue_next = task;
-    else tabs->queued_head = task;
-    tabs->queued_tail = task;
-    pthread_cond_signal(&tabs->condition);
+static void queue_push_locked(TaiBrowserApp *app, LoadTask *task) {
+    if (app->queued_tail) app->queued_tail->queue_next = task;
+    else app->queued_head = task;
+    app->queued_tail = task;
+    pthread_cond_signal(&app->condition);
 }
 
-static void load_task_start(TaiTabSet *tabs, LoadTask *task,
+static void load_task_start(TaiBrowserApp *app, LoadTask *task,
                             TaiNetwork *network, bool network_failed) {
     if (network_failed || atomic_load_explicit(&task->cancelled,
                                                memory_order_acquire)) {
-        completion_append(tabs, task, NULL, false,
+        completion_append(app, task, NULL, false,
                           tai_strdup(network_failed ? "network owner failed"
                                                     : "navigation cancelled"));
         return;
@@ -179,49 +197,49 @@ static void load_task_start(TaiTabSet *tabs, LoadTask *task,
     if (!url || (task->referrer && !referrer)) {
         tai_url_destroy(url);
         tai_url_destroy(referrer);
-        completion_append(tabs, task, NULL, false,
+        completion_append(app, task, NULL, false,
                           tai_strdup("navigation URL allocation failed"));
         return;
     }
     char *error = NULL;
     TaiPageLoad *load = task->internal_markup
         ? tai_page_load_async_markup(network, url, task->internal_markup,
-            tabs->default_css, task->width, task->height, tabs->rtl,
+            app->default_css, task->width, task->height, app->rtl,
             page_load_done, task, &error)
         : tai_page_load_async(network, url, referrer, task->body,
-            tabs->default_css, task->width, task->height, tabs->rtl,
+            app->default_css, task->width, task->height, app->rtl,
             page_load_done, task, &error);
     tai_url_destroy(url);
     tai_url_destroy(referrer);
     if (task->completed) {
-        completion_publish(tabs, task);
+        completion_publish(app, task);
         free(error);
         return;
     }
     if (!load) {
-        completion_append(tabs, task, NULL, false, error);
+        completion_append(app, task, NULL, false, error);
         return;
     }
     task->page_load = task->completed ? NULL : load;
     if (atomic_load_explicit(&task->cancelled, memory_order_acquire)) {
         task->page_load = NULL;
         tai_page_load_async_cancel(load);
-        completion_append(tabs, task, NULL, false,
+        completion_append(app, task, NULL, false,
                           tai_strdup("navigation cancelled"));
         return;
     }
-    task->active_next = tabs->active_loads;
-    tabs->active_loads = task;
+    task->active_next = app->active_loads;
+    app->active_loads = task;
 }
 
-static void cancel_or_reap_loads(TaiTabSet *tabs, TaiNetwork *network,
+static void cancel_or_reap_loads(TaiBrowserApp *app, TaiNetwork *network,
                                  bool network_failed) {
-    LoadTask **slot = &tabs->active_loads;
+    LoadTask **slot = &app->active_loads;
     while (*slot) {
         LoadTask *task = *slot;
         if (task->completed) {
-            active_remove(tabs, slot);
-            completion_publish(tabs, task);
+            active_remove(app, slot);
+            completion_publish(app, task);
             continue;
         }
         if (network_failed || atomic_load_explicit(&task->cancelled,
@@ -229,8 +247,8 @@ static void cancel_or_reap_loads(TaiTabSet *tabs, TaiNetwork *network,
             TaiPageLoad *load = task->page_load;
             task->page_load = NULL;
             if (load) tai_page_load_async_cancel(load);
-            active_remove(tabs, slot);
-            completion_append(tabs, task, NULL, false,
+            active_remove(app, slot);
+            completion_append(app, task, NULL, false,
                 tai_strdup(network_failed ? "network polling failed"
                                           : "navigation cancelled"));
             continue;
@@ -241,38 +259,38 @@ static void cancel_or_reap_loads(TaiTabSet *tabs, TaiNetwork *network,
 }
 
 static void *loader_main(void *opaque) {
-    TaiTabSet *tabs = opaque;
+    TaiBrowserApp *app = opaque;
     TaiNetwork *network = tai_network_create();
-    if (network && tabs->ca_file &&
-        !tai_network_set_ca_file(network, tabs->ca_file)) {
+    if (network && app->ca_file &&
+        !tai_network_set_ca_file(network, app->ca_file)) {
         tai_network_destroy(network);
         network = NULL;
     }
-    pthread_mutex_lock(&tabs->mutex);
-    tabs->loader_ok = network != NULL;
-    tabs->loader_ready = true;
-    pthread_cond_broadcast(&tabs->condition);
-    pthread_mutex_unlock(&tabs->mutex);
+    pthread_mutex_lock(&app->mutex);
+    app->loader_ok = network != NULL;
+    app->loader_ready = true;
+    pthread_cond_broadcast(&app->condition);
+    pthread_mutex_unlock(&app->mutex);
     if (!network) return NULL;
 
     bool network_failed = false;
     for (;;) {
-        pthread_mutex_lock(&tabs->mutex);
-        while (!tabs->stopping && !tabs->queued_head && !tabs->active_loads)
-            pthread_cond_wait(&tabs->condition, &tabs->mutex);
-        bool stopping = tabs->stopping;
-        LoadTask *task = queued_take(tabs);
-        pthread_mutex_unlock(&tabs->mutex);
+        pthread_mutex_lock(&app->mutex);
+        while (!app->stopping && !app->queued_head && !app->active_loads)
+            pthread_cond_wait(&app->condition, &app->mutex);
+        bool stopping = app->stopping;
+        LoadTask *task = queued_take(app);
+        pthread_mutex_unlock(&app->mutex);
 
-        if (task) load_task_start(tabs, task, network, network_failed);
-        if (tabs->active_loads) {
+        if (task) load_task_start(app, task, network, network_failed);
+        if (app->active_loads) {
             if (!tai_network_poll(network, 16)) network_failed = true;
-            cancel_or_reap_loads(tabs, network, network_failed || stopping);
+            cancel_or_reap_loads(app, network, network_failed || stopping);
         }
 
-        pthread_mutex_lock(&tabs->mutex);
-        bool done = tabs->stopping && !tabs->queued_head && !tabs->active_loads;
-        pthread_mutex_unlock(&tabs->mutex);
+        pthread_mutex_lock(&app->mutex);
+        bool done = app->stopping && !app->queued_head && !app->active_loads;
+        pthread_mutex_unlock(&app->mutex);
         if (done) break;
     }
     tai_network_destroy(network);
@@ -361,12 +379,11 @@ static LoadTask *task_create(TaiTabSet *tabs, TabSlot *slot, const char *url,
         set_error(error, "navigation task allocation failed");
         return NULL;
     }
-    task->owner = tabs;
     task->tab_id = slot->id;
     task->generation = slot->generation + 1;
     task->url = tai_strdup(url);
     if (!strcmp(url, "about:bookmarks"))
-        task->internal_markup = bookmarks_markup(tabs->bookmarks);
+        task->internal_markup = bookmarks_markup(tabs->app->bookmarks);
     if (body) task->body = tai_strdup(body);
     const TaiPage *page = tai_session_page(slot->session);
     /* Python captures the tab's current URL before replacing it. While a
@@ -392,9 +409,10 @@ static LoadTask *task_create(TaiTabSet *tabs, TabSlot *slot, const char *url,
 
 static bool task_publish(TaiTabSet *tabs, TabSlot *slot, LoadTask *task,
                          char **error) {
-    pthread_mutex_lock(&tabs->mutex);
-    if (tabs->stopping) {
-        pthread_mutex_unlock(&tabs->mutex);
+    TaiBrowserApp *app = tabs->app;
+    pthread_mutex_lock(&app->mutex);
+    if (app->stopping) {
+        pthread_mutex_unlock(&app->mutex);
         task_destroy(task);
         return set_error(error, "tab set is closing");
     }
@@ -403,8 +421,8 @@ static bool task_publish(TaiTabSet *tabs, TabSlot *slot, LoadTask *task,
                               memory_order_release);
     slot->generation = task->generation;
     slot->active_task = task;
-    queue_push_locked(tabs, task);
-    pthread_mutex_unlock(&tabs->mutex);
+    queue_push_locked(app, task);
+    pthread_mutex_unlock(&app->mutex);
     return true;
 }
 
@@ -413,9 +431,9 @@ static TabSlot *active_slot(TaiTabSet *tabs) {
         ? &tabs->slots[tabs->active] : NULL;
 }
 
-static TabSlot *slot_by_id(TaiTabSet *tabs, uint64_t id) {
+static TabSlot *slot_by_id(const TaiTabSet *tabs, uint64_t id) {
     for (size_t index = 0; index < tabs->count; index++)
-        if (tabs->slots[index].id == id) return &tabs->slots[index];
+        if (tabs->slots[index].id == id) return (TabSlot *)&tabs->slots[index];
     return NULL;
 }
 
@@ -431,100 +449,199 @@ static bool reserve_slot(TaiTabSet *tabs, char **error) {
     return true;
 }
 
-static void tabset_free_state(TaiTabSet *tabs) {
-    tai_bookmarks_destroy(tabs->bookmarks);
-    free(tabs->home_url);
-    free(tabs->ca_file);
-    free(tabs);
+static void completions_free(Completion *completion) {
+    while (completion) {
+        Completion *next = completion->next;
+        tai_page_destroy(completion->page);
+        free(completion->error);
+        task_destroy(completion->task);
+        completion = next;
+    }
 }
 
-static TaiTabSet *tabset_create(const char *default_css, bool rtl,
-                                const char *home_url, const char *ca_file,
-                                char **error) {
+static void app_free_state(TaiBrowserApp *app) {
+    tai_bookmarks_destroy(app->bookmarks);
+    free(app->home_url);
+    free(app->ca_file);
+    free(app->tabsets);
+    free(app);
+}
+
+static TaiBrowserApp *app_create(const char *default_css, bool rtl,
+                                 const char *home_url, const char *ca_file,
+                                 char **error) {
     if (error) { free(*error); *error = NULL; }
     if (!default_css || !home_url || !*home_url) {
         set_error(error, "default CSS and New Tab URL are required");
         return NULL;
+    }
+    TaiBrowserApp *app = calloc(1, sizeof(*app));
+    if (!app) {
+        set_error(error, "browser allocation failed");
+        return NULL;
+    }
+    app->default_css = default_css;
+    app->home_url = tai_strdup(home_url);
+    app->ca_file = ca_file ? tai_strdup(ca_file) : NULL;
+    app->bookmarks = tai_bookmarks_create();
+    app->rtl = rtl;
+    app->next_tab_id = 1;
+    if (!app->home_url || !app->bookmarks || (ca_file && !app->ca_file)) {
+        set_error(error, "browser state allocation failed");
+        app_free_state(app);
+        return NULL;
+    }
+    if (pthread_mutex_init(&app->mutex, NULL) != 0) {
+        set_error(error, "browser mutex initialization failed");
+        app_free_state(app);
+        return NULL;
+    }
+    app->mutex_ready = true;
+    if (pthread_cond_init(&app->condition, NULL) != 0) {
+        set_error(error, "browser condition initialization failed");
+        pthread_mutex_destroy(&app->mutex);
+        app_free_state(app);
+        return NULL;
+    }
+    app->condition_ready = true;
+    if (pthread_create(&app->loader_thread, NULL, loader_main, app) != 0) {
+        set_error(error, "page loader thread creation failed");
+        pthread_cond_destroy(&app->condition);
+        pthread_mutex_destroy(&app->mutex);
+        app_free_state(app);
+        return NULL;
+    }
+    app->loader_started = true;
+    pthread_mutex_lock(&app->mutex);
+    while (!app->loader_ready)
+        pthread_cond_wait(&app->condition, &app->mutex);
+    bool ok = app->loader_ok;
+    pthread_mutex_unlock(&app->mutex);
+    if (!ok) {
+        set_error(error, "page loader network initialization failed");
+        tai_browser_app_destroy(app);
+        return NULL;
+    }
+    return app;
+}
+
+TaiBrowserApp *tai_browser_app_create_with_home_url(const char *default_css,
+                                                    bool rtl,
+                                                    const char *home_url,
+                                                    char **error) {
+    return app_create(default_css, rtl, home_url, NULL, error);
+}
+
+TaiBrowserApp *tai_browser_app_create_for_test(const char *default_css,
+                                               bool rtl, const char *home_url,
+                                               const char *ca_file,
+                                               char **error) {
+    return app_create(default_css, rtl, home_url, ca_file, error);
+}
+
+TaiBrowserApp *tai_browser_app_create(const char *default_css, bool rtl,
+                                      char **error) {
+    TaiBrowserApp *app = tai_browser_app_create_with_home_url(default_css, rtl,
+        "https://browser.engineering/", error);
+    if (!app) return NULL;
+    /* An unusable bookmarks file must not keep the browser from starting.
+     * The file is left untouched and this run keeps favorites in memory. */
+    char *store_error = NULL;
+    TaiBookmarks *bookmarks = tai_bookmarks_open_default(&store_error);
+    if (bookmarks) {
+        tai_bookmarks_destroy(app->bookmarks);
+        app->bookmarks = bookmarks;
+    } else {
+        fprintf(stderr, "bookmarks will not be saved this session: %s\n",
+                store_error ? store_error : "cannot open bookmarks file");
+    }
+    free(store_error);
+    return app;
+}
+
+void tai_browser_app_destroy(TaiBrowserApp *app) {
+    if (!app) return;
+    if (app->loader_started) {
+        pthread_mutex_lock(&app->mutex);
+        app->stopping = true;
+        /* Every tab set is gone, so nothing may start another load. */
+        for (LoadTask *task = app->queued_head; task; task = task->queue_next)
+            atomic_store_explicit(&task->cancelled, true,
+                                  memory_order_release);
+        pthread_cond_broadcast(&app->condition);
+        pthread_mutex_unlock(&app->mutex);
+        pthread_join(app->loader_thread, NULL);
+    }
+    completions_free(app->completed_head);
+    LoadTask *queued = app->queued_head;
+    while (queued) {
+        LoadTask *next = queued->queue_next;
+        task_destroy(queued);
+        queued = next;
+    }
+    if (app->condition_ready) pthread_cond_destroy(&app->condition);
+    if (app->mutex_ready) pthread_mutex_destroy(&app->mutex);
+    app_free_state(app);
+}
+
+TaiTabSet *tai_tabset_create_in_app(TaiBrowserApp *app, char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (!app) {
+        set_error(error, "browser is required");
+        return NULL;
+    }
+    if (app->tabset_count == app->tabset_capacity) {
+        if (app->tabset_capacity > SIZE_MAX / 2 / sizeof(*app->tabsets)) {
+            set_error(error, "window capacity exceeded");
+            return NULL;
+        }
+        size_t capacity = app->tabset_capacity ? app->tabset_capacity * 2 : 4;
+        TaiTabSet **next = realloc(app->tabsets, capacity * sizeof(*next));
+        if (!next) {
+            set_error(error, "window registry allocation failed");
+            return NULL;
+        }
+        app->tabsets = next;
+        app->tabset_capacity = capacity;
     }
     TaiTabSet *tabs = calloc(1, sizeof(*tabs));
     if (!tabs) {
         set_error(error, "tab set allocation failed");
         return NULL;
     }
-    tabs->default_css = default_css;
-    tabs->home_url = tai_strdup(home_url);
-    tabs->ca_file = ca_file ? tai_strdup(ca_file) : NULL;
-    tabs->bookmarks = tai_bookmarks_create();
-    tabs->rtl = rtl;
-    tabs->next_tab_id = 1;
-    if (!tabs->home_url || !tabs->bookmarks || (ca_file && !tabs->ca_file)) {
-        set_error(error, "tab set state allocation failed");
-        tabset_free_state(tabs);
+    tabs->app = app;
+    app->tabsets[app->tabset_count++] = tabs;
+    return tabs;
+}
+
+static TaiTabSet *tabset_create_owning(TaiBrowserApp *app, char **error) {
+    if (!app) return NULL;
+    TaiTabSet *tabs = tai_tabset_create_in_app(app, error);
+    if (!tabs) {
+        tai_browser_app_destroy(app);
         return NULL;
     }
-    if (pthread_mutex_init(&tabs->mutex, NULL) != 0) {
-        set_error(error, "tab set mutex initialization failed");
-        tabset_free_state(tabs);
-        return NULL;
-    }
-    tabs->mutex_ready = true;
-    if (pthread_cond_init(&tabs->condition, NULL) != 0) {
-        set_error(error, "tab set condition initialization failed");
-        pthread_mutex_destroy(&tabs->mutex);
-        tabset_free_state(tabs);
-        return NULL;
-    }
-    tabs->condition_ready = true;
-    if (pthread_create(&tabs->loader_thread, NULL, loader_main, tabs) != 0) {
-        set_error(error, "page loader thread creation failed");
-        pthread_cond_destroy(&tabs->condition);
-        pthread_mutex_destroy(&tabs->mutex);
-        tabset_free_state(tabs);
-        return NULL;
-    }
-    tabs->loader_started = true;
-    pthread_mutex_lock(&tabs->mutex);
-    while (!tabs->loader_ready)
-        pthread_cond_wait(&tabs->condition, &tabs->mutex);
-    bool ok = tabs->loader_ok;
-    pthread_mutex_unlock(&tabs->mutex);
-    if (!ok) {
-        set_error(error, "page loader network initialization failed");
-        tai_tabset_destroy(tabs);
-        return NULL;
-    }
+    tabs->owns_app = true;
     return tabs;
 }
 
 TaiTabSet *tai_tabset_create_with_home_url(const char *default_css, bool rtl,
                                            const char *home_url,
                                            char **error) {
-    return tabset_create(default_css, rtl, home_url, NULL, error);
+    return tabset_create_owning(tai_browser_app_create_with_home_url(
+        default_css, rtl, home_url, error), error);
 }
 
 TaiTabSet *tai_tabset_create_for_test(const char *default_css, bool rtl,
                                       const char *home_url,
                                       const char *ca_file, char **error) {
-    return tabset_create(default_css, rtl, home_url, ca_file, error);
+    return tabset_create_owning(tai_browser_app_create_for_test(
+        default_css, rtl, home_url, ca_file, error), error);
 }
 
 TaiTabSet *tai_tabset_create(const char *default_css, bool rtl, char **error) {
-    TaiTabSet *tabs = tai_tabset_create_with_home_url(default_css, rtl,
-        "https://browser.engineering/", error);
-    if (!tabs) return NULL;
-    /* An unusable bookmarks file must not keep the browser from starting.
-     * The file is left untouched and this run keeps favorites in memory. */
-    char *store_error = NULL;
-    TaiBookmarks *bookmarks = tai_bookmarks_open_default(&store_error);
-    if (bookmarks) {
-        tai_bookmarks_destroy(tabs->bookmarks);
-        tabs->bookmarks = bookmarks;
-    } else {
-        fprintf(stderr, "bookmarks will not be saved this session: %s\n",
-                store_error ? store_error : "cannot open bookmarks file");
-    }
-    free(store_error);
-    return tabs;
+    return tabset_create_owning(tai_browser_app_create(default_css, rtl,
+                                                       error), error);
 }
 
 static bool append_new_slot(TaiTabSet *tabs, const char *url,
@@ -532,12 +649,13 @@ static bool append_new_slot(TaiTabSet *tabs, const char *url,
     if (tabs->count >= TAI_MAX_TABS)
         return set_error(error, "maximum of 25 tabs reached");
     if (!reserve_slot(tabs, error)) return false;
-    TaiSession *session = tai_session_create_empty(tabs->default_css,
-                                                   tabs->rtl);
+    TaiBrowserApp *app = tabs->app;
+    TaiSession *session = tai_session_create_empty(app->default_css,
+                                                   app->rtl);
     if (!session) return set_error(error, "tab session allocation failed");
-    TabSlot slot = {.id = tabs->next_tab_id, .generation = 0,
+    TabSlot slot = {.id = app->next_tab_id, .generation = 0,
                     .session = session};
-    if (tabs->next_tab_id == UINT64_MAX) {
+    if (app->next_tab_id == UINT64_MAX) {
         tai_session_destroy(session);
         return set_error(error, "tab identity exhausted");
     }
@@ -550,10 +668,10 @@ static bool append_new_slot(TaiTabSet *tabs, const char *url,
     tabs->slots[tabs->count] = slot;
     TabSlot *stored = &tabs->slots[tabs->count];
     tabs->count++;
-    tabs->next_tab_id++;
+    app->next_tab_id++;
     stored->generation = task->generation;
     stored->active_task = task;
-    queue_push(tabs, task);
+    queue_push(app, task);
     tabs->active = tabs->count - 1;
     return true;
 }
@@ -579,7 +697,7 @@ bool tai_tabset_new_tab(TaiTabSet *tabs, char **error) {
     if (error) { free(*error); *error = NULL; }
     if (!tabs || !tabs->started)
         return set_error(error, "tab set has not started");
-    return append_new_slot(tabs, tabs->home_url, error);
+    return append_new_slot(tabs, tabs->app->home_url, error);
 }
 
 bool tai_tabset_select(TaiTabSet *tabs, size_t index) {
@@ -644,7 +762,7 @@ bool tai_tabset_toggle_bookmark(TaiTabSet *tabs, bool *bookmarked,
         return set_error(error, "no committed bookmarkable page");
     const char *url = tai_url_string(tai_page_url(
         tai_session_page(slot->session)));
-    if (!tai_bookmarks_toggle(tabs->bookmarks, url, bookmarked))
+    if (!tai_bookmarks_toggle(tabs->app->bookmarks, url, bookmarked))
         return set_error(error, "bookmark toggle failed");
     return true;
 }
@@ -708,15 +826,44 @@ bool tai_tabset_resize(TaiTabSet *tabs, double width, double height,
     return true;
 }
 
+static TaiTabSet *tabset_owning(const TaiBrowserApp *app, uint64_t tab_id) {
+    for (size_t index = 0; index < app->tabset_count; index++)
+        if (slot_by_id(app->tabsets[index], tab_id))
+            return app->tabsets[index];
+    return NULL;
+}
+
+/* Moves every published completion to the inbox of the tab set that owns its
+ * tab. A completion whose tab or window is already gone is released here. */
+static void route_completions(TaiBrowserApp *app) {
+    pthread_mutex_lock(&app->mutex);
+    Completion *items = app->completed_head;
+    app->completed_head = NULL;
+    app->completed_tail = NULL;
+    pthread_mutex_unlock(&app->mutex);
+    while (items) {
+        Completion *next = items->next;
+        items->next = NULL;
+        TaiTabSet *owner = tabset_owning(app, items->task->tab_id);
+        if (owner) {
+            if (owner->inbox_tail) owner->inbox_tail->next = items;
+            else owner->inbox_head = items;
+            owner->inbox_tail = items;
+        } else {
+            completions_free(items);
+        }
+        items = next;
+    }
+}
+
 bool tai_tabset_pump(TaiTabSet *tabs, bool *changed, char **error) {
     if (error) { free(*error); *error = NULL; }
     if (changed) *changed = false;
     if (!tabs || !changed) return set_error(error, "invalid tab completion pump");
-    pthread_mutex_lock(&tabs->mutex);
-    Completion *items = tabs->completed_head;
-    tabs->completed_head = NULL;
-    tabs->completed_tail = NULL;
-    pthread_mutex_unlock(&tabs->mutex);
+    route_completions(tabs->app);
+    Completion *items = tabs->inbox_head;
+    tabs->inbox_head = NULL;
+    tabs->inbox_tail = NULL;
 
     bool all_ok = true;
     while (items) {
@@ -805,7 +952,7 @@ bool tai_tabset_view(const TaiTabSet *tabs, TaiTabSetView *view) {
         .can_go_forward = tai_tabset_history_available(tabs, 1),
         .bookmarkable = bookmarkable,
         .bookmarked = bookmarkable &&
-            tai_bookmarks_contains(tabs->bookmarks, committed_url),
+            tai_bookmarks_contains(tabs->app->bookmarks, committed_url),
         .secure = page && tai_page_secure(page),
     };
     return true;
@@ -813,40 +960,30 @@ bool tai_tabset_view(const TaiTabSet *tabs, TaiTabSetView *view) {
 
 void tai_tabset_destroy(TaiTabSet *tabs) {
     if (!tabs) return;
-    if (tabs->loader_started) {
-        pthread_mutex_lock(&tabs->mutex);
-        tabs->stopping = true;
-        for (size_t index = 0; index < tabs->count; index++) {
-            LoadTask *task = tabs->slots[index].active_task;
-            if (task)
-                atomic_store_explicit(&task->cancelled, true,
-                                      memory_order_release);
-        }
-        pthread_cond_broadcast(&tabs->condition);
-        pthread_mutex_unlock(&tabs->mutex);
-        pthread_join(tabs->loader_thread, NULL);
+    TaiBrowserApp *app = tabs->app;
+    /* The shared loader may still own this window's tasks; cancelled ones
+     * complete there and route_completions() or app destroy releases them. */
+    pthread_mutex_lock(&app->mutex);
+    for (size_t index = 0; index < tabs->count; index++) {
+        LoadTask *task = tabs->slots[index].active_task;
+        if (task)
+            atomic_store_explicit(&task->cancelled, true,
+                                  memory_order_release);
     }
-    Completion *completion = tabs->completed_head;
-    while (completion) {
-        Completion *next = completion->next;
-        tai_page_destroy(completion->page);
-        free(completion->error);
-        task_destroy(completion->task);
-        completion = next;
+    pthread_cond_broadcast(&app->condition);
+    pthread_mutex_unlock(&app->mutex);
+    for (size_t index = 0; index < app->tabset_count; index++) {
+        if (app->tabsets[index] != tabs) continue;
+        memmove(&app->tabsets[index], &app->tabsets[index + 1],
+                (app->tabset_count - index - 1) * sizeof(*app->tabsets));
+        app->tabset_count--;
+        break;
     }
-    LoadTask *queued = tabs->queued_head;
-    while (queued) {
-        LoadTask *next = queued->queue_next;
-        task_destroy(queued);
-        queued = next;
-    }
+    completions_free(tabs->inbox_head);
     for (size_t index = 0; index < tabs->count; index++)
         tai_session_destroy(tabs->slots[index].session);
     free(tabs->slots);
-    tai_bookmarks_destroy(tabs->bookmarks);
-    free(tabs->home_url);
-    free(tabs->ca_file);
-    if (tabs->condition_ready) pthread_cond_destroy(&tabs->condition);
-    if (tabs->mutex_ready) pthread_mutex_destroy(&tabs->mutex);
+    bool owns_app = tabs->owns_app;
     free(tabs);
+    if (owns_app) tai_browser_app_destroy(app);
 }

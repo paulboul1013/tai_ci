@@ -107,8 +107,17 @@ private, incompatible node layouts.
   and all SDL resources on the window thread.
   The legacy `tai_present_window_with_chrome` remains available for the
   synchronous single-session adapter.
-- `TaiTabSet` owns ordered tab slots, the active index, and one `TaiSession` per
-  slot. It borrows default CSS and owns the New Tab URL. Each session owns its
+- `TaiBrowserApp` is the process-wide state every window shares, matching
+  Python's `BrowserApp`: the loader thread and its `TaiNetwork` (one cookie
+  jar), the bookmark collection, the New Tab URL, default CSS (borrowed), RTL,
+  the app-wide tab ID counter, and a registry of the tab sets created in it.
+  The registry, IDs and bookmarks belong to the SDL owner thread. The app must
+  outlive every tab set created with `tai_tabset_create_in_app`; the
+  single-window `tai_tabset_create*` constructors build a private app that the
+  tab set owns and destroys with itself.
+- `TaiTabSet` is one window's tabs: ordered tab slots, the active index, one
+  `TaiSession` per slot, and an inbox of completions routed to it. It borrows
+  its app. Each session owns its
   committed page and copied URL history; in-flight URL/history state is exposed
   provisionally without changing the committed session
   (`tai_tabset_history_url` reads that provisional list). A successful
@@ -119,33 +128,40 @@ private, incompatible node layouts.
   superseded or cancelled load commits nothing, so Back while a navigation is
   pending drops the provisional entry (an intentional difference recorded in
   [`PORTING_PLAN.md`](../../PORTING_PLAN.md)).
-- The tab set starts one loader thread. That thread creates, exclusively uses,
+- The app starts one loader thread. That thread creates, exclusively uses,
   and destroys the shared `TaiNetwork`; document and external-resource requests
   use its submit/poll API. It also owns a page candidate through parsing,
   script/style application, layout, and display-list construction. Completion
-  carries the stable tab ID and navigation generation plus the candidate page.
+  carries the stable tab ID and navigation generation plus the candidate page;
+  a task never points at its tab set. Any tab set's pump moves the app's
+  published completions to the inbox of the tab set whose slots contain that
+  tab ID (releasing those whose window is gone), then commits its own inbox.
   The SDL thread rejects stale generations and takes page ownership only while
   committing to the matching session. Replaced tasks are canceled by the
-  loader thread; tab-set shutdown marks pending work canceled, joins the loader,
-  drains completions, then destroys sessions. Destruction runs on the window
-  owner after it has stopped issuing tab-set operations. No loader path touches
-  SDL.
+  loader thread. Destroying a tab set marks its pending work canceled and
+  unregisters it without waiting for the loader; the loader later publishes
+  those cancelled tasks and the next pump or app destruction frees them. App
+  shutdown cancels queued work, joins the loader, then drains completions.
+  Destruction runs on the window owner after it has stopped issuing
+  operations. No loader path touches SDL.
 - A navigation snapshots its Referer from the same tab's committed page URL;
   if it supersedes a pending navigation, it uses that provisional URL, matching
   Python's capture-before-assignment behavior. Other tabs never supply a
   Referer to the request.
-- `TaiTabSet` owns one `TaiBookmarks` collection shared by all tabs; chrome
+- `TaiBrowserApp` owns one `TaiBookmarks` collection shared by all tabs and
+  windows; chrome
   reads it only through `TaiTabSetView.bookmarkable/bookmarked`. Toggle,
   lookup, and the `about:bookmarks` snapshot run on the SDL thread. Starting an
   `about:bookmarks` navigation copies a sorted snapshot into generated HTML
   owned by the load task, so the loader thread never reads the mutable
-  collection. `tai_tabset_create` opens the per-user file
+  collection. `tai_browser_app_create` (and so `tai_tabset_create`) opens the
+  per-user file
   (`$XDG_DATA_HOME/tai-browser/bookmarks`, else
   `~/.local/share/tai-browser/bookmarks`); each toggle writes a temporary file,
   fsyncs, and renames it before changing memory, so a failed write leaves both
-  unchanged. If the file cannot be opened or parsed, the tab set warns on
+  unchanged. If the file cannot be opened or parsed, the app warns on
   stderr, keeps the file untouched, and uses a memory-only collection.
-  `tai_tabset_create_with_home_url` is always memory-only.
+  The `_with_home_url` and `_for_test` variants are always memory-only.
 - Page security is a property of the committed `TaiPage`, not extra tab-set
   state: `tai_page_secure()` is true when the page's requested URL is `https`
   and its document response had no transport or certificate error (redirects
@@ -153,7 +169,8 @@ private, incompatible node layouts.
   page, so a pending navigation keeps the previous page's lock, an error page
   has none, and every tab keeps its own value. The SDL thread is the only
   reader.
-- `tai_tabset_create_for_test` additionally copies a CA bundle path that the
+- `tai_browser_app_create_for_test` (and `tai_tabset_create_for_test`)
+  additionally copies a CA bundle path that the
   loader thread applies with `tai_network_set_ca_file()` right after creating
   its `TaiNetwork` and before reporting readiness; the string is written
   before `pthread_create` and only read by the loader afterwards. Only

@@ -137,8 +137,10 @@ SDL 事件。因為 `handle_new_window` 寫死外部網址，probe 包裝 `Brows
  TaiTabSet（視窗 1）  TaiTabSet（視窗 2） …  每個視窗一個，擁有自己的分頁與 session
 ```
 
-- 新增 `include/tai/app.h`、`src/app.c`：`tai_browser_app_create*()`／`_destroy()`、
-  `tai_browser_app_pump()`（把 loader 完成的工作依 tab ID 分送給對應 `TaiTabSet`）。
+- `TaiBrowserApp` 宣告在 `include/tai/tabset.h`、實作在 `src/tabset.c`（loader 與私有
+  `LoadTask` 緊密相關，不另開檔）：`tai_browser_app_create*()`／`_destroy()`。沒有獨立的
+  app pump：任一 `TaiTabSet` 的 `tai_tabset_pump()` 先把 app 的完成結果依 tab ID 分送到
+  各 tab set 的 inbox，再提交自己的 inbox。
 - `TaiTabSet` 改為借用 `TaiBrowserApp`，新增 `tai_tabset_create_in_app(app, ...)`。
   **既有的 `tai_tabset_create*()` 保留**，內部建立一個私有 app 並擁有它，讓既有測試與
   呼叫端不必修改。

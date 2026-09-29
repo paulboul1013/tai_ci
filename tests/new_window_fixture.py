@@ -2,8 +2,9 @@
 
 Every page has a unique <h1> so waiting for a heading cannot succeed early.
 The server records each request's method, path and Cookie header. /cookie-set
-answers with a session cookie so a later request from another window shows
-whether the cookie jar is shared. A gate holds /delay until the test releases
+answers with a session cookie and /cookie-check echoes the Cookie header it
+received, so a later request from another window shows whether the cookie jar
+is shared. A gate holds /delay until the test releases
 it, which keeps a load in flight while its window closes.
 """
 
@@ -71,7 +72,12 @@ class NewWindowServer:
                         pass
                     self.connection.close()
                     return
-                payload = PAGES[path].encode()
+                payload = PAGES[path]
+                if path == "/cookie-check":
+                    # Echo the cookie so a native test can read it on the page.
+                    payload = page("cookie-check", "<p>cookie=[{}]</p>".format(
+                        self.headers.get("Cookie") or ""))
+                payload = payload.encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(payload)))

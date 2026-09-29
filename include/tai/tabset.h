@@ -4,6 +4,10 @@
 #include "tai/session.h"
 
 typedef struct TaiTabSet TaiTabSet;
+/* Process-wide browser state shared by every window: one loader thread and
+ * its TaiNetwork (so one cookie jar), the bookmark collection, the New Tab
+ * URL and the page configuration. */
+typedef struct TaiBrowserApp TaiBrowserApp;
 
 enum { TAI_MAX_TABS = 25 };
 
@@ -29,7 +33,34 @@ typedef struct {
     bool secure;
 } TaiTabSetView;
 
-/* The caller owns the tab set and default_css must outlive it. Creation starts
+/* The caller owns the app; default_css must outlive it. Creation starts one
+ * loader thread, which creates, exclusively uses and destroys the shared
+ * TaiNetwork. All app and tab-set operations except the loader's own work
+ * run on the SDL/window owner thread. tai_browser_app_create opens the
+ * persistent per-user bookmarks like tai_tabset_create; the other variants
+ * keep bookmarks in memory and mirror the tab-set constructors below. */
+TaiBrowserApp *tai_browser_app_create(const char *default_css, bool rtl,
+                                      char **error);
+TaiBrowserApp *tai_browser_app_create_with_home_url(const char *default_css,
+                                                    bool rtl,
+                                                    const char *home_url,
+                                                    char **error);
+TaiBrowserApp *tai_browser_app_create_for_test(const char *default_css,
+                                               bool rtl, const char *home_url,
+                                               const char *ca_file,
+                                               char **error);
+/* Destroy every tab set created in the app first. Cancels queued work, joins
+ * the loader and releases completions nobody collected. */
+void tai_browser_app_destroy(TaiBrowserApp *app);
+/* One window's tab set borrowing app, which must outlive it. Tab IDs are
+ * unique across the app. Each tab set's pump routes completions for the
+ * app's other tab sets to them, and destroying a tab set cancels its loads
+ * without waiting for the loader. */
+TaiTabSet *tai_tabset_create_in_app(TaiBrowserApp *app, char **error);
+
+/* Single-window constructors: the tab set owns a private app built with the
+ * matching tai_browser_app_create* variant and destroys it with itself.
+ * The caller owns the tab set and default_css must outlive it. Creation starts
  * one loader thread; that thread creates, exclusively uses, and destroys the
  * shared TaiNetwork. All public operations except destroy are called by the
  * SDL/window owner thread. Loaded pages transfer from the loader to sessions
@@ -57,7 +88,8 @@ bool tai_tabset_start(TaiTabSet *tabs, const char *url, double width,
                       double height,
                       char **error);
 /* Call after the window owner has stopped issuing other operations. Destroy
- * cancels and joins the loader, then releases sessions and queued completions. */
+ * cancels this tab set's loads and releases its sessions; a tab set that owns
+ * its app also destroys the app, joining the loader. */
 void tai_tabset_destroy(TaiTabSet *tabs);
 
 /* New Tab creates and selects the default-home tab before its load completes.

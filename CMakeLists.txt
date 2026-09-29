@@ -189,6 +189,12 @@ if(BUILD_TESTING)
   add_executable(test_tabset tests/test_tabset.c)
   target_link_libraries(test_tabset PRIVATE tai_core)
   target_compile_options(test_tabset PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_executable(test_browser_app tests/test_browser_app.c)
+  target_link_libraries(test_browser_app PRIVATE tai_core)
+  target_compile_options(test_browser_app PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME browser_app_integration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/browser_app_integration.py"
+    $<TARGET_FILE:test_browser_app>)
   add_executable(test_tabset_loader_oom tests/test_tabset_loader_oom.c)
   target_link_libraries(test_tabset_loader_oom PRIVATE tai_core)
   target_compile_options(test_tabset_loader_oom PRIVATE -Wall -Wextra -Wpedantic -Werror)
