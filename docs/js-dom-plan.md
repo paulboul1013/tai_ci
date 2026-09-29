@@ -1,6 +1,6 @@
 # JS DOM 補齊：整體計畫與交接
 
-**狀態：實作中（2026-09-29）。** 六項決定皆已確認；切片 0–2 完成，切片 3 起尚未開始。
+**狀態：實作中（2026-09-29）。** 六項決定皆已確認；切片 0–3 完成，切片 4 起尚未開始。
 計畫已經四路獨立驗證（oracle 實跑、native 程式碼、所有權設計、文件一致性），結果已併入本文。
 本工作處理 [ACCEPTANCE.md](../ACCEPTANCE.md) 的「JS-visible DOM mutation、query、event
 propagation/default prevention、XHR 與實際可用 scheduling APIs」，並滿足同檔「ASan 重複
@@ -55,7 +55,7 @@ load/mutate/render/close」與「獨立 verifier」兩項；也處理 [PORTING_P
   wrapper 才刪；刪後再加回是新 wrapper（`!==`）；`setAttribute('id')` 會重算；detached 節點的 id 不進
   全域，接上後才進。`getAttribute` 名稱不 casefold，`setAttribute` 才 casefold。
 - **序列化：** 屬性依解析順序（同名後者覆蓋、位置留在第一次出現處）；文字只 escape `& < >`，屬性
-  escape `" & < >`；`<script>` 內容也被 escape；void 元素無結尾標籤；空屬性輸出 `disabled=""`；
+  escape `" ' & < >`（`'` 為 `&#x27;`）；`<script>` 內容也被 escape；void 元素無結尾標籤；空屬性輸出 `disabled=""`；
   註解被丟棄；**屬性值的 entity 不解碼**（`class="a&quot;b"` → `class="a&amp;quot;b"`）；
   `<br/>` 解析成標籤 `br/`，序列化成 `<br/>…</br/>`。
 - **innerHTML 設定：** 以 `<html><body>` 包裝，取**最後一個** `body`（`find_body` 不中斷）；
@@ -76,7 +76,7 @@ load/mutate/render/close」與「獨立 verifier」兩項；也處理 [PORTING_P
 | `querySelectorAll`、`getAttribute`/`setAttribute` | 有（`src/js.c`） | `setAttribute('id')` 不重算 ID 全域；未知 handle／Text 的錯誤需比對 |
 | `id`/`style` 存取器、`children`、`window`、`log` | 無 | 全補 |
 | `createElement`、`appendChild`、`insertBefore`、`removeChild` | 無（`tai_node_append` 有循環檢查但沒接 JS） | 全補 |
-| `innerHTML`/`outerHTML` | `tai_node_set_inner_html` 存在但無呼叫者，且取**第一個** `body`（`src/dom.c:591`，與 Python 相反）；無 HTML 序列化器 | 修正 body 選擇、新增序列化 |
+| `innerHTML`/`outerHTML` | 切片 3 前：`tai_node_set_inner_html` 無呼叫者且取**第一個** `body`；無 HTML 序列化器 | 切片 3 已完成 |
 | ID 全域 | 建立時設一次，從不刪除（`src/js.c:33`、`189`） | 改成 Python `sync_id_globals` 語意 |
 | Inline script | **會執行**（`src/browser.c:115-124`、`296-299`），與外部 script 依 source 順序執行，不受 CSP 限制 | 保留執行，但頁面有 CSP `default-src` 時不執行（比照真實瀏覽器）；記為刻意差異 D6（決定 5） |
 | Listener 丟錯 | `tai_js_dispatch_event` 回錯誤，`browser.c:1205/1348/1450` 直接 `return false`，一路讓**視窗事件迴圈結束** | **既有缺陷**，改成真實瀏覽器語意（決定 6，D7） |
@@ -231,6 +231,44 @@ bridge 內 ID 同步出現後補測。
   審查時（切片 7 的 `ownership-reviewer`）逐條確認這三條沒有被破壞。
 
 ### 切片 3：序列化與 innerHTML
+
+**狀態：完成（2026-09-29）。**
+- **序列化：** `dom.c` 新增 `tai_node_serialize(node, outer)`（Python `serialize_node`；outer＝
+  `outerHTML`，否則只序列化子節點＝`innerHTML`）。以明確堆疊迭代走訪，深樹不會耗盡 C 堆疊。屬性依
+  `TaiMap` 儲存順序（同名後者覆蓋、位置留在第一次出現處）；文字（含 `<script>` 內容）只 escape
+  `& < >`，屬性值另 escape `"` 與 `'`（實跑 `html.escape(quote=True)` 確認為 `&#x27;`）；void 元素
+  不輸出子節點與結尾標籤，但 void 元素自己的 `innerHTML` 仍列出腳本加入的子節點（同 Python）。
+- **innerHTML 設定：** `tai_node_set_inner_html(node, html, &removed, &removed_count)` 改回傳
+  `TaiDomStatus`：取**最後一個** `body`（修正原本取第一個與錯誤註解）；fragment 的所有節點（含包裝用
+  `html`／`head`／`body`）加入文件前先檢查 D2 上限（超過回 `TAI_DOM_NODE_LIMIT`）；Python
+  `HTMLParser` 會丟 `IndexError` 的標記（開放元素堆疊為空）回新的 `TAI_DOM_PARSE_ERROR`，與配置
+  失敗（`TAI_DOM_NO_MEMORY`）分開；三種失敗都整批回收 fragment、樹與節點數不變。成功時舊子節點陣列
+  移交呼叫端。
+- **Bridge：** `innerHTML_get`、`innerHTML_set`、`outerHTML_get`（只經 `node_arg` 取節點）。
+  `innerHTML_set` 對每個舊子節點呼叫 `node_removed`，再 `after_mutation(js, true)`（ID 全域重算＋
+  `invalidated`，中斷往外傳）。錯誤：上限 → `Error('Document node limit reached')`；解析錯誤 →
+  可攔截的 `Error('HTML parsing failed: invalid parser stack')`（Python 為 bridge `IndexError`，
+  差異測試規則視為 native `Error`）。
+- **Parser 一致性：** 屬性 entity 不解碼、`<br/>` 成為標籤 `br/`、空屬性與無值屬性皆為 `""`、屬性名
+  casefold、重複屬性位置，native parser 原本就與 Python 一致，未修改 parser。`tests/dom_differential.py`
+  新增 6 個情境，並加強為（1）屬性依順序比對（原本 dict 比較忽略順序）、（2）每個情境以 AST 取出
+  凍結 `JSContext.serialize_node`／`serialize_attributes` 與 `VOID_ELEMENTS`，比對 native
+  `outerHTML`／`innerHTML`（`test_dom --serialize`／`--serialize-inner`）；278 個情境全部相符。
+- **差異測試：** `js_dom_differential` 移除 10 個切片 3 pending，22 個情境與 oracle 相符、剩 4 個
+  pending（切片 5 cookie×2、切片 6 RAF×2）；未改 `js_dom_cases.py` 與 fixture，
+  `js_dom_oracle_probe.py --check` 仍相符。另以臨時 oracle probe 實跑（不入固定情境）：setAttribute 值含
+  `' " & < >`、`<br/>`、entity 屬性、emoji、`<body id=…>` 包裝、`<script>` 不執行、`</div></body></html>`
+  前綴、改寫 `html` 元素的 `innerHTML`、解析錯誤後樹不變——全部相符；唯一不同是字串含 U+0000（native
+  在 NUL 處截斷），記入 PORTING_PLAN.md「已知差異與範圍」。
+- **單元測試：** `test_dom.c`（以 `--wrap` 注入配置失敗）：序列化規則、最後一個 body、舊子節點移交、
+  解析錯誤不變、每個配置點失敗時樹與節點數不變、序列化配置失敗回 NULL、D2 上限（剛好達上限成功、
+  多一個失敗）。`test_js.c`：getter 不觸發回呼、`innerHTML` 的 `node_removed`／`invalidated` 次數、
+  ID 全域刪加、`null` 丟 `TypeError`、解析錯誤可攔截、節點上限錯誤且回呼與樹不變。
+- **證據：** Debug CTest 48/48；`build-asan/` 全套 48/48（ASan/UBSan＋LSan 開啟，只排除文件記載的
+  fontconfig／cairo 洩漏）。指令：`cmake --build build -j 4`、`ctest --test-dir build
+  --output-on-failure -j 3`、`ASAN_OPTIONS=detect_leaks=1 LSAN_OPTIONS=suppressions=<檔>
+  ctest --test-dir build-asan --output-on-failure -j 3`、`python3 tests/js_dom_oracle_probe.py --check`。
+- **未做：** 獨立 `ownership-reviewer` 審查留待切片 7；標題的 JS 改寫整合屬切片 4。
 
 - `dom.c` 新增 `tai_node_serialize(node, bool outer)`，規則照 oracle（見上）；確認 native parser
   對屬性 entity、`<br/>`、空屬性與 Python 一致，不一致就先修 parser（`dom_differential.py` 加情境）。

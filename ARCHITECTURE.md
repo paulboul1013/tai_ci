@@ -59,7 +59,7 @@ Public interfaces generally share a name with their implementation; internal fil
 | Interface / implementation | Boundary |
 |---|---|
 | `core.h` / `core.c` | strings、map、file、JSON primitives |
-| `dom.h` / `dom.c` | HTML parsing、document、DOM nodes、view-source |
+| `dom.h` / `dom.c` | HTML parsing、document、DOM nodes、script mutation（`TaiDomStatus`）、HTML 序列化（`tai_node_serialize`，Python `serialize_node`）、view-source |
 | `css.h` / `css.c` | CSS parsing、selectors、cascade、computed style |
 | `url.h` / `url.c` | URL parsing、resolution、origin and identity |
 | `network.h` / `network.c` | libcurl multi requests、responses、cache/cookies |

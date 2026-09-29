@@ -300,7 +300,14 @@ typedef struct {
   TaiNode **stack, **format;
   size_t n, cap, nf, cf;
   Buffer *view;
+  bool invalid; /* failed on an empty open-element stack, not on memory */
 } Parser;
+/* Where Python's HTMLParser raises IndexError on an empty stack. */
+static bool empty_stack(Parser *p) {
+  if (!p->n)
+    p->invalid = true;
+  return !p->n;
+}
 static bool has(const char *t, const char *list) {
   const char *p = list;
   size_t n = strlen(t);
@@ -365,7 +372,7 @@ static bool text_add(Parser *p, const char *s) {
     return false;
   TaiNode *n = node_new(p->d, TAI_TEXT, v);
   free(v);
-  return n && p->n && tai_node_append(p->stack[p->n - 1], n);
+  return n && !empty_stack(p) && tai_node_append(p->stack[p->n - 1], n);
 }
 static bool attributes(const char *s, char **name, TaiMap *m) {
   size_t i = 0;
@@ -412,8 +419,10 @@ static bool attributes(const char *s, char **name, TaiMap *m) {
   return true;
 }
 static bool pop_attach(Parser *p) {
-  if (p->n < 2)
+  if (p->n < 2) {
+    p->invalid = true;
     return false;
+  }
   TaiNode *n = p->stack[--p->n];
   return tai_node_append(p->stack[p->n - 1], n);
 }
@@ -473,7 +482,7 @@ static bool tag(Parser *p, const char *s) {
           break;
       }
       for (size_t i = found + 1; i < old; i++) {
-        if (!p->n)
+        if (empty_stack(p))
           goto done;
         TaiNode *f = p->format[i], *n = node_new(p->d, TAI_ELEMENT, f->tag);
         if (!n || !tai_map_copy(&n->attributes, &f->attributes))
@@ -496,7 +505,7 @@ static bool tag(Parser *p, const char *s) {
     n->checked = tai_map_get(&n->attributes, "checked") != NULL;
     if (has(t, "area base br col embed hr img input link meta param source "
                "track wbr")) {
-      ok = p->n && tai_node_append(p->stack[p->n - 1], n);
+      ok = !empty_stack(p) && tai_node_append(p->stack[p->n - 1], n);
     } else {
       n->parent = p->n ? p->stack[p->n - 1] : NULL;
       ok = push(&p->stack, &p->n, &p->cap, n);
@@ -598,7 +607,7 @@ static bool parse(Parser *p, const char *s) {
     while (p->n > 1)
       if (!pop_attach(p))
         goto done;
-    if (!p->n)
+    if (empty_stack(p))
       goto done;
     p->d->root = p->stack[--p->n];
   }
@@ -609,20 +618,26 @@ done:
   free(p->format);
   return ok;
 }
+static TaiDocument *parse_document(const char *html, bool *invalid) {
+  *invalid = false;
+  TaiDocument *d = calloc(1, sizeof(*d));
+  if (!d)
+    return NULL;
+  Parser p = {.d = d};
+  if (!html || !parse(&p, html)) {
+    *invalid = p.invalid;
+    tai_document_destroy(d);
+    return NULL;
+  }
+  return d;
+}
 TaiDocument *tai_html_parse(const char *html, char **error) {
   if (error)
     *error = NULL;
-  TaiDocument *d = calloc(1, sizeof(*d));
-  if (!d) {
+  bool invalid;
+  TaiDocument *d = parse_document(html, &invalid);
+  if (!d)
     fail(error);
-    return NULL;
-  }
-  Parser p = {.d = d};
-  if (!html || !parse(&p, html)) {
-    tai_document_destroy(d);
-    fail(error);
-    return NULL;
-  }
   return d;
 }
 char *tai_view_source(const char *html, char **error) {
@@ -637,35 +652,40 @@ char *tai_view_source(const char *html, char **error) {
   }
   return b.s;
 }
-bool tai_node_set_inner_html(TaiNode *node, const char *html, char **error) {
-  if (error)
-    *error = NULL;
-  if (!node || !html) {
-    fail(error);
-    return false;
-  }
+/* Python innerHTML_set: parse "<html><body>" + html + "</body></html>" and
+ * adopt the children of the LAST body in pre-order (find_body keeps scanning).
+ * Every fragment node joins the document, like parsed nodes, so the D2 limit
+ * counts them all. Nothing changes unless TAI_DOM_OK is returned. */
+TaiDomStatus tai_node_set_inner_html(TaiNode *node, const char *html,
+                                     TaiNode ***removed,
+                                     size_t *removed_count) {
+  if (removed)
+    *removed = NULL;
+  if (removed_count)
+    *removed_count = 0;
+  if (!node || !html || !node->document)
+    return TAI_DOM_WRONG_DOCUMENT;
   Buffer b = {0};
   if (!str(&b, "<html><body>") || !str(&b, html) ||
       !str(&b, "</body></html>")) {
     free(b.s);
-    fail(error);
-    return false;
+    return TAI_DOM_NO_MEMORY;
   }
-  TaiDocument *fragment = tai_html_parse(b.s, error);
+  bool invalid;
+  TaiDocument *fragment = parse_document(b.s, &invalid);
   free(b.s);
   if (!fragment)
-    return false;
-  TaiNode *body = NULL; /* Python find_body performs pre-order traversal. */
+    return invalid ? TAI_DOM_PARSE_ERROR : TAI_DOM_NO_MEMORY;
+  TaiDomStatus status = TAI_DOM_NO_MEMORY;
+  TaiNode *body = NULL;
   TaiNode **stack = NULL;
   size_t n = 0, cap = 0;
   if (!push(&stack, &n, &cap, fragment->root))
     goto bad;
   while (n) {
     TaiNode *x = stack[--n];
-    if (x->kind == TAI_ELEMENT && !strcmp(x->tag, "body")) {
+    if (x->kind == TAI_ELEMENT && !strcmp(x->tag, "body"))
       body = x;
-      break;
-    }
     for (size_t i = x->child_count; i > 0; i--)
       if (!push(&stack, &n, &cap, x->children[i - 1]))
         goto bad;
@@ -673,13 +693,23 @@ bool tai_node_set_inner_html(TaiNode *node, const char *html, char **error) {
   free(stack);
   stack = NULL;
   TaiDocument *d = node->document;
-  if (fragment->count > SIZE_MAX - d->count ||
-      !grow((void **)&d->nodes, &d->capacity, d->count + fragment->count,
+  if (fragment->count > TAI_DOCUMENT_SCRIPT_NODE_LIMIT ||
+      d->count > TAI_DOCUMENT_SCRIPT_NODE_LIMIT - fragment->count) {
+    status = TAI_DOM_NODE_LIMIT;
+    goto bad;
+  }
+  if (!grow((void **)&d->nodes, &d->capacity, d->count + fragment->count,
             sizeof(*d->nodes)))
     goto bad;
+  /* Nothing below can fail. */
   for (size_t i = 0; i < node->child_count; i++)
     node->children[i]->parent = NULL;
-  free(node->children);
+  if (removed && node->child_count) {
+    *removed = node->children;
+    if (removed_count)
+      *removed_count = node->child_count;
+  } else
+    free(node->children);
   node->children = body ? body->children : NULL;
   node->child_count = body ? body->child_count : 0;
   node->child_capacity = body ? body->child_capacity : 0;
@@ -697,12 +727,95 @@ bool tai_node_set_inner_html(TaiNode *node, const char *html, char **error) {
   }
   fragment->count = 0;
   tai_document_destroy(fragment);
-  return true;
+  return TAI_DOM_OK;
 bad:
   free(stack);
   tai_document_destroy(fragment);
-  fail(error);
-  return false;
+  return status;
+}
+/* Python JSContext.serialize_node, iteratively so deep trees cannot exhaust
+ * the C stack. html.escape: text escapes & < >, attribute values also " and
+ * ' (as &#x27;). Script contents are escaped like any text. */
+static bool escape_into(Buffer *b, const char *s, bool quote) {
+  for (; *s; s++) {
+    const char *v = *s == '&'             ? "&amp;"
+                    : *s == '<'            ? "&lt;"
+                    : *s == '>'            ? "&gt;"
+                    : quote && *s == '"'   ? "&quot;"
+                    : quote && *s == '\'' ? "&#x27;"
+                                           : NULL;
+    if (v ? !str(b, v) : !put(b, s, 1))
+      return false;
+  }
+  return true;
+}
+static bool is_void(const char *t) {
+  return has(t, "area base br col embed hr img input link meta param source "
+                "track wbr");
+}
+static bool open_tag(Buffer *b, const TaiNode *n) {
+  if (!str(b, "<") || !str(b, n->tag))
+    return false;
+  for (size_t i = 0; i < n->attributes.count; i++) {
+    const TaiPair *a = &n->attributes.items[i];
+    if (!str(b, " ") || !str(b, a->key) || !str(b, "=\"") ||
+        !escape_into(b, a->value ? a->value : "", true) || !str(b, "\""))
+      return false;
+  }
+  return str(b, ">");
+}
+char *tai_node_serialize(const TaiNode *node, bool outer) {
+  if (!node)
+    return NULL;
+  typedef struct {
+    const TaiNode *n;
+    size_t next;
+  } Frame;
+  Buffer b = {0};
+  Frame *stack = NULL;
+  size_t depth = 0, cap = 0;
+  bool ok = put(&b, "", 0);
+  if (ok && outer) {
+    if (node->kind == TAI_TEXT)
+      ok = escape_into(&b, node->text, false);
+    else if (node->kind == TAI_ELEMENT) {
+      ok = open_tag(&b, node);
+      if (ok && is_void(node->tag))
+        goto done;
+    }
+  }
+  if (ok && node->kind == TAI_ELEMENT) {
+    ok = grow((void **)&stack, &cap, 1, sizeof(*stack));
+    if (ok)
+      stack[depth++] = (Frame){node, 0};
+  }
+  while (ok && depth) {
+    Frame *f = &stack[depth - 1];
+    if (f->next == f->n->child_count) {
+      depth--;
+      if ((depth || outer) &&
+          (!str(&b, "</") || !str(&b, f->n->tag) || !str(&b, ">")))
+        ok = false;
+      continue;
+    }
+    const TaiNode *c = f->n->children[f->next++];
+    if (c->kind == TAI_TEXT) {
+      ok = escape_into(&b, c->text, false);
+    } else if (c->kind == TAI_ELEMENT) {
+      ok = open_tag(&b, c);
+      if (ok && !is_void(c->tag)) {
+        ok = grow((void **)&stack, &cap, depth + 1, sizeof(*stack));
+        if (ok)
+          stack[depth++] = (Frame){c, 0};
+      }
+    }
+  }
+done:
+  free(stack);
+  if (ok)
+    return b.s;
+  free(b.s);
+  return NULL;
 }
 static void map_json(FILE *out, const TaiMap *m) {
   fputc('{', out);

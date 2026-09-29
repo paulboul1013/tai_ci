@@ -13,10 +13,27 @@ tree = ast.parse(source.read_text())
 names = {'Text', 'Element', 'HTMLParser', 'ViewSourceParser'}
 ns = {'unescape': html.unescape}
 exec(compile(ast.Module(body=[n for n in tree.body if isinstance(n, ast.ClassDef) and n.name in names], type_ignores=[]), str(source), 'exec'), ns)
+# JSContext's serializer methods and VOID_ELEMENTS, run as-is on a bare class.
+js_context = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'JSContext')
+serializer = ast.ClassDef(name='Serializer', bases=[], keywords=[], decorator_list=[],
+                          body=[n for n in js_context.body if isinstance(n, ast.FunctionDef)
+                                and n.name in ('serialize_node', 'serialize_attributes')])
+void = [n for n in tree.body if isinstance(n, ast.Assign) and any(
+    isinstance(t, ast.Name) and t.id == 'VOID_ELEMENTS' for t in n.targets)]
+ns['escape'] = html.escape
+exec(compile(ast.fix_missing_locations(ast.Module(body=void + [serializer], type_ignores=[])),
+             str(source), 'exec'), ns)
+serialize = ns['Serializer']().serialize_node
 def normalize(node):
     if isinstance(node, ns['Text']):
         return {'text': node.text}
-    return {'tag': node.tag, 'attributes': node.attributes, 'children': [normalize(c) for c in node.children]}
+    # Attribute order is observable through outerHTML, so it is compared too.
+    return {'tag': node.tag, 'attributes': list(node.attributes.items()), 'children': [normalize(c) for c in node.children]}
+def ordered(node):
+    if 'tag' in node:
+        node['attributes'] = list(node['attributes'].items())
+        node['children'] = [ordered(c) for c in node['children']]
+    return node
 
 cases = [
     '', ' ', 'hello', '<!doctype html><title>T</title><p>Hi',
@@ -36,6 +53,11 @@ cases = [
 cases += [' '.join('&' + key for key in html.entities.html5),
           ' '.join('&#%d;' % n for n in list(range(256)) + [0xd800, 0xdfff, 0xfdd0, 0xfffe, 0x10ffff, 0x110000]),
           '<Straße İD="x" A\u001cb="y">z', '<div>&notit; &amp= &copycat;</div>']
+# Attribute values keep entities undecoded; duplicates keep the first position.
+cases += ['<p class="a&quot;b" title=\'x&amp;y\' data-q="it\'s">t</p>',
+          '<input disabled="" value checked=>', '<a b=1 c=2 B=3 C="4">x</a>',
+          '<img src=x/><br/>t</br/>', '<p a="<>&\'">x < y & z > w</p>',
+          '<script>if (a < b && c > d) { s = "</b>"; }</script>']
 rng = random.Random(7351)
 tokens = ['<p>', '</p>', '<b>', '</b>', '<i>', '</i>', '<div>', '</div>', '<head>', '</head>', '<li>', '<ul>', '</ul>', '<br>', 'a', '&amp;', ' ', '<!--x-->']
 cases += [''.join(rng.choices(tokens, k=16)) for _ in range(250)]
@@ -57,7 +79,13 @@ with tempfile.TemporaryDirectory() as directory:
             continue
         p.write_text(value)
         got = subprocess.run([exe, str(p)], check=True, capture_output=True, text=True)
-        actual = json.loads(got.stdout)
+        actual = ordered(json.loads(got.stdout))
         passed += 1
         assert actual == expected, f'case {i}: {value!r}\nexpected {expected}\nactual {actual}'
+        python_root = ns['HTMLParser'](value).parse()
+        for outer in (True, False):
+            want = serialize(python_root) if outer else ''.join(serialize(c) for c in python_root.children)
+            got = subprocess.run([exe, '--serialize' if outer else '--serialize-inner', str(p)],
+                                 check=True, capture_output=True).stdout.decode('utf-8')
+            assert got == want, f'serialize case {i} outer={outer}: {value!r}\nexpected {want!r}\nactual {got!r}'
 print(f'DOM differential: {passed} cases passed; {exceptions} Python exceptions mapped to native errors')

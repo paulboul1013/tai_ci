@@ -209,6 +209,74 @@ static void test_mutation_callbacks(void) {
     tai_document_destroy(doc);
 }
 
+/* innerHTML = s reports every former child as removed, invalidates once and
+ * resyncs the ID globals; the getters change nothing. */
+static void test_inner_html(void) {
+    char *error = NULL;
+    TaiDocument *doc = tai_html_parse(
+        "<div id=box><b id=old>b</b>text<i>i</i></div>", &error);
+    assert(doc && !error);
+    MutationLog log = {0};
+    TaiJsHost host = {.invalidated = count_invalidation,
+                      .node_removed = record_removal, .userdata = &log};
+    TaiJsContext *js = tai_js_create(tai_document_root(doc), &host, &error);
+    assert(js && !error);
+    TaiNode *box = find_element(tai_document_root(doc), "div");
+    TaiNode *italic = find_element(box, "i");
+    char *result = NULL;
+    assert(tai_js_eval_value(js, "get.js", "box.innerHTML + '|' + box.outerHTML",
+                             &result, &error));
+    assert(!strcmp(result, "<b id=\"old\">b</b>text<i>i</i>|"
+                           "<div id=\"box\"><b id=\"old\">b</b>text<i>i</i></div>"));
+    free(result);
+    assert(log.invalidations == 0 && log.removed == 0);
+    assert(tai_js_eval_value(js, "set.js",
+        "var kept = old; box.innerHTML = '<p id=fresh>n</p>';"
+        " [typeof old, fresh.outerHTML, kept.outerHTML].join('|')",
+        &result, &error));
+    assert(!strcmp(result, "undefined|<p id=\"fresh\">n</p>|<b id=\"old\">b</b>"));
+    free(result);
+    assert(log.removed == 3 && log.last_removed == italic && !italic->parent);
+    assert(log.invalidations == 1);
+    assert(box->child_count == 1 && !strcmp(box->children[0]->tag, "p"));
+    /* An emptied element reports nothing more to remove. */
+    assert(tai_js_eval(js, "clear.js", "box.innerHTML = ''; box.innerHTML = ''",
+                       &error));
+    assert(log.removed == 4 && log.invalidations == 3 && !box->child_count);
+    /* runtime.js calls s.toString(): null throws before reaching C. */
+    assert(!tai_js_eval(js, "null.js", "box.innerHTML = null", &error));
+    assert(error && strstr(error, "TypeError"));
+    free(error);
+    error = NULL;
+    assert(log.invalidations == 3);
+    /* Python's parser raises on this markup: a catchable plain Error. */
+    assert(tai_js_eval_value(js, "parse.js",
+        "try { box.innerHTML = '<i></div><b> </i><head></i></p><i><b><i><ul><i><i></i>';"
+        " 'no error' } catch (e) { e.name + ': ' + e.message }", &result, &error));
+    assert(!strcmp(result, "Error: HTML parsing failed: invalid parser stack"));
+    free(result);
+    assert(log.invalidations == 3 && log.removed == 4);
+    assert(!tai_js_eval(js, "unknown.js", "new Node(999).innerHTML", &error));
+    assert(error && strstr(error, "Unknown node handle"));
+    free(error);
+    error = NULL;
+
+    /* D2: the parsed fragment counts toward the node limit; failing leaves
+     * the element and the callbacks untouched. */
+    assert(tai_js_eval(js, "fill.js", "box.innerHTML = '<u>keep</u>'", &error));
+    size_t removed = log.removed, invalidations = log.invalidations;
+    TaiDomStatus status = TAI_DOM_OK;
+    while (tai_document_create_element(doc, "b", &status)) {}
+    assert(status == TAI_DOM_NODE_LIMIT);
+    assert(!tai_js_eval(js, "over.js", "box.innerHTML = 'x'", &error));
+    assert(error && strstr(error, "Document node limit reached"));
+    free(error);
+    assert(log.removed == removed && log.invalidations == invalidations);
+    assert(box->child_count == 1 && !strcmp(box->children[0]->tag, "u"));
+    tai_js_destroy(js);
+    tai_document_destroy(doc);
+}
+
 /* A bridge call that re-enters JS (the ID global resync) must not reset the
  * outer script's deadline. */
 static void test_nested_deadline(void) {
@@ -287,6 +355,7 @@ static void test_node_limit(void) {
 
 int main(void) {
     test_mutation_callbacks();
+    test_inner_html();
     test_nested_deadline();
     test_append_cost();
     test_node_limit();

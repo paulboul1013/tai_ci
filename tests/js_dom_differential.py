@@ -33,16 +33,6 @@ FIXTURE = ROOT / "tests" / "fixtures" / "js_dom_oracle.json"
 
 # case -> the later plan slice that provides what it needs.
 PENDING = {
-    "id_globals_duplicates_and_reserved": "slice 3 (innerHTML)",
-    "id_globals_script_variable_wins": "slice 3 (innerHTML)",
-    "children_and_handles": "slice 3 (innerHTML)",
-    "unknown_handles": "slice 3 (innerHTML)",
-    "create_element": "slice 3 (outerHTML)",
-    "append_and_move": "slice 3 (innerHTML)",
-    "insert_before": "slice 3 (innerHTML)",
-    "remove_child": "slice 3 (outerHTML)",
-    "serialize": "slice 3 (outerHTML)",
-    "inner_html_set": "slice 3 (innerHTML)",
     "raf_batches": "slice 6 (requestAnimationFrame)",
     "raf_throws": "slice 6 (requestAnimationFrame)",
     "cookie": "slice 5 (document.cookie)",

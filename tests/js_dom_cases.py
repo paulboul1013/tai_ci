@@ -347,6 +347,8 @@ CASES = [
             ("js", "s.innerHTML"),
             ("js", "document.querySelectorAll('span')[0].outerHTML"),
             ("js", "document.querySelectorAll('html')[0].outerHTML"),
+            ("js", "var sp = document.querySelectorAll('span')[0];"
+                   " sp.setAttribute('title', \"it's \\\"q\\\" & <b>\"); sp.outerHTML"),
         ],
     },
 

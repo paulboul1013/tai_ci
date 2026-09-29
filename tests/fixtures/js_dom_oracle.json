@@ -3211,6 +3211,84 @@
         "output": [],
         "raf_requests": 0,
         "value": "<html><body><div id=\"s\" b=\"3\" a=\"2\" q=\"x&quot;y\" amp=\"a&amp;amp;b\" ent=\"a&amp;quot;b\">t &lt; &amp; &gt; \" ' <img src=\"x.png\"><input disabled=\"\"><br/>after<script>if (a &lt; b &amp;&amp; c &gt; d) {}</script><span empty=\"\">e</span></br/></div></body></html>"
+      },
+      {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {
+                    "a": "2",
+                    "amp": "a&amp;b",
+                    "b": "3",
+                    "ent": "a&quot;b",
+                    "id": "s",
+                    "q": "x\"y"
+                  },
+                  "children": [
+                    {
+                      "text": "t < & > \" ' "
+                    },
+                    {
+                      "attributes": {
+                        "src": "x.png"
+                      },
+                      "children": [],
+                      "tag": "img"
+                    },
+                    {
+                      "attributes": {
+                        "disabled": ""
+                      },
+                      "children": [],
+                      "tag": "input"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "after"
+                        },
+                        {
+                          "attributes": {},
+                          "children": [
+                            {
+                              "text": "if (a < b && c > d) {}"
+                            }
+                          ],
+                          "tag": "script"
+                        },
+                        {
+                          "attributes": {
+                            "empty": "",
+                            "title": "it's \"q\" & <b>"
+                          },
+                          "children": [
+                            {
+                              "text": "e"
+                            }
+                          ],
+                          "tag": "span"
+                        }
+                      ],
+                      "tag": "br/"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "invalidations": 1,
+        "output": [],
+        "raf_requests": 0,
+        "value": "<span empty=\"\" title=\"it&#x27;s &quot;q&quot; &amp; &lt;b&gt;\">e</span>"
       }
     ]
   },

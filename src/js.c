@@ -189,6 +189,10 @@ static JSValue throw_dom_status(JSContext *context, TaiDomStatus status) {
     case TAI_DOM_REFERENCE_NOT_CHILD:
         return JS_ThrowPlainError(context,
             "Reference child is not a child of parent");
+    case TAI_DOM_PARSE_ERROR:
+        /* Python's HTMLParser raises IndexError: a catchable bridge error. */
+        return JS_ThrowPlainError(context,
+            "HTML parsing failed: invalid parser stack");
     case TAI_DOM_WRONG_DOCUMENT:
     case TAI_DOM_OK:
         break;
@@ -496,6 +500,47 @@ static JSValue op_remove_child(TaiJsContext *js, int argc, JSValueConst *argv) {
     return after_mutation(js, true);
 }
 
+static JSValue serialized(TaiJsContext *js, JSValueConst handle, bool outer) {
+    TaiNode *node;
+    if (!node_arg(js, handle, &node)) return JS_EXCEPTION;
+    char *html = tai_node_serialize(node, outer);
+    if (!html) return JS_ThrowOutOfMemory(js->context);
+    JSValue result = JS_NewString(js->context, html);
+    free(html);
+    return result;
+}
+
+static JSValue op_inner_html_get(TaiJsContext *js, int argc, JSValueConst *argv) {
+    (void)argc;
+    return serialized(js, argv[0], false);
+}
+
+static JSValue op_outer_html_get(TaiJsContext *js, int argc, JSValueConst *argv) {
+    (void)argc;
+    return serialized(js, argv[0], true);
+}
+
+/* Python innerHTML_set. runtime.js has already called s.toString(), so a
+ * null value threw its TypeError before reaching here. */
+static JSValue op_inner_html_set(TaiJsContext *js, int argc, JSValueConst *argv) {
+    (void)argc;
+    JSContext *context = js->context;
+    TaiNode *node;
+    if (!node_arg(js, argv[0], &node)) return JS_EXCEPTION;
+    const char *html = JS_ToCString(context, argv[1]);
+    if (!html) return JS_EXCEPTION;
+    TaiNode **removed = NULL;
+    size_t removed_count = 0;
+    TaiDomStatus status =
+        tai_node_set_inner_html(node, html, &removed, &removed_count);
+    JS_FreeCString(context, html);
+    if (status != TAI_DOM_OK) return throw_dom_status(context, status);
+    for (size_t index = 0; index < removed_count; index++)
+        node_removed(js, removed[index]);
+    free(removed);
+    return after_mutation(js, true);
+}
+
 static const struct {
     const char *name;
     int arguments; /* after the operation name */
@@ -511,6 +556,9 @@ static const struct {
     {"appendChild", 2, op_append_child},
     {"insertBefore", 3, op_insert_before},
     {"removeChild", 2, op_remove_child},
+    {"innerHTML_get", 1, op_inner_html_get},
+    {"innerHTML_set", 2, op_inner_html_set},
+    {"outerHTML_get", 1, op_outer_html_get},
 };
 
 static JSValue call_python(JSContext *context, JSValueConst this_value,
