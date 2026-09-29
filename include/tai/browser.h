@@ -125,6 +125,12 @@ const TaiUrl *tai_page_url(const TaiPage *page);
  * no transport or certificate error (the oracle's Tab.secure). Redirects do
  * not change it; internal and error pages are never secure. */
 bool tai_page_secure(const TaiPage *page);
+/* The oracle's Tab.get_title() computed from the current DOM: the first
+ * <title> in document order whose direct Text children, joined and stripped
+ * like Python str.strip(), are non-empty. Returns an owned string, "" when no
+ * such title exists (the caller picks the fallback name), or NULL on
+ * allocation failure. */
+char *tai_page_title(const TaiPage *page);
 void tai_page_json(FILE *out, const TaiPage *page);
 
 #endif

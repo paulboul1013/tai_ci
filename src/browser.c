@@ -439,7 +439,10 @@ static char *network_error_markup(const TaiUrl *url, const char *message,
     char *body = NULL;
     size_t length = 0;
     const char *heading = certificate_error ? "Certificate Error" : "Network Error";
-    if (!append(&body, &length, "<html><body><h1>") ||
+    /* Python's certificate page has a <title>; its Network Error page has none. */
+    if (!append(&body, &length, certificate_error
+                    ? "<html><head><title>Certificate Error</title></head><body><h1>"
+                    : "<html><body><h1>") ||
         !append(&body, &length, heading) ||
         !append(&body, &length, "</h1><p>") ||
         !append_html_escape(&body, &length, tai_url_string(url)) ||
@@ -1522,6 +1525,69 @@ bool tai_page_write_viewport_png(const TaiPage *page, const char *path,
 }
 const TaiUrl *tai_page_url(const TaiPage *page) { return page ? page->url : NULL; }
 bool tai_page_secure(const TaiPage *page) { return page && page->secure; }
+
+/* Python str.isspace(): general category Zs or bidi class WS, B or S. */
+static bool title_space(utf8proc_int32_t c) {
+    const utf8proc_property_t *property = utf8proc_get_property(c);
+    return property->category == UTF8PROC_CATEGORY_ZS ||
+           property->bidi_class == UTF8PROC_BIDI_CLASS_WS ||
+           property->bidi_class == UTF8PROC_BIDI_CLASS_B ||
+           property->bidi_class == UTF8PROC_BIDI_CLASS_S;
+}
+
+/* Strips text in place the way Python str.strip() does. */
+static void title_strip(char *text) {
+    const utf8proc_uint8_t *bytes = (const utf8proc_uint8_t *)text;
+    size_t length = strlen(text), start = length, end = 0;
+    for (size_t at = 0; at < length;) {
+        utf8proc_int32_t c = -1;
+        utf8proc_ssize_t step = utf8proc_iterate(bytes + at,
+                                                 (utf8proc_ssize_t)(length - at), &c);
+        if (step <= 0) step = 1;
+        if (c < 0 || !title_space(c)) {
+            if (start == length) start = at;
+            end = at + (size_t)step;
+        }
+        at += (size_t)step;
+    }
+    if (start == length) start = end = 0;
+    memmove(text, text + start, end - start);
+    text[end - start] = '\0';
+}
+
+/* Python Tab.get_title: the first <title>, in document order, whose direct
+ * Text children are non-empty after stripping. *title stays NULL if none. */
+static bool find_title(const TaiNode *node, char **title) {
+    if (node->kind != TAI_ELEMENT) return true;
+    if (!strcmp(node->tag, "title")) {
+        char *text = NULL;
+        size_t length = 0;
+        if (!append(&text, &length, "")) return false;
+        for (size_t i = 0; i < node->child_count; i++) {
+            const TaiNode *child = node->children[i];
+            if (child->kind == TAI_TEXT && !append(&text, &length, child->text)) {
+                free(text);
+                return false;
+            }
+        }
+        title_strip(text);
+        if (*text) {
+            *title = text;
+            return true;
+        }
+        free(text);
+    }
+    for (size_t i = 0; i < node->child_count && !*title; i++)
+        if (!find_title(node->children[i], title)) return false;
+    return true;
+}
+
+char *tai_page_title(const TaiPage *page) {
+    char *title = NULL;
+    const TaiNode *root = page ? tai_document_root(page->document) : NULL;
+    if (root && !find_title(root, &title)) return NULL;
+    return title ? title : tai_strdup("");
+}
 void tai_page_json(FILE *out, const TaiPage *page) {
     fputs("{\"url\":", out);
     tai_json_string(out, tai_url_string(page->url));

@@ -218,6 +218,12 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/new_window_oracle_probe.py" --check)
   add_test(NAME title_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/title_oracle_probe.py" --check)
+  add_executable(test_page_title tests/test_page_title.c)
+  target_link_libraries(test_page_title PRIVATE tai_core)
+  target_compile_options(test_page_title PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME title_integration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/title_integration.py"
+    $<TARGET_FILE:test_page_title>)
   add_executable(test_new_window tests/test_new_window.c)
   target_link_libraries(test_new_window PRIVATE tai_presentation)
   target_compile_options(test_new_window PRIVATE -Wall -Wextra -Wpedantic -Werror)
