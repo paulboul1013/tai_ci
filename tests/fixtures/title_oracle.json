@@ -1,0 +1,269 @@
+{
+  "bookmarks": {
+    "about_bookmarks": {
+      "committed_title": "Bookmarks",
+      "get_title": "Bookmarks",
+      "heading": "Bookmarks",
+      "sdl_title": "Bookmarks",
+      "url": "about:bookmarks"
+    }
+  },
+  "dom_change": {
+    "after_script": {
+      "committed_title": "After script",
+      "get_title": "After script",
+      "heading": "retitle",
+      "sdl_title": "After script",
+      "url": "http://127.0.0.1:<PORT>/retitle"
+    }
+  },
+  "error_pages": {
+    "certificate_error": {
+      "committed_title": "Certificate Error",
+      "get_title": "Certificate Error",
+      "heading": "Certificate Error",
+      "sdl_title": "Certificate Error",
+      "url": "https://127.0.0.1:<UNTRUSTED_PORT>/secure-home"
+    },
+    "network_error": {
+      "committed_title": "Tai Gar",
+      "get_title": "Tai Gar",
+      "heading": "Network Error",
+      "sdl_title": "Tai Gar",
+      "url": "http://127.0.0.1:<PORT>/fail"
+    }
+  },
+  "fresh_window": {
+    "committed": {
+      "committed_title": "Delayed",
+      "get_title": "Delayed",
+      "heading": "delay",
+      "sdl_title": "Delayed",
+      "url": "http://127.0.0.1:<PORT>/delay"
+    },
+    "created": {
+      "committed": 0,
+      "sdl_title": "Tai Gar"
+    },
+    "presented_before_commit": {
+      "committed": 0,
+      "sdl_title": "Tai Gar"
+    }
+  },
+  "markup": {
+    "/t/amp": {
+      "committed_title": "A & B",
+      "get_title": "A & B",
+      "heading": "amp",
+      "sdl_title": "A & B",
+      "url": "http://127.0.0.1:<PORT>/t/amp"
+    },
+    "/t/basic": {
+      "committed_title": "Page A",
+      "get_title": "Page A",
+      "heading": "basic",
+      "sdl_title": "Page A",
+      "url": "http://127.0.0.1:<PORT>/t/basic"
+    },
+    "/t/blank": {
+      "committed_title": "Tai Gar",
+      "get_title": "Tai Gar",
+      "heading": "blank",
+      "sdl_title": "Tai Gar",
+      "url": "http://127.0.0.1:<PORT>/t/blank"
+    },
+    "/t/blank-then": {
+      "committed_title": "After blank",
+      "get_title": "After blank",
+      "heading": "blank-then",
+      "sdl_title": "After blank",
+      "url": "http://127.0.0.1:<PORT>/t/blank-then"
+    },
+    "/t/body": {
+      "committed_title": "In Body",
+      "get_title": "In Body",
+      "heading": "body",
+      "sdl_title": "In Body",
+      "url": "http://127.0.0.1:<PORT>/t/body"
+    },
+    "/t/cjk": {
+      "committed_title": "中文標題",
+      "get_title": "中文標題",
+      "heading": "cjk",
+      "sdl_title": "中文標題",
+      "url": "http://127.0.0.1:<PORT>/t/cjk"
+    },
+    "/t/controls": {
+      "committed_title": "spaced",
+      "get_title": "spaced",
+      "heading": "controls",
+      "sdl_title": "spaced",
+      "url": "http://127.0.0.1:<PORT>/t/controls"
+    },
+    "/t/empty-first": {
+      "committed_title": "Second",
+      "get_title": "Second",
+      "heading": "empty-first",
+      "sdl_title": "Second",
+      "url": "http://127.0.0.1:<PORT>/t/empty-first"
+    },
+    "/t/headless": {
+      "committed_title": "Headless",
+      "get_title": "Headless",
+      "heading": "headless",
+      "sdl_title": "Headless",
+      "url": "http://127.0.0.1:<PORT>/t/headless"
+    },
+    "/t/ideographic": {
+      "committed_title": "wide",
+      "get_title": "wide",
+      "heading": "ideographic",
+      "sdl_title": "wide",
+      "url": "http://127.0.0.1:<PORT>/t/ideographic"
+    },
+    "/t/lt": {
+      "committed_title": "<b>",
+      "get_title": "<b>",
+      "heading": "lt",
+      "sdl_title": "<b>",
+      "url": "http://127.0.0.1:<PORT>/t/lt"
+    },
+    "/t/nbsp-entity": {
+      "committed_title": "nbsp",
+      "get_title": "nbsp",
+      "heading": "nbsp-entity",
+      "sdl_title": "nbsp",
+      "url": "http://127.0.0.1:<PORT>/t/nbsp-entity"
+    },
+    "/t/nbsp-literal": {
+      "committed_title": "lit",
+      "get_title": "lit",
+      "heading": "nbsp-literal",
+      "sdl_title": "lit",
+      "url": "http://127.0.0.1:<PORT>/t/nbsp-literal"
+    },
+    "/t/nested": {
+      "committed_title": "xz",
+      "get_title": "xz",
+      "heading": "nested",
+      "sdl_title": "xz",
+      "url": "http://127.0.0.1:<PORT>/t/nested"
+    },
+    "/t/newline": {
+      "committed_title": "line one\nline two",
+      "get_title": "line one\nline two",
+      "heading": "newline",
+      "sdl_title": "line one\nline two",
+      "url": "http://127.0.0.1:<PORT>/t/newline"
+    },
+    "/t/none": {
+      "committed_title": "Tai Gar",
+      "get_title": "Tai Gar",
+      "heading": "none",
+      "sdl_title": "Tai Gar",
+      "url": "http://127.0.0.1:<PORT>/t/none"
+    },
+    "/t/padded": {
+      "committed_title": "padded",
+      "get_title": "padded",
+      "heading": "padded",
+      "sdl_title": "padded",
+      "url": "http://127.0.0.1:<PORT>/t/padded"
+    },
+    "/t/two": {
+      "committed_title": "First",
+      "get_title": "First",
+      "heading": "two",
+      "sdl_title": "First",
+      "url": "http://127.0.0.1:<PORT>/t/two"
+    }
+  },
+  "pending": {
+    "pending": {
+      "committed_title": "Page A",
+      "get_title": "Page A",
+      "heading": "page-a",
+      "sdl_title": "Page A",
+      "url": "http://127.0.0.1:<PORT>/delay"
+    },
+    "released": {
+      "committed_title": "Delayed",
+      "get_title": "Delayed",
+      "heading": "delay",
+      "sdl_title": "Delayed",
+      "url": "http://127.0.0.1:<PORT>/delay"
+    }
+  },
+  "tabs": {
+    "first_active": {
+      "committed_title": "Page A",
+      "get_title": "Page A",
+      "heading": "page-a",
+      "sdl_title": "Page A",
+      "url": "http://127.0.0.1:<PORT>/a"
+    },
+    "inactive_loaded": {
+      "committed_title": "Page B",
+      "get_title": "Page B",
+      "heading": "page-b",
+      "inactive_committed_title": "Delayed",
+      "sdl_title": "Page B",
+      "url": "http://127.0.0.1:<PORT>/b"
+    },
+    "second_active": {
+      "committed_title": "Page B",
+      "get_title": "Page B",
+      "heading": "page-b",
+      "sdl_title": "Page B",
+      "url": "http://127.0.0.1:<PORT>/b"
+    },
+    "second_again": {
+      "committed_title": "Page B",
+      "get_title": "Page B",
+      "heading": "page-b",
+      "sdl_title": "Page B",
+      "url": "http://127.0.0.1:<PORT>/b"
+    },
+    "switched_to_loaded": {
+      "committed_title": "Delayed",
+      "get_title": "Delayed",
+      "heading": "delay",
+      "sdl_title": "Delayed",
+      "url": "http://127.0.0.1:<PORT>/delay"
+    }
+  },
+  "windows": {
+    "opened": [
+      {
+        "committed_title": "Page A",
+        "get_title": "Page A",
+        "heading": "page-a",
+        "sdl_title": "Page A",
+        "url": "http://127.0.0.1:<PORT>/a"
+      },
+      {
+        "committed_title": "Page B",
+        "get_title": "Page B",
+        "heading": "page-b",
+        "sdl_title": "Page B",
+        "url": "http://127.0.0.1:<PORT>/b"
+      }
+    ],
+    "second_navigated": [
+      {
+        "committed_title": "Page A",
+        "get_title": "Page A",
+        "heading": "page-a",
+        "sdl_title": "Page A",
+        "url": "http://127.0.0.1:<PORT>/a"
+      },
+      {
+        "committed_title": "Page C",
+        "get_title": "Page C",
+        "heading": "page-c",
+        "sdl_title": "Page C",
+        "url": "http://127.0.0.1:<PORT>/c"
+      }
+    ]
+  }
+}
