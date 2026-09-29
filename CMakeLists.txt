@@ -71,7 +71,8 @@ add_library(tai_presentation
   src/presentation_chrome.c
   src/presentation_events.c
   src/presentation_geometry.c
-  src/presentation_scene.c)
+  src/presentation_scene.c
+  src/presentation_tabs.c)
 target_include_directories(tai_presentation PUBLIC include)
 target_link_libraries(tai_presentation PUBLIC tai_core SDL3::SDL3)
 target_compile_options(tai_presentation PRIVATE -Wall -Wextra -Wpedantic -Werror)

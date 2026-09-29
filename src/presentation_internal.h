@@ -3,7 +3,8 @@
 
 /* Private to the tai_presentation library. Declares only what crosses its
  * translation units:
- *   presentation.c          SDL window lifecycle and event loops
+ *   presentation.c          single-page SDL window lifecycle and event loop
+ *   presentation_tabs.c     tabbed windows: one SDL loop over every window
  *   presentation_events.c   pointer mapping and SDL -> TaiPage event adapter
  *   presentation_scene.c    page textures and SDL scene composition
  *   presentation_chrome.c   Cairo toolbar/tab-strip rendering and tab layout
@@ -24,6 +25,8 @@
 #define TAI_ADDRESS_HEIGHT 16.0
 #define TAI_ADDRESS_STANDARD_Y 49.072
 #define TAI_ADDRESS_NARROW_Y 62.732
+/* Ctrl+N opens at most this many windows at once (Python has no limit). */
+#define TAI_PRES_MAX_WINDOWS 10
 
 typedef struct {
   char *text;
@@ -125,11 +128,37 @@ typedef struct {
   void *opaque;
 } TaiPresTabsObserver;
 
-/* presentation.c: tai_present_window_with_tabs with an optional observer. */
+/* presentation_tabs.c: tai_present_window_with_tabs with an optional
+ * observer. */
 bool tai_pres_present_tabs_observed(TaiTabSet *tabs, const char *initial_url,
                                     int width, int height,
                                     const TaiPresTabsObserver *observer,
                                     char **error);
+
+/* Test seam for the multi-window loop: frame sees every open window, in
+ * creation order, at the end of each loop iteration. The pointers are valid
+ * only for the call. Returning false closes every window and presentation
+ * then returns true. */
+typedef struct {
+  TaiTabSet *tabs;
+  SDL_WindowID window_id;
+  int width;
+  int height;
+  bool wraps;
+  AddressEditor *editor;
+} TaiPresWindowInfo;
+
+typedef struct {
+  bool (*frame)(void *opaque, const TaiPresWindowInfo *windows, size_t count);
+  void *opaque;
+} TaiPresBrowserObserver;
+
+/* presentation_tabs.c: tai_present_browser with an optional observer. */
+bool tai_pres_present_browser_observed(TaiBrowserApp *app,
+                                       const char *initial_url, int width,
+                                       int height,
+                                       const TaiPresBrowserObserver *observer,
+                                       char **error);
 
 /* presentation_events.c */
 void tai_pres_pointer_event_to_pixels(SDL_Window *window,

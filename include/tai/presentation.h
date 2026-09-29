@@ -4,6 +4,7 @@
 #include "tai/browser.h"
 
 typedef struct TaiTabSet TaiTabSet;
+typedef struct TaiBrowserApp TaiBrowserApp;
 
 /* The caller owns *page and may replace it after loading a candidate page. The
  * intent is borrowed for the callback; failed loads should return true with the
@@ -58,5 +59,11 @@ bool tai_present_window_with_chrome(
  * tab set remains owned by the caller and is pumped on the SDL thread. */
 bool tai_present_window_with_tabs(TaiTabSet *tabs, const char *initial_url,
                                   int width, int height, char **error);
+/* The browser's window loop: opens the first window with a tab set created
+ * in app, then presents every window on the calling (SDL owner) thread until
+ * the last one closes or SDL_EVENT_QUIT arrives. Closing a window destroys
+ * its tab set. The app is borrowed and must outlive the call. */
+bool tai_present_browser(TaiBrowserApp *app, const char *initial_url,
+                         int width, int height, char **error);
 
 #endif
