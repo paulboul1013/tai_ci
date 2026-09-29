@@ -224,6 +224,25 @@ static void invalidated(void *opaque) {
     ((TaiPage *)opaque)->dirty = true;
 }
 
+/* Real-browser focus fixup (intentional difference D8; Python keeps focus on
+ * the detached input): a removal whose subtree holds the focused node blurs
+ * it, even when the same operation re-attaches the node elsewhere. */
+static void node_removed(void *opaque, TaiNode *node) {
+    TaiPage *page = opaque;
+    for (TaiNode *current = page->focused; current; current = current->parent)
+        if (current == node) {
+            page->focused->focused = false;
+            page->focused = NULL;
+            page->dirty = true;
+            return;
+        }
+}
+
+static bool node_connected(const TaiPage *page, const TaiNode *node) {
+    while (node->parent) node = node->parent;
+    return node == tai_document_root(page->document);
+}
+
 static bool scroll_to_fragment(TaiPage *page, const char *fragment,
                               char **error);
 
@@ -280,7 +299,8 @@ static bool page_prepare_document(TaiPage *page, const TaiUrl *url,
         diagnostic(error, "page resource allocation failed");
         return false;
     }
-    TaiJsHost host = {.invalidated = invalidated, .userdata = page};
+    TaiJsHost host = {.invalidated = invalidated,
+                      .node_removed = node_removed, .userdata = page};
     page->javascript = tai_js_create(tai_document_root(page->document), &host,
                                      error);
     return page->javascript != NULL;
@@ -309,6 +329,8 @@ static bool page_apply_resources(TaiPage *page, Resource *resources,
 }
 
 static bool page_finish_visual(TaiPage *page, char **error) {
+    /* Load-time scripts have finished; the first frame below includes them. */
+    page->dirty = false;
     if (!tai_css_style(tai_document_root(page->document), page->styles, error))
         return false;
     page->layout = tai_layout_create(tai_document_root(page->document),
@@ -949,6 +971,14 @@ static bool rebuild_dirty_page(TaiPage *page, char **error) {
     return true;
 }
 
+/* The layout borrows the DOM and is stale while page->dirty: script may have
+ * changed the tree since it was built. Every layout query that can follow a
+ * script run settles first (Python likewise relayouts before a fragment
+ * scroll). */
+static bool settle_layout(TaiPage *page, char **error) {
+    return !page->dirty || rebuild_dirty_page(page, error);
+}
+
 static bool ascii_case_equal(const char *left, const char *right) {
     if (!left || !right) return false;
     while (*left && *right) {
@@ -1312,7 +1342,8 @@ static bool apply_fragment_url(TaiPage *page, TaiUrl *target,
     }
     double previous_scroll = page->scroll_y;
     const char *fragment = tai_url_fragment(target);
-    if (!scroll_to_fragment(page, fragment, error)) {
+    if (!settle_layout(page, error) ||
+        !scroll_to_fragment(page, fragment, error)) {
         free(signal);
         tai_url_destroy(target);
         return false;
@@ -1344,6 +1375,7 @@ bool tai_page_activate_viewport(TaiPage *page, double x, double y,
         !page->layout || !page->display)
         return diagnostic(error, "invalid page activation input");
     if (!isfinite(x) || !isfinite(y)) return true;
+    if (!settle_layout(page, error)) return false;
 
     /* Python blurs before hit testing or dispatch, so a prevented activation
      * still visibly clears an already focused control. */
@@ -1381,9 +1413,13 @@ bool tai_page_activate_viewport(TaiPage *page, double x, double y,
                 const char *type = tai_map_get(&node->attributes, "type");
                 if (type && !strcmp(type, "checkbox")) {
                     node->checked = !node->checked;
-                } else {
-                    page->focused = node;
-                    node->focused = true;
+                } else if (node_connected(page, node)) {
+                    /* A click listener may have changed the DOM: the caret
+                     * comes from the rebuilt layout, where Python measures
+                     * the new value against the box hit before dispatch. A
+                     * listener that detached the input leaves it unfocused
+                     * (D8). */
+                    if (!settle_layout(page, error)) return false;
                     const char *value =
                         tai_map_get(&node->attributes, "value");
                     size_t caret = utf8_count(value ? value : "");
@@ -1391,6 +1427,8 @@ bool tai_page_activate_viewport(TaiPage *page, double x, double y,
                         return diagnostic(error, "input cursor overflow");
                     (void)tai_layout_control_caret_index(page->layout, node->id,
                                                          x, &caret);
+                    page->focused = node;
+                    node->focused = true;
                     node->cursor_index = caret;
                 }
                 frame_changed = true;
@@ -1462,7 +1500,8 @@ bool tai_page_text_input(TaiPage *page, const char *text, bool *changed,
     if (!*filtered) { free(filtered); return true; }
     bool prevented = dispatch_page_event(page, "keydown", page->focused);
     bool local_changed = false;
-    if (!prevented) {
+    /* A listener that removed the input also blurred it (D8). */
+    if (!prevented && page->focused) {
         const char *value = tai_map_get(&page->focused->attributes, "value");
         size_t cursor = utf8_count(value ? value : "");
         if (page->focused->cursor_index < cursor)

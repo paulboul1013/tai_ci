@@ -1,0 +1,698 @@
+{
+  "scenarios": {
+    "click": {
+      "first_click": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Clicked 1"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/click.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "click"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "target"
+                  },
+                  "children": [
+                    {
+                      "text": "Click me"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "class": "added"
+                  },
+                  "children": [
+                    {
+                      "text": "Added 1"
+                    }
+                  ],
+                  "tag": "p"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "Clicked 1",
+        "url": "http://127.0.0.1:<PORT>/click"
+      },
+      "loaded": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Before click"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/click.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "click"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "target"
+                  },
+                  "children": [
+                    {
+                      "text": "Click me"
+                    }
+                  ],
+                  "tag": "p"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "Before click",
+        "url": "http://127.0.0.1:<PORT>/click"
+      },
+      "second_click": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Clicked 2"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/click.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "click"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "target"
+                  },
+                  "children": [
+                    {
+                      "text": "Click me"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "class": "added"
+                  },
+                  "children": [
+                    {
+                      "text": "Added 1"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "class": "added"
+                  },
+                  "children": [
+                    {
+                      "text": "Added 2"
+                    }
+                  ],
+                  "tag": "p"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "Clicked 2",
+        "url": "http://127.0.0.1:<PORT>/click"
+      }
+    },
+    "focus": {
+      "after_key": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Removed"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/focus.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "focus"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "box"
+                  },
+                  "children": [],
+                  "tag": "div"
+                },
+                {
+                  "attributes": {
+                    "id": "after"
+                  },
+                  "children": [
+                    {
+                      "text": "after"
+                    }
+                  ],
+                  "tag": "p"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": "field",
+        "scroll": 0,
+        "title": "Removed",
+        "url": "http://127.0.0.1:<PORT>/focus"
+      },
+      "focused": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Focus"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/focus.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "focus"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "box"
+                  },
+                  "children": [
+                    {
+                      "attributes": {
+                        "id": "field",
+                        "value": "cat"
+                      },
+                      "children": [],
+                      "tag": "input"
+                    }
+                  ],
+                  "tag": "div"
+                },
+                {
+                  "attributes": {
+                    "id": "after"
+                  },
+                  "children": [
+                    {
+                      "text": "after"
+                    }
+                  ],
+                  "tag": "p"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": "field",
+        "scroll": 0,
+        "title": "Focus",
+        "url": "http://127.0.0.1:<PORT>/focus"
+      }
+    },
+    "fragment": {
+      "scrolled": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Fragment"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/fragment.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "fragment"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "href": "#t",
+                    "id": "go"
+                  },
+                  "children": [
+                    {
+                      "text": "Go down"
+                    }
+                  ],
+                  "tag": "a"
+                },
+                {
+                  "attributes": {
+                    "style": "height:900px"
+                  },
+                  "children": [
+                    {
+                      "text": "gap"
+                    }
+                  ],
+                  "tag": "div"
+                },
+                {
+                  "attributes": {
+                    "id": "t"
+                  },
+                  "children": [
+                    {
+                      "text": "Target"
+                    }
+                  ],
+                  "tag": "p"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 464.34000301361084,
+        "title": "Fragment",
+        "url": "http://127.0.0.1:<PORT>/fragment#t"
+      }
+    },
+    "mutate": {
+      "loaded": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Mutated"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/mutate.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "mutate"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "list"
+                  },
+                  "children": [
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "zero"
+                        }
+                      ],
+                      "tag": "li"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "two "
+                        },
+                        {
+                          "attributes": {},
+                          "children": [
+                            {
+                              "text": "bold"
+                            }
+                          ],
+                          "tag": "b"
+                        }
+                      ],
+                      "tag": "li"
+                    }
+                  ],
+                  "tag": "ul"
+                },
+                {
+                  "attributes": {
+                    "class": "done",
+                    "id": "note"
+                  },
+                  "children": [
+                    {
+                      "text": "note & more"
+                    }
+                  ],
+                  "tag": "p"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "Mutated",
+        "url": "http://127.0.0.1:<PORT>/mutate"
+      }
+    },
+    "throw": {
+      "after_next": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Recovered"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/throw.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "throw"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "data-seen": "yes",
+                    "id": "target"
+                  },
+                  "children": [
+                    {
+                      "text": "Throw here"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "data-seen": "yes",
+                    "id": "other"
+                  },
+                  "children": [
+                    {
+                      "text": "Then here"
+                    }
+                  ],
+                  "tag": "p"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "Recovered",
+        "url": "http://127.0.0.1:<PORT>/throw"
+      },
+      "after_throw": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Throw"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/throw.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "throw"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "data-seen": "yes",
+                    "id": "target"
+                  },
+                  "children": [
+                    {
+                      "text": "Throw here"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "id": "other"
+                  },
+                  "children": [
+                    {
+                      "text": "Then here"
+                    }
+                  ],
+                  "tag": "p"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "Throw",
+        "url": "http://127.0.0.1:<PORT>/throw"
+      }
+    }
+  },
+  "viewport": {
+    "height": 531.6599987745285,
+    "width": 800
+  }
+}

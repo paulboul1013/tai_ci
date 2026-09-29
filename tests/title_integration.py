@@ -14,9 +14,6 @@ Not compared, with the reason:
   get_title.
 * fresh_window.created: the observer first runs after the window's first
   frame; native reports that frame as presented_before_commit.
-* dom_change: native JS has no innerHTML, so a script cannot rewrite the
-  title text (the JS "mutation" gap in PORTING_PLAN.md). Windows recompute
-  the title on every repaint, so it follows once that gap closes.
 """
 
 import json
@@ -32,7 +29,6 @@ PYTHON_NAME = "Tai Gar"
 NATIVE_NAME = "Tai Ci"
 SKIPPED_KEYS = {"committed_title"}
 SKIPPED_STEPS = {("fresh_window", "created")}
-SKIPPED_SCENARIOS = {"dom_change"}
 
 sys.path.insert(0, str(ROOT / "tests"))
 import https_fixture  # noqa: E402
@@ -76,8 +72,6 @@ def check_windows(binary, css, oracle):
     expected = renamed(oracle)
     for scenario, step in SKIPPED_STEPS:
         expected[scenario].pop(step)
-    for scenario in SKIPPED_SCENARIOS:
-        expected.pop(scenario)
     server = title_fixture.TitleServer()
     seen = set()
     failures = []

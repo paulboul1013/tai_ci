@@ -158,6 +158,11 @@ single-page presentation APIs remain available to callers.
   compares them with `test_page_title.c` (`tai_page_title()` per markup page)
   and `test_title_window.c` (SDL titles in the dummy-SDL multi-window loop).
   `fixtures/title_window/` serves the real-window check.
+- `js_page_fixture.py` serves 127.0.0.1 pages whose external scripts mutate
+  the DOM and title, with click/keydown scenarios; `js_page_oracle_probe.py`
+  and `fixtures/js_page_oracle.json` freeze the Python Tab's DOM, title,
+  scroll, URL and focus; `js_dom_integration.py` compares them with
+  `js_page_probe.c`, which replays the actions through the `TaiPage` input seam.
 - `tab_strip_differential.py` measures the live Python chrome for one and two
   tabs across widths and compares `tab_strip_probe.c`'s toolbar row positions,
   which move only when the tab strip actually wraps.

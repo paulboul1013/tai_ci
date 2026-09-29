@@ -241,6 +241,15 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/title_oracle_probe.py" --check)
   add_test(NAME js_dom_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/js_dom_oracle_probe.py" --check)
+  add_test(NAME js_page_oracle_probe COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/js_page_oracle_probe.py" --check)
+  add_executable(js_page_probe tests/js_page_probe.c)
+  target_link_libraries(js_page_probe PRIVATE tai_core)
+  target_compile_options(js_page_probe PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME js_dom_integration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/js_dom_integration.py"
+    $<TARGET_FILE:js_page_probe>
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
   add_executable(test_page_title tests/test_page_title.c)
   target_link_libraries(test_page_title PRIVATE tai_core)
   target_compile_options(test_page_title PRIVATE -Wall -Wextra -Wpedantic -Werror)

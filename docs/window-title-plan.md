@@ -2,8 +2,8 @@
 
 **狀態：已實作，`VALIDATING`（2026-09-29）。** 決定已由使用者確認（見「決定」）。實作與證據見
 [驗收紀錄](acceptance/2026-09-29-window-title.md)。實作時的修正：`network_differential` 其實會比對
-User-Agent，已改為把 oracle 的 `Tai_Gar/1.0` 對應成 `Tai_Ci/1.0`；問題 12（JS 改寫標題）因 native
-JS 沒有 `innerHTML` 而未在 native 比對。
+User-Agent，已改為把 oracle 的 `Tai_Gar/1.0` 對應成 `Tai_Ci/1.0`；問題 12（JS 改寫標題）當時因 native
+JS 沒有 `innerHTML` 而未在 native 比對，已在 [JS DOM 切片 4](js-dom-plan.md) 補上比對。
 本工作接在 [新視窗（Ctrl+N）](new-window-plan.md) 之後，處理 `PORTING_PLAN.md`「已知差異與範圍」
 中的「視窗標題與位置」的標題部分（位置不在範圍內）。
 

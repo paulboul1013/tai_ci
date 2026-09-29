@@ -2,6 +2,7 @@
 #include <cairo/cairo.h>
 #include <assert.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,6 +62,29 @@ static bool activate_control(TaiPage *page, const TaiNode *target,
     return tai_page_activate_viewport(page, point.x, point.y, changed, error);
 }
 
+static bool find_node_point(const TaiLayoutItem *item, void *opaque) {
+    ControlPoint *point = opaque;
+    if (!item->node || item->node->kind != TAI_TEXT) return true;
+    for (const TaiNode *node = item->node; node && !point->found;
+         node = node->parent)
+        if (node == point->target) {
+            point->x = item->x + item->width / 2.0;
+            point->y = item->y + item->height / 2.0;
+            point->found = true;
+        }
+    return true;
+}
+
+/* Clicks the middle of the first laid-out text inside target. */
+static bool click_node(TaiPage *page, const TaiNode *target, bool *changed,
+                       char **error) {
+    ControlPoint point = {.target = target};
+    if (!tai_layout_visit(tai_page_layout(page), find_node_point, &point,
+                          error) || !point.found)
+        return false;
+    return tai_page_activate_viewport(page, point.x, point.y, changed, error);
+}
+
 typedef struct {
     bool called;
     bool network_failure;
@@ -75,6 +99,161 @@ static void markup_done(void *opaque, TaiPage *page, bool network_failure,
     result->network_failure = network_failure;
     result->page = page;
     result->error = error;
+}
+
+/* Loads markup through a percent-encoded data: URL. */
+static TaiPage *load_markup(TaiNetwork *network, const char *markup,
+                            double viewport_height) {
+    static const char hex[] = "0123456789ABCDEF";
+    static const char prefix[] = "data:text/html,";
+    size_t length = strlen(markup);
+    char *text = malloc(sizeof(prefix) + 3 * length);
+    assert(text);
+    memcpy(text, prefix, sizeof(prefix) - 1);
+    char *out = text + sizeof(prefix) - 1;
+    for (const unsigned char *p = (const unsigned char *)markup; *p; p++) {
+        if ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+            (*p >= '0' && *p <= '9')) {
+            *out++ = (char)*p;
+        } else {
+            *out++ = '%';
+            *out++ = hex[*p >> 4];
+            *out++ = hex[*p & 15];
+        }
+    }
+    *out = '\0';
+    TaiUrl *url = tai_url_parse(text);
+    free(text);
+    assert(url);
+    char *error = NULL;
+    TaiPage *page = tai_page_load(network, url,
+        "html {display:block} body {display:block} a {display:block} "
+        "div {display:block} p {display:block}",
+        300.0, viewport_height, false, &error);
+    assert(page && !error);
+    tai_url_destroy(url);
+    return page;
+}
+
+static TaiNode *find_id(TaiNode *node, const char *id) {
+    const char *value = node->kind == TAI_ELEMENT
+                            ? tai_map_get(&node->attributes, "id") : NULL;
+    if (value && !strcmp(value, id)) return node;
+    for (size_t i = 0; i < node->child_count; i++) {
+        TaiNode *result = find_id(node->children[i], id);
+        if (result) return result;
+    }
+    return NULL;
+}
+
+/* A keydown listener runs mutation on the focused input; afterwards the page
+ * must neither edit nor stay focused on a removed input (D8). */
+static void check_focus_removed_by_keydown(TaiNetwork *network,
+                                           const char *listener) {
+    char markup[512];
+    int written = snprintf(markup, sizeof(markup),
+        "<div id=box><input id=i value=cat></div><p id=other>o</p>"
+        "<script>i.addEventListener('keydown',function(){%s});</script>",
+        listener);
+    assert(written > 0 && (size_t)written < sizeof(markup));
+    TaiPage *page = load_markup(network, markup, 100.0);
+    TaiNode *input = find_id(tai_page_root(page), "i");
+    bool changed = false;
+    char *error = NULL;
+    assert(activate_control(page, input, &changed, &error) && !error);
+    assert(changed && input->focused && tai_page_text_input_active(page));
+    changed = false;
+    assert(tai_page_text_input(page, "x", &changed, &error) && !error);
+    assert(changed && !input->focused && !tai_page_text_input_active(page));
+    assert(!strcmp(tai_map_get(&input->attributes, "value"), "cat"));
+    /* Keys that edit the focused input now have no target. */
+    changed = false;
+    assert(tai_page_key(page, TAI_PAGE_KEY_BACKSPACE, &changed, &error));
+    assert(!changed && !error);
+    tai_page_destroy(page);
+}
+
+/* JS DOM slice 4: script mutation, the stale frame, focus and the title. */
+static void check_script_mutation(TaiNetwork *network) {
+    char *error = NULL;
+    bool changed = false;
+
+    /* Load-time mutations are part of the first frame: the page is clean, so
+     * an idle click keeps the frame. */
+    TaiPage *loaded = load_markup(network,
+        "<p id=p>x</p><script>p.innerHTML = 'rewritten';</script>", 100.0);
+    const TaiDisplayList *first = tai_page_display_list(loaded);
+    assert(text_command(first, "rewritten"));
+    assert(tai_page_activate_viewport(loaded, 250.0, 90.0, &changed, &error));
+    assert(!error && !changed && tai_page_display_list(loaded) == first);
+    tai_page_destroy(loaded);
+
+    /* A click listener that pushes the fragment target down: the scroll
+     * uses the rebuilt layout, like Python's render before scroll_to_fragment. */
+    TaiPage *fragment = load_markup(network,
+        "<a id=go href='#t'>go</a><p id=t>t</p><script>"
+        "go.addEventListener('click',function(){"
+        "var d=document.createElement('div');"
+        "d.setAttribute('style','height:200px');"
+        "document.querySelectorAll('body')[0].insertBefore(d,t);});"
+        "</script>", 50.0);
+    TaiNode *target = find_id(tai_page_root(fragment), "t");
+    assert(target && tai_page_max_scroll_y(fragment) < 100.0);
+    assert(click_node(fragment, find_id(tai_page_root(fragment), "go"),
+                      &changed, &error));
+    assert(!error && changed);
+    assert(tai_page_scroll_y(fragment) >= 200.0);
+    assert(tai_page_scroll_y(fragment) <= tai_page_max_scroll_y(fragment));
+    tai_page_destroy(fragment);
+
+    /* removeChild, innerHTML on an ancestor, and a move all blur. */
+    check_focus_removed_by_keydown(network, "box.removeChild(i);");
+    check_focus_removed_by_keydown(network, "box.innerHTML='gone';");
+    check_focus_removed_by_keydown(network, "other.appendChild(i);");
+
+    /* Removing an unrelated node keeps the focus and the edit. */
+    TaiPage *kept = load_markup(network,
+        "<div id=box><input id=i value=cat></div><p id=other>o</p><script>"
+        "i.addEventListener('keydown',function(){"
+        "document.querySelectorAll('body')[0]"
+        ".removeChild(other);});</script>", 100.0);
+    TaiNode *kept_input = find_id(tai_page_root(kept), "i");
+    assert(activate_control(kept, kept_input, &changed, &error) && !error);
+    assert(tai_page_text_input(kept, "x", &changed, &error) && !error);
+    assert(kept_input->focused && tai_page_text_input_active(kept));
+    const char *kept_value = tai_map_get(&kept_input->attributes, "value");
+    assert(strlen(kept_value) == 4 && strchr(kept_value, 'x'));
+    assert(!find_id(tai_page_root(kept), "other"));
+    tai_page_destroy(kept);
+
+    /* A click listener that detaches the clicked input: nothing is focused. */
+    TaiPage *detached = load_markup(network,
+        "<div id=box><input id=i value=cat></div><script>"
+        "i.addEventListener('click',function(){box.removeChild(i);});"
+        "</script>", 100.0);
+    TaiNode *detached_input = find_id(tai_page_root(detached), "i");
+    assert(activate_control(detached, detached_input, &changed, &error));
+    assert(!error && changed && !detached_input->focused &&
+           !tai_page_text_input_active(detached));
+    assert(!detached_input->parent);
+    tai_page_destroy(detached);
+
+    /* A click listener rewrites the title; tai_page_title reads the DOM. */
+    TaiPage *titled = load_markup(network,
+        "<title>Before</title><p id=p>click</p><script>"
+        "p.addEventListener('click',function(){"
+        "document.querySelectorAll('title')[0].innerHTML=' After ';});"
+        "</script>", 100.0);
+    char *title = tai_page_title(titled);
+    assert(title && !strcmp(title, "Before"));
+    free(title);
+    assert(click_node(titled, find_id(tai_page_root(titled), "p"), &changed,
+                      &error));
+    assert(!error && changed);
+    title = tai_page_title(titled);
+    assert(title && !strcmp(title, "After"));
+    free(title);
+    tai_page_destroy(titled);
 }
 
 int main(void) {
@@ -600,6 +779,8 @@ int main(void) {
     assert(intent == NULL);
     tai_page_destroy(fragment_page);
     tai_url_destroy(fragment_url);
+
+    check_script_mutation(network);
 
     tai_page_json(stdout, page);
     fputc('\n', stdout);

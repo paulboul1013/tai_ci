@@ -1,6 +1,6 @@
 # JS DOM 補齊：整體計畫與交接
 
-**狀態：實作中（2026-09-29）。** 六項決定皆已確認；切片 0–3 完成，切片 4 起尚未開始。
+**狀態：實作中（2026-09-29）。** 六項決定皆已確認；切片 0–4 完成，切片 5 起尚未開始。
 計畫已經四路獨立驗證（oracle 實跑、native 程式碼、所有權設計、文件一致性），結果已併入本文。
 本工作處理 [ACCEPTANCE.md](../ACCEPTANCE.md) 的「JS-visible DOM mutation、query、event
 propagation/default prevention、XHR 與實際可用 scheduling APIs」，並滿足同檔「ASan 重複
@@ -83,8 +83,8 @@ load/mutate/render/close」與「獨立 verifier」兩項；也處理 [PORTING_P
 | `document.cookie` | `tai_network_cookie_get/set` 存在，但 src/ 無呼叫者；network 屬於 loader 執行緒 | 接 JS，先定執行緒設計 |
 | 同步 XHR | 無 | 全補 |
 | RAF | 無 | 全補 |
-| Mutation 後重建 | `invalidated` 只設 `page->dirty`；重建在事件處理尾端（`rebuild_dirty_page`）。重建前已用舊 layout：`browser.c:1378` caret、`1277` fragment 捲動；JS 錯誤提前 return 時 dirty 留著不重建 | 規定 dirty 期間不查 layout |
-| 焦點節點被移除 | `page->focused` 與 `node->focused` 會留在 detached 節點（native 沒有 hover 狀態） | 移除時清焦點 |
+| Mutation 後重建 | 切片 4 前：`invalidated` 只設 `page->dirty`，重建在事件處理尾端；caret 與 fragment 捲動用舊 layout | 切片 4 已完成 |
+| 焦點節點被移除 | 切片 4 前：`page->focused` 與 `node->focused` 會留在 detached 節點 | 切片 4 已完成（D8） |
 | QuickJS 跨執行緒 | runtime 在 loader 建立、在 SDL 執行緒執行，從未呼叫 `JS_UpdateStackTop` | 每次進入 JS 前更新 |
 
 ## 整體流程
@@ -276,6 +276,41 @@ bridge 內 ID 同步出現後補測。
 
 ### 切片 4：頁面整合
 
+**狀態：完成（2026-09-29）。**
+- **Dirty 期間不查 layout：** `browser.c` 新增 `settle_layout()`（dirty 時先 `rebuild_dirty_page`）。
+  `tai_page_activate_viewport` 進入時、input caret 計算前、`apply_fragment_url` 捲動前都先 settle；
+  其餘入口（text input、key、blur）原本就在回傳前重建，錯誤提前 return 時由下一次入口的 settle
+  補上。`page_finish_visual` 在第一次 layout 前清掉 dirty：載入期腳本已包含在第一個 frame，不再讓
+  載入後第一個事件多做一次重建。Fragment 捲動因此與 Python 相同（Python 在 `render` 重新 layout
+  後才 `scroll_to_fragment`）。Caret 以重建後的 layout 計算；Python 以派送前命中的 input box 幾何量
+  新值，只有 listener 改變該 input 位置或字型時不同，記入 D8 列。
+- **焦點清除（D8）：** Python **不**清焦點（`removeChild`／`innerHTML_set` 只 `detach`，`self.focus`
+  留在脫離的 input，之後按鍵照樣改它的 `value`）。使用者指定本切片清焦點，比照真實瀏覽器，記為
+  刻意差異 D8。實作：`TaiJsHost.node_removed` 回呼（`browser.c` `node_removed`）檢查被移除子樹是否含
+  `page->focused`，是就清 `page->focused`／`node->focused` 並設 dirty；同一操作再接回別處（移動）也
+  清。`tai_page_text_input` 在 `keydown` 派送後重新檢查焦點；點擊時只聚焦仍在文件內的 input。不變式：
+  `page->focused` 一律在文件內。
+- **標題：** `tests/test_title_window.c` 新增 `dom_change` 情境，`tests/title_integration.py` 移除
+  略過，比對 `title_oracle.json` 已凍結的問題 12（未重新凍結）；33 個視窗檢查點相符。
+- **整頁 oracle：** `tests/js_page_fixture.py`（fixture server 與情境）、`tests/js_page_oracle_probe.py`
+  （真的 `BrowserApp`／`Tab`，SDL dummy，CTest `js_page_oracle_probe`，連跑三次輸出相同）凍結
+  `tests/fixtures/js_page_oracle.json`；`tests/js_page_probe.c` 經公開 `TaiPage` 介面重放相同動作，
+  `tests/js_dom_integration.py`（CTest `js_dom_integration`）逐點比對 5 個情境、9 個檢查點：載入期
+  mutation（`createElement`／`appendChild`／`insertBefore`／`removeChild`／`innerHTML`／`setAttribute`／
+  改標題）、點擊 listener 兩次改 DOM 與標題、丟錯 listener 後另一 listener 照常、fragment 連結的
+  listener 把目標往下推（捲動 464.34px）、`keydown` listener 移除焦點 input。只有
+  `focus.after_key.focus` 套用 D8。以切片 4 前的 `browser.c` 重跑時 fragment 捲動為 0，測試失敗。
+  整頁情境走 `TaiPage` 輸入介面而非 dummy SDL 視窗；SDL 路由已由既有視窗測試覆蓋，Xvfb 真實視窗
+  留在切片 7。
+- **單元測試：** `tests/test_browser.c` `check_script_mutation`：載入期 mutation 後閒置點擊不換 frame、
+  fragment 用重建 layout、`removeChild`／祖先 `innerHTML`／移動三種移除都清焦點且不改值、移除無關
+  節點保留焦點、點擊 listener 移出 input 不聚焦、點擊 listener 改標題。以切片 4 前的 `browser.c`
+  重跑會失敗。
+- **證據：** Debug CTest 50/50；`build-asan/` 全套 50/50（ASan/UBSan＋LSan 開啟，只排除文件記載的
+  fontconfig／cairo 洩漏）；`python3 tests/js_page_oracle_probe.py` 連跑三次輸出相同。
+- **未做：** `ownership-reviewer` 審查留待切片 7。
+
+原計畫：
 - 規定 `page->dirty` 期間不得查 layout：`browser.c:1378` caret、`1277` fragment 捲動等位置在查詢前
   先重建，或在 JS 回傳後立即重建；JS 錯誤路徑也要重建。
 - `node_removed` 回呼：被移除的子樹含焦點節點時清除 `page->focused` 與 `node->focused`。
@@ -368,6 +403,7 @@ bridge 內 ID 同步出現後補測。
 | D5 | 提供 `setTimeout`、`setInterval`／`clearInterval`、非同步 XHR（凍結 oracle 不可用） | 原版 `7d536e0` 意外移除 JS 包裝；使用者 2026-09-29 決定補回 |
 | D6 | 執行 inline `<script>`（Python 只執行有 `src` 的 script），與外部 script 依 source 順序執行；頁面有 CSP `default-src` 時不執行 inline script | 真實網頁大量依賴 inline script；使用者 2026-09-29 決定保留。oracle 比對的頁面含 inline script 時，該腳本造成的 DOM 變化不在 Python 答案內，測試頁面以外部 script 為主 |
 | D7 | Listener 丟錯只影響該 listener：同節點其他 listener 與冒泡照常執行，先前的 `preventDefault` 有效（Python 會中斷整個派送、default action 一律照做） | 真實瀏覽器語意；使用者 2026-09-29 決定。oracle 比對只對「丟錯 listener」情境套用此規則 |
+| D8 | 移除含焦點 input 的子樹時清除焦點（Python 焦點留在脫離的節點，按鍵仍改它的值） | 真實瀏覽器語意；使用者 2026-09-29 指定為切片 4 範圍 |
 
 ## 不在本工作範圍
 

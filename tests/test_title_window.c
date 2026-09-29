@@ -462,6 +462,24 @@ static bool fresh_window(Driver *driver, const TaiPresWindowInfo *w,
   return false;
 }
 
+/* Question 12: /retitle.js rewrites the <title> text through innerHTML. */
+static bool dom_change(Driver *driver, const TaiPresWindowInfo *w,
+                       size_t count) {
+  (void)count;
+  switch (driver->step) {
+  case 0:
+    if (!loaded(w[0].tabs, "page-a")) return true;
+    navigate(w[0].tabs, "/retitle");
+    ADVANCE();
+  case 1:
+    if (!loaded(w[0].tabs, "retitle")) return true;
+    report(driver->name, "after_script", &w[0]);
+    FINISH();
+  }
+  CHECK(!"unexpected step");
+  return false;
+}
+
 static void run(const char *name, Scenario scenario, const char *path) {
   char *error = NULL;
   TaiBrowserApp *app = tai_browser_app_create_with_home_url(
@@ -499,6 +517,7 @@ int main(int argc, char **argv) {
   run("tabs", tabs, "/a");
   run("windows", windows, "/a");
   run("fresh_window", fresh_window, "/delay");
+  run("dom_change", dom_change, "/a");
   free(css);
   puts("DONE");
   fflush(stdout);

@@ -64,6 +64,17 @@ private, incompatible node layouts.
   A future raster worker may receive a self-contained display list, never
   mutable DOM state.
 
+- Script mutation and the frame: JS changes the DOM in place and only marks
+  the page dirty; the layout and display list keep borrowing the DOM and are
+  stale until `rebuild_dirty_page` replaces them. Load-time scripts finish
+  before the first layout, so a fresh page is clean. Every page input entry
+  point rebuilds before it returns, and any layout query that can follow a
+  script run inside one input (the click hit test, the input caret, a fragment
+  scroll) settles the frame first. A removal (`removeChild`, `innerHTML`, or a
+  move) whose subtree holds the focused input blurs it through the
+  `node_removed` host callback, so `page->focused` is always attached to the
+  document (D8 in `PORTING_PLAN.md`).
+
 - Window navigation keeps network and page-session ownership outside
   `TaiPage`. A page owns at most one pending `TaiNavigationIntent`, including
   its resolved URL and optional POST body; taking the intent transfers
