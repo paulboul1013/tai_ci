@@ -4,6 +4,7 @@
 
 #include <limits.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
@@ -118,7 +119,10 @@ static bool collect_resources(TaiNode *node, const TaiUrl *base,
                 resource.source = source;
                 resource.url = tai_url_resolve(base, source);
                 found = resource.url && allowed(origins, resource.url);
-            } else {
+            } else if (!origins) {
+                /* D6: inline scripts run (Python only runs src scripts), but a
+                 * valid CSP default-src blocks them like a real browser; CSP
+                 * here has no 'unsafe-inline', nonce or hash sources. */
                 size_t length = 0;
                 resource.kind = RESOURCE_SCRIPT;
                 resource.source = "<inline-script>";
@@ -1200,12 +1204,25 @@ static char *join_url_and_query(const TaiUrl *url, const char *body,
     return text;
 }
 
-static bool submit_form(TaiPage *page, TaiNode *form, char **error) {
+/* Script failures never end the page: listener errors are reported inside
+ * the JS layer, and a dispatch that could not start runs the default action
+ * like Python's crashed dispatch. */
+static bool dispatch_page_event(TaiPage *page, const char *type,
+                                TaiNode *target) {
     bool prevented = false;
-    if (!tai_js_dispatch_event(page->javascript, "submit", form, &prevented,
-                              error))
-        return false;
-    if (prevented) return true;
+    char *dispatch_error = NULL;
+    if (!tai_js_dispatch_event(page->javascript, type, target, &prevented,
+                               &dispatch_error)) {
+        fprintf(stderr, "Event %s crashed %s\n", type,
+                dispatch_error ? dispatch_error : "(dispatch failed)");
+        prevented = false;
+    }
+    free(dispatch_error);
+    return prevented;
+}
+
+static bool submit_form(TaiPage *page, TaiNode *form, char **error) {
+    if (dispatch_page_event(page, "submit", form)) return true;
 
     char *body = encode_form_data(form, error);
     if (!body) return false;
@@ -1344,11 +1361,7 @@ bool tai_page_activate_viewport(TaiPage *page, double x, double y,
         return true;
     }
 
-    bool prevented = false;
-    if (!tai_js_dispatch_event(page->javascript, "click", target, &prevented,
-                               error))
-        return false;
-    if (!prevented) {
+    if (!dispatch_page_event(page, "click", target)) {
         TaiNode *button = NULL;
         for (TaiNode *node = target; node; node = node->parent)
             if (node->kind == TAI_ELEMENT && !strcmp(node->tag, "button")) {
@@ -1446,12 +1459,7 @@ bool tai_page_text_input(TaiPage *page, const char *text, bool *changed,
     char *filtered = filtered_input(text, &inserted, error);
     if (!filtered) return false;
     if (!*filtered) { free(filtered); return true; }
-    bool prevented = false;
-    if (!tai_js_dispatch_event(page->javascript, "keydown", page->focused,
-                               &prevented, error)) {
-        free(filtered);
-        return false;
-    }
+    bool prevented = dispatch_page_event(page, "keydown", page->focused);
     bool local_changed = false;
     if (!prevented) {
         const char *value = tai_map_get(&page->focused->attributes, "value");

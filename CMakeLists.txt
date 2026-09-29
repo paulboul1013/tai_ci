@@ -218,6 +218,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/new_window_oracle_probe.py" --check)
   add_test(NAME title_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/title_oracle_probe.py" --check)
+  add_test(NAME js_dom_oracle_probe COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/js_dom_oracle_probe.py" --check)
   add_executable(test_page_title tests/test_page_title.c)
   target_link_libraries(test_page_title PRIVATE tai_core)
   target_compile_options(test_page_title PRIVATE -Wall -Wextra -Wpedantic -Werror)
@@ -279,6 +281,8 @@ if(BUILD_TESTING)
     $<TARGET_FILE:page_scroll_probe> $<TARGET_FILE:tai-browser>)
   add_test(NAME browser_differential COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/browser_differential.py" $<TARGET_FILE:tai-browser>)
+  add_test(NAME inline_script_integration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/inline_script_integration.py" $<TARGET_FILE:tai-browser>)
   add_test(NAME display_differential COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/display_differential.py" $<TARGET_FILE:tai-browser>)
   add_test(NAME image_differential COMMAND "${Python3_EXECUTABLE}"

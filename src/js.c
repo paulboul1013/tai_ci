@@ -4,6 +4,7 @@
 
 #include <quickjs.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -16,6 +17,7 @@ struct TaiJsContext {
     TaiJsInvalidated invalidated;
     void *userdata;
     double deadline;
+    unsigned depth; /* nested JS entries; only the outermost sets the deadline */
 };
 
 static const char runtime_source[] =
@@ -27,7 +29,9 @@ static const char runtime_source[] =
     "function Event(type){this.type=type;this.do_default=true;this.propagation_stopped=false;this.target=null;this.currentTarget=null;}"
     "Event.prototype.preventDefault=function(){this.do_default=false;};"
     "Event.prototype.stopPropagation=function(){this.propagation_stopped=true;};"
-    "Node.prototype.dispatchEvent=function(event){event.currentTarget=this;var d=LISTENERS[this.handle];var a=(d&&d[event.type])||[];for(var i=0;i<a.length;i++)a[i].call(this,event);return event.do_default;};"
+    /* D7: unlike Python, a throwing listener is reported and skipped; the
+     * remaining listeners, bubbling and an earlier preventDefault still apply. */
+    "Node.prototype.dispatchEvent=function(event){event.currentTarget=this;var d=LISTENERS[this.handle];var a=(d&&d[event.type])||[];for(var i=0;i<a.length;i++){try{a[i].call(this,event);}catch(e){__tai_listener_error(event.type,e);}}return event.do_default;};"
     "function dispatch_event_path(type,handles){var e=new Event(type);if(!handles.length)return true;e.target=new Node(handles[0]);for(var i=0;i<handles.length;i++){new Node(handles[i]).dispatchEvent(e);if(e.propagation_stopped)break;}return e.do_default;}"
     "var document={querySelectorAll:function(s){return call_python('querySelectorAll',s).map(function(h){return new Node(h);});}};"
     "function __tai_set_id(name,handle){if(!(name in globalThis))globalThis[name]=new Node(handle);}";
@@ -44,6 +48,22 @@ static int interrupt_handler(JSRuntime *runtime, void *opaque) {
     return js->deadline > 0.0 && seconds_now() >= js->deadline;
 }
 
+/* Every entry from C into JS goes through enter/leave. QuickJS measures stack
+ * depth from the thread that last updated the stack top; the runtime is created
+ * on the loader thread and later used on the SDL thread, so the outermost entry
+ * refreshes it. Nested entries (a bridge call re-entering JS) keep the outer
+ * deadline instead of replacing or clearing it. */
+static void enter_js(TaiJsContext *js) {
+    if (js->depth++ == 0) {
+        JS_UpdateStackTop(js->runtime);
+        js->deadline = seconds_now() + 2.0;
+    }
+}
+
+static void leave_js(TaiJsContext *js) {
+    if (--js->depth == 0) js->deadline = 0.0;
+}
+
 static bool set_error(char **error, const char *message) {
     if (error && !*error) *error = tai_strdup(message ? message : "JavaScript error");
     return false;
@@ -56,6 +76,28 @@ static bool exception_error(TaiJsContext *js, char **error) {
     JS_FreeCString(js->context, message);
     JS_FreeValue(js->context, exception);
     return result;
+}
+
+/* Reports an exception and consumes it. D1: diagnostics go to stderr because
+ * stdout carries the headless JSON output. */
+static void report_exception(JSContext *context, const char *prefix,
+                             const char *type, JSValueConst exception) {
+    const char *message = JS_ToCString(context, exception);
+    if (!message) JS_FreeValue(context, JS_GetException(context));
+    fprintf(stderr, "%s %s crashed %s\n", prefix, type,
+            message ? message : "(unprintable exception)");
+    JS_FreeCString(context, message);
+}
+
+static JSValue listener_error(JSContext *context, JSValueConst this_value,
+                              int argc, JSValueConst *argv) {
+    (void)this_value;
+    if (argc < 2) return JS_UNDEFINED;
+    const char *type = JS_ToCString(context, argv[0]);
+    if (!type) JS_FreeValue(context, JS_GetException(context));
+    report_exception(context, "Event", type ? type : "?", argv[1]);
+    JS_FreeCString(context, type);
+    return JS_UNDEFINED;
 }
 
 static TaiNode *node_from_value(TaiJsContext *js, JSValueConst value) {
@@ -130,9 +172,9 @@ static JSValue call_python(JSContext *context, JSValueConst this_value,
 static bool evaluate(TaiJsContext *js, const char *name, const char *code,
                      char **error) {
     if (error) { free(*error); *error = NULL; }
-    js->deadline = seconds_now() + 2.0;
+    enter_js(js);
     JSValue value = JS_Eval(js->context, code, strlen(code), name, JS_EVAL_TYPE_GLOBAL);
-    js->deadline = 0.0;
+    leave_js(js);
     if (JS_IsException(value)) {
         JS_FreeValue(js->context, value);
         return exception_error(js, error);
@@ -183,10 +225,22 @@ TaiJsContext *tai_js_create(TaiNode *root, TaiJsInvalidated invalidated,
     if (!js->context) goto fail;
     JS_SetContextOpaque(js->context, js);
     JSValue global = JS_GetGlobalObject(js->context);
-    JS_SetPropertyStr(js->context, global, "call_python",
-        JS_NewCFunction(js->context, call_python, "call_python", 1));
+    bool bound =
+        JS_SetPropertyStr(js->context, global, "call_python",
+            JS_NewCFunction(js->context, call_python, "call_python", 1)) >= 0 &&
+        JS_SetPropertyStr(js->context, global, "__tai_listener_error",
+            JS_NewCFunction(js->context, listener_error,
+                            "__tai_listener_error", 2)) >= 0;
     JS_FreeValue(js->context, global);
-    if (!evaluate(js, "runtime.js", runtime_source, error) || !sync_ids(js, root, error)) {
+    if (!bound) goto fail;
+    if (!evaluate(js, "runtime.js", runtime_source, error)) {
+        tai_js_destroy(js);
+        return NULL;
+    }
+    enter_js(js);
+    bool synced = sync_ids(js, root, error);
+    leave_js(js);
+    if (!synced) {
         tai_js_destroy(js);
         return NULL;
     }
@@ -212,29 +266,44 @@ bool tai_js_eval(TaiJsContext *js, const char *name, const char *code,
 
 bool tai_js_dispatch_event(TaiJsContext *js, const char *type, TaiNode *target,
                            bool *default_prevented, char **error) {
+    if (default_prevented) *default_prevented = false;
     if (!js || !type || !target) return set_error(error, "missing event input");
-    JSValue handles = JS_NewArray(js->context);
+    JSContext *context = js->context;
+    JSValue global = JS_GetGlobalObject(context);
+    JSValue function = JS_GetPropertyStr(context, global, "dispatch_event_path");
+    JSValue arguments[2] = {JS_NewString(context, type), JS_NewArray(context)};
+    bool built = !JS_IsException(function) && !JS_IsException(arguments[0]) &&
+                 !JS_IsException(arguments[1]);
     uint32_t index = 0;
-    for (TaiNode *node = target; node; node = node->parent)
-        if (node->kind == TAI_ELEMENT)
-            JS_SetPropertyUint32(js->context, handles, index++, JS_NewInt64(js->context, (int64_t)node->id));
-    JSValue global = JS_GetGlobalObject(js->context);
-    JSValue function = JS_GetPropertyStr(js->context, global, "dispatch_event_path");
-    JSValue arguments[2] = {JS_NewString(js->context, type), handles};
-    js->deadline = seconds_now() + 2.0;
-    JSValue result = JS_Call(js->context, function, global, 2, arguments);
-    js->deadline = 0.0;
-    JS_FreeValue(js->context, arguments[0]);
-    JS_FreeValue(js->context, handles);
-    JS_FreeValue(js->context, function);
-    JS_FreeValue(js->context, global);
-    if (JS_IsException(result)) {
-        JS_FreeValue(js->context, result);
-        return exception_error(js, error);
+    for (TaiNode *node = target; built && node; node = node->parent)
+        if (node->kind == TAI_ELEMENT &&
+            JS_SetPropertyUint32(context, arguments[1], index++,
+                JS_NewInt64(context, (int64_t)node->id)) < 0)
+            built = false;
+    JSValue result = JS_UNDEFINED;
+    if (built) {
+        enter_js(js);
+        result = JS_Call(context, function, global, 2, arguments);
+        leave_js(js);
     }
-    int do_default = JS_ToBool(js->context, result);
-    JS_FreeValue(js->context, result);
-    if (do_default < 0) return exception_error(js, error);
+    JS_FreeValue(context, arguments[0]);
+    JS_FreeValue(context, arguments[1]);
+    JS_FreeValue(context, function);
+    JS_FreeValue(context, global);
+    if (!built) return exception_error(js, error);
+
+    /* Listener exceptions are caught per listener in JS. What still escapes
+     * (the deadline interrupt, out of memory) aborts this dispatch; Python
+     * reports "Event <type> crashed" and runs the default action. */
+    int do_default = 1;
+    if (!JS_IsException(result)) do_default = JS_ToBool(context, result);
+    if (JS_IsException(result) || do_default < 0) {
+        JSValue exception = JS_GetException(context);
+        report_exception(context, "Event", type, exception);
+        JS_FreeValue(context, exception);
+        do_default = 1;
+    }
+    JS_FreeValue(context, result);
     if (default_prevented) *default_prevented = !do_default;
     return true;
 }

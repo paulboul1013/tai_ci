@@ -412,6 +412,30 @@ int main(void) {
     tai_page_destroy(checkbox_page);
     tai_url_destroy(checkbox_url);
 
+    /* D7: a throwing click listener is reported, keeps its DOM change, and
+     * the default action still runs; the page never turns it into an error. */
+    TaiUrl *throwing_url = tai_url_parse(
+        "data:text/html,%3Cinput%20type%3Dcheckbox%20id%3Dc%3E%3Cscript%3Ec.a"
+        "ddEventListener%28%27click%27%2Cfunction%28%29%7Bc.setAttribute%28%2"
+        "7data-seen%27%2C%27yes%27%29%3Bthrow%20Error%28%27listener%20failure"
+        "%27%29%3B%7D%29%3B%3C%2Fscript%3E");
+    TaiPage *throwing_page = tai_page_load(network, throwing_url,
+        "html {display:block} body {display:block}",
+        300.0, 100.0, false, &error);
+    assert(throwing_page && !error);
+    TaiNode *throwing_box = find(tai_page_root(throwing_page), "input");
+    assert(throwing_box && !throwing_box->checked);
+    const TaiDisplayList *throwing_before =
+        tai_page_display_list(throwing_page);
+    changed = false;
+    assert(tai_page_activate_viewport(throwing_page, 14.0, 22.0, &changed,
+                                      &error));
+    assert(!error && changed && throwing_box->checked);
+    assert(!strcmp(tai_map_get(&throwing_box->attributes, "data-seen"), "yes"));
+    assert(tai_page_display_list(throwing_page) != throwing_before);
+    tai_page_destroy(throwing_page);
+    tai_url_destroy(throwing_url);
+
     /* An ordinary text input is also a visible control target. Clicking its
      * left edge focuses it, preserves its value, and places the caret at zero
      * in the refreshed immutable frame. */

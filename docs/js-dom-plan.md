@@ -1,6 +1,6 @@
 # JS DOM 補齊：整體計畫與交接
 
-**狀態：計畫中，尚未實作（2026-09-29）。** 四項決定皆已確認；使用者要求暫不開始實作。
+**狀態：實作中（2026-09-29）。** 六項決定皆已確認；切片 0、1 完成，切片 2 起尚未開始。
 計畫已經四路獨立驗證（oracle 實跑、native 程式碼、所有權設計、文件一致性），結果已併入本文。
 本工作處理 [ACCEPTANCE.md](../ACCEPTANCE.md) 的「JS-visible DOM mutation、query、event
 propagation/default prevention、XHR 與實際可用 scheduling APIs」，並滿足同檔「ASan 重複
@@ -67,7 +67,7 @@ load/mutate/render/close」與「獨立 verifier」兩項；也處理 [PORTING_P
 - **其他：** `createElement` 名稱用 Python `casefold()`（`'İ'` → `i̇`）；`children` 略過 Text；
   `Node` 沒有 `parentNode`；handle 依首次取用順序編號；`log` 印到 stdout。
 - **RAF：** 整批取出後清空，callback 內新註冊的留到下一 frame；每次呼叫都通知需要 frame；
-  callback 丟錯時同批剩下的被丟棄。Headless 是否跑 RAF 待切片 0 驅動完整 `Tab` 確認。
+  callback 丟錯時同批剩下的被丟棄。Headless 是否跑 RAF 延到切片 6 以完整 `Tab` 凍結。
 
 ## 現況與缺口（native，已對照程式碼）
 
@@ -113,6 +113,27 @@ load/mutate/render/close」與「獨立 verifier」兩項；也處理 [PORTING_P
 
 ### 切片 0：Oracle 凍結
 
+**狀態：完成（2026-09-29）。** `tests/js_dom_cases.py`（情境，native 差異測試共用）、
+`tests/js_dom_oracle_probe.py`、`tests/fixtures/js_dom_oracle.json`，CTest `js_dom_oracle_probe`
+連跑三次通過，竄改 fixture 時會失敗。Probe 用真的 `JSContext`＋最小 Tab 替身（文件、URL、
+render／RAF 計數）；`log` 與 crash 經模組層 `print` 結構化記錄。每個 JS step 以
+`js_dom_cases.step_source()` 包裝（間接 `eval`、值編碼成 JSON），native 須逐字使用同一段包裝。
+錯誤正規化：dukpy 把 bridge 的 Python 例外包成 `EvalError("Error while calling Python Function
+(fn): Exception('msg')")`，fixture 記為 `{"type": "bridge", "function", "message"}`（`KeyError` 等
+只記 `python` 型別）；native 對應為丟出同訊息的 `Error`，差異測試依此比對。JS 錯誤只記 `name`，
+純 `Error` 才記訊息。
+
+凍結時新確認的行為（上方清單以外）：
+- 數字 id 也會成為全域（`id = 42` 後 `window['42']` 是 wrapper）。
+- `setAttribute(n, null/undefined)`、`id = null`、`style = null` 在 JS 端 `toString` 丟 `TypeError`，
+  不觸發 invalidation；`getAttribute(5)` 不轉字串，回 `""`。
+- `children`、`querySelectorAll` 每次產生新 wrapper（`list.children[0] !== list.children[0]`）。
+- `outerHTML` 只有 getter，賦值靜默忽略；`innerHTML = { toString }` 走 `toString`。
+- `innerHTML = '<head><title>t</title></head>text'` 在 Python parser 下原樣保留在元素內。
+- `document.cookie` 讀取回傳含參數的序列化（`theme=dark; samesite=lax; path=/`），每個 host 一個
+  cookie；過期 `Expires` 會刪除；既有 HttpOnly cookie 讓 JS 讀寫都無效。
+- `createElement` 已建但未接上的節點可掛 listener，接上後派送照常冒泡。
+
 - 新增 `tests/js_dom_oracle_probe.py`，以 SDL dummy 載入凍結 browser.py，用最小 Tab 建立真的
   `JSContext`，對每個情境記錄 DOM JSON、JS 回傳值、例外（只比對「有丟錯」與訊息中 Python 自訂的部分，
   dukpy 引擎訊息不比）、`log`／crash 輸出、invalidation 次數。輸出 `tests/fixtures/js_dom_oracle.json`，
@@ -123,6 +144,19 @@ load/mutate/render/close」與「獨立 verifier」兩項；也處理 [PORTING_P
   fixture server 驅動完整 `Tab` 凍結。
 
 ### 切片 1：既有缺陷
+
+**狀態：完成（2026-09-29）。** 前言覆寫 `dispatchEvent` 逐一 `try/catch`，錯誤經 C 函式
+`__tai_listener_error` 印到 stderr；`tai_js_dispatch_event` 只在派送無法開始（輸入或配置失敗）時回錯，
+逃出的例外（deadline 中斷、OOM）由 js.c 印出並回「未阻止」；`browser.c` 以 `dispatch_page_event`
+統一三個呼叫點，錯誤一律照做 default action、不再提前 return（dirty 頁面走原本的重建路徑）。
+`enter_js`／`leave_js` 以巢狀深度管理 deadline，最外層進入時呼叫 `JS_UpdateStackTop`；建立時的 ID
+同步也在 deadline 內。證據：`javascript`（丟錯 listener、ReferenceError、2 秒中斷後可繼續使用、
+另一執行緒淺層成功＋深遞迴丟 stack overflow；拿掉 `JS_UpdateStackTop` 時此測試失敗）、
+`browser_headless`（丟錯 click listener 仍切換 checkbox 並重建）、`inline_script_integration`
+（source 順序、CSP 允許清單、空清單、非 `default-src`）。完整 CTest 47/47；`build-asan/`
+的 `javascript`、`browser_headless`、`inline_script_integration`、`js_dom_oracle_probe` 在 LSan 開啟下通過。
+D6、D7、D1（crash 部分）已寫入 `PORTING_PLAN.md`。巢狀 deadline 目前沒有重入路徑可測，切片 2 的
+bridge 內 ID 同步出現後補測。
 
 - **Listener 丟錯（決定 6，D7）：** 比照真實瀏覽器逐一隔離 listener：native 前言覆寫
   `Node.prototype.dispatchEvent`，對每個 listener 個別 `try/catch`，錯誤交給 C 印到 stderr（格式
