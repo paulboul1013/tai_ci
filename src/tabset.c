@@ -15,6 +15,7 @@ typedef enum { LOAD_NAVIGATION, LOAD_HISTORY } LoadKind;
 
 typedef struct Loader Loader;
 typedef struct XhrJob XhrJob;
+typedef struct AsyncJob AsyncJob;
 typedef struct LoadTask LoadTask;
 typedef struct TabSlot TabSlot;
 typedef struct Completion Completion;
@@ -94,6 +95,10 @@ struct TaiBrowserApp {
     bool xhr_closed; /* the loader no longer takes jobs */
     XhrJob *xhr_head;
     XhrJob *xhr_tail;
+    /* Asynchronous XHR started by JS on the SDL thread, queued for the
+     * loader (D5). Nobody waits for them; pages see the result later. */
+    AsyncJob *async_head;
+    AsyncJob *async_tail;
     /* Mirrors stopping for lock-free checks in the JS interrupt handler. */
     atomic_bool stopping_flag;
     /* Shared with every page and the loader's network; created before the
@@ -121,12 +126,24 @@ struct XhrJob {
     XhrJob *loader_next;    /* in-flight list */
 };
 
+/* One asynchronous XHR (D5), heap-allocated. It holds the owner's reference
+ * to the page's fetch until tai_page_fetch_finish, which the loader calls
+ * exactly once: on completion, deadline, abandonment, failure or exit. */
+struct AsyncJob {
+    TaiPageFetch *fetch;
+    AsyncJob *next;         /* app->mutex queue, then the loader's list */
+    TaiRequest *request;    /* loader-only */
+    double deadline;
+    Loader *loader;
+};
+
 /* Loader-thread state, on the loader's stack. */
 struct Loader {
     TaiBrowserApp *app;
     TaiNetwork *network;
     bool network_failed;
     XhrJob *inflight;
+    AsyncJob *async_inflight;
 };
 
 /* One window's tabs. It borrows its app unless it was created by one of the
@@ -261,6 +278,69 @@ static void xhr_done(void *opaque, TaiResponse *response) {
                response ? NULL : "XMLHttpRequest failed");
 }
 
+/* ---- asynchronous XHR jobs (loader side, D5) ------------------------------ */
+
+static void async_finish(AsyncJob *job, TaiResponse *response,
+                         const char *failure) {
+    tai_page_fetch_finish(job->fetch, response, failure);
+    free(job);
+}
+
+static void async_done(void *opaque, TaiResponse *response) {
+    AsyncJob *job = opaque;
+    AsyncJob **slot = &job->loader->async_inflight;
+    while (*slot && *slot != job) slot = &(*slot)->next;
+    if (*slot) *slot = job->next;
+    async_finish(job, response, "XMLHttpRequest failed");
+}
+
+/* Sends one job on the loader's network. Its callback is cheap and touches
+ * no page, so nested polls may dispatch it. The total limit matches the
+ * synchronous one. */
+static void async_submit(Loader *loader, AsyncJob *job) {
+    if (loader->network_failed) {
+        async_finish(job, NULL, "network polling failed");
+        return;
+    }
+    if (tai_page_fetch_abandoned(job->fetch)) {
+        async_finish(job, NULL, "XMLHttpRequest cancelled");
+        return;
+    }
+    const TaiPageFetchRequest *request = tai_page_fetch_request(job->fetch);
+    job->loader = loader;
+    job->request = tai_network_submit(loader->network, request->url,
+        request->referrer, request->payload, request->origin,
+        request->referrer_policy, async_done, job);
+    if (!job->request) {
+        async_finish(job, NULL, "XMLHttpRequest failed");
+        return;
+    }
+    tai_network_allow_nested(job->request);
+    job->deadline = seconds_now() + TAI_XHR_TIMEOUT_SECONDS;
+    job->next = loader->async_inflight;
+    loader->async_inflight = job;
+}
+
+/* Stops in-flight jobs past their deadline or whose page is gone, or all of
+ * them when failure is set. */
+static void async_expire(Loader *loader, const char *failure) {
+    double now = failure ? 0.0 : seconds_now();
+    AsyncJob **slot = &loader->async_inflight;
+    while (*slot) {
+        AsyncJob *job = *slot;
+        bool abandoned = tai_page_fetch_abandoned(job->fetch);
+        if (!failure && !abandoned && now < job->deadline) {
+            slot = &job->next;
+            continue;
+        }
+        *slot = job->next;
+        tai_network_cancel(loader->network, job->request);
+        async_finish(job, NULL, failure ? failure
+            : abandoned ? "XMLHttpRequest cancelled"
+                        : "XMLHttpRequest timed out");
+    }
+}
+
 /* Submits queued jobs. Their requests may complete inside a nested poll
  * (a load-time XHR or a checkpoint between load-time scripts), so an
  * event-time XHR does not wait for a whole page load. */
@@ -269,7 +349,14 @@ static void loader_take_jobs(Loader *loader) {
     pthread_mutex_lock(&app->mutex);
     XhrJob *jobs = app->xhr_head;
     app->xhr_head = app->xhr_tail = NULL;
+    AsyncJob *async = app->async_head;
+    app->async_head = app->async_tail = NULL;
     pthread_mutex_unlock(&app->mutex);
+    while (async) {
+        AsyncJob *job = async;
+        async = job->next;
+        async_submit(loader, job);
+    }
     while (jobs) {
         XhrJob *job = jobs;
         jobs = job->next;
@@ -311,6 +398,7 @@ static void loader_expire_jobs(Loader *loader, const char *failure) {
 static void loader_service(Loader *loader) {
     loader_take_jobs(loader);
     loader_expire_jobs(loader, NULL);
+    async_expire(loader, NULL);
 }
 
 /* ---- load-time page net (loader side) ---------------------------------- */
@@ -347,9 +435,20 @@ static bool loader_checkpoint(void *opaque) {
     LoadTask *task = opaque;
     Loader *loader = task->loader;
     loader_service(loader);
-    if (loader->inflight && !tai_network_poll_nested(loader->network, 0))
+    if ((loader->inflight || loader->async_inflight) &&
+        !tai_network_poll_nested(loader->network, 0))
         loader->network_failed = true;
     return !task_cancelled(task);
+}
+
+/* A load-time script's asynchronous XHR: this is already the loader. */
+static bool loader_start(void *opaque, TaiPageFetch *fetch) {
+    LoadTask *task = opaque;
+    AsyncJob *job = calloc(1, sizeof(*job));
+    if (!job) return false;
+    job->fetch = fetch;
+    async_submit(task->loader, job);
+    return true;
 }
 
 /* ---- event-time page net (SDL side) ------------------------------------ */
@@ -379,6 +478,25 @@ static TaiResponse *app_xhr_request(void *opaque, const TaiUrl *url,
     return job.response;
 }
 
+/* An event-time asynchronous XHR: queue it for the loader and return. */
+static bool app_start(void *opaque, TaiPageFetch *fetch) {
+    TaiBrowserApp *app = opaque;
+    AsyncJob *job = calloc(1, sizeof(*job));
+    if (!job) return false;
+    job->fetch = fetch;
+    pthread_mutex_lock(&app->mutex);
+    bool open = !app->stopping && !app->xhr_closed;
+    if (open) {
+        if (app->async_tail) app->async_tail->next = job;
+        else app->async_head = job;
+        app->async_tail = job;
+        pthread_cond_signal(&app->condition);
+    }
+    pthread_mutex_unlock(&app->mutex);
+    if (!open) free(job);
+    return open;
+}
+
 static void load_task_start(Loader *loader, LoadTask *task) {
     TaiBrowserApp *app = loader->app;
     TaiNetwork *network = loader->network;
@@ -405,6 +523,7 @@ static void load_task_start(Loader *loader, LoadTask *task) {
     TaiPageNet net = {.request = loader_request,
                       .checkpoint = loader_checkpoint,
                       .cancelled = task_cancelled,
+                      .start = loader_start,
                       .cookies = app->cookies, .userdata = task};
     TaiPageLoad *load = task->internal_markup
         ? tai_page_load_async_markup(network, url, task->internal_markup,
@@ -481,7 +600,8 @@ static void *loader_main(void *opaque) {
     for (;;) {
         pthread_mutex_lock(&app->mutex);
         while (!app->stopping && !app->queued_head && !app->active_loads &&
-               !app->xhr_head && !loader.inflight)
+               !app->xhr_head && !loader.inflight && !app->async_head &&
+               !loader.async_inflight)
             pthread_cond_wait(&app->condition, &app->mutex);
         bool stopping = app->stopping;
         LoadTask *task = queued_take(app);
@@ -489,10 +609,12 @@ static void *loader_main(void *opaque) {
 
         if (task) load_task_start(&loader, task);
         loader_service(&loader);
-        if (app->active_loads || loader.inflight) {
+        if (app->active_loads || loader.inflight || loader.async_inflight) {
             if (!tai_network_poll(network, 16)) loader.network_failed = true;
-            if (loader.network_failed)
+            if (loader.network_failed) {
                 loader_expire_jobs(&loader, "network polling failed");
+                async_expire(&loader, "network polling failed");
+            }
             cancel_or_reap_loads(app, network,
                                  loader.network_failed || stopping);
         }
@@ -510,6 +632,7 @@ static void *loader_main(void *opaque) {
     loader.network_failed = true;
     loader_take_jobs(&loader);
     loader_expire_jobs(&loader, "browser is closing");
+    async_expire(&loader, "browser is closing");
     tai_network_destroy(network);
     return NULL;
 }
@@ -732,6 +855,7 @@ static TaiBrowserApp *app_create(const char *default_css, bool rtl,
     app->xhr_condition_ready = true;
     app->cookies = tai_cookie_jar_create();
     app->event_net = (TaiPageNet){.request = app_xhr_request,
+                                  .start = app_start,
                                   .cookies = app->cookies, .userdata = app};
     if (!app->cookies ||
         pthread_create(&app->loader_thread, NULL, loader_main, app) != 0) {
@@ -1157,6 +1281,34 @@ bool tai_tabset_pump(TaiTabSet *tabs, bool *changed, char **error) {
         items = next;
     }
     return all_ok;
+}
+
+bool tai_tabset_run_tasks(TaiTabSet *tabs, double now, size_t budget,
+                          bool *active_changed, double *next, char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (active_changed) *active_changed = false;
+    if (next) *next = INFINITY;
+    if (!tabs || isnan(now)) return set_error(error, "invalid page task input");
+    bool ok = true;
+    for (size_t index = 0; index < tabs->count; index++) {
+        TaiPage *page = tai_session_page(tabs->slots[index].session);
+        if (!page) continue;
+        if (tai_page_next_task(page) <= now) {
+            bool changed = false;
+            char *page_error = NULL;
+            if (!tai_page_run_tasks(page, now, budget, &changed, &page_error)) {
+                if (ok) set_error(error, page_error ? page_error
+                                                    : "page task failed");
+                ok = false;
+            }
+            free(page_error);
+            if (changed && index == tabs->active && active_changed)
+                *active_changed = true;
+        }
+        double due = tai_page_next_task(page);
+        if (next && due < *next) *next = due;
+    }
+    return ok;
 }
 
 char *tai_tabset_history_url(const TaiTabSet *tabs, size_t index) {

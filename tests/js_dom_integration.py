@@ -15,10 +15,18 @@ scenario runs twice: headless (scripts use the network on the probe's
 thread) and --tabset (load-time scripts on the loader thread, event-time
 XHR queued to it from the probe's thread, as from the SDL thread).
 
-Intentional difference applied, with the reason:
+The D5 scenarios (timers and asynchronous XHR; their oracle adds the 7d536e0^
+scheduling runtime) wait with until:TITLE, which runs page tasks as the
+window loop does. The asynchronous XHR ones run in --tabset only: the
+headless path gives scripts no asynchronous network (the CLI never runs
+page tasks), so their requests fail there.
+
+Intentional differences applied, with the reasons:
 * D8, focus.after_key.focus: removing the focused input blurs it (real
   browsers); Python keeps focus on the detached input, so native reports
   null where the oracle reports "field".
+* D5, xhr.loaded: the frozen runtime rejects open(..., true); native
+  accepts it, so the "async" record is "ok:undefined", not "error:other".
 Scroll offsets compare within 0.001px (the oracle's float layout sums).
 """
 
@@ -37,6 +45,17 @@ sys.path.insert(0, str(ROOT / "tests"))
 import js_page_fixture  # noqa: E402
 
 D8_FOCUS_CLEARED = {("focus", "after_key")}
+D5_ASYNC_OPEN = ("xhr", "loaded", "async", "ok:undefined")
+TABSET_ONLY = {"xhr_async", "xhr_async_csp"}
+
+
+def set_record(node, label, value):
+    """Sets data-v of the <p class=label> record under node."""
+    if node.get("tag") == "p" and node["attributes"].get("class") == label:
+        node["attributes"]["data-v"] = value
+        return True
+    return any(set_record(child, label, value)
+               for child in node.get("children", ()))
 
 
 def arguments(actions):
@@ -71,6 +90,8 @@ def main():
                 (mode, scenario) for mode in ((), ("--tabset",))
                 for scenario in js_page_fixture.SCENARIOS):
             label = name + (mode[0] if mode else "")
+            if not mode and name in TABSET_ONLY:
+                continue
             result = subprocess.run(
                 [probe, *mode, css, repr(viewport["width"]),
                  repr(viewport["height"]), server.url(path),
@@ -85,6 +106,10 @@ def main():
             for scenario, step in D8_FOCUS_CLEARED:
                 if scenario == name:
                     expected[step]["focus"] = None
+            scenario, step, record, value = D5_ASYNC_OPEN
+            if scenario == name and not set_record(expected[step]["dom"],
+                                                   record, value):
+                raise SystemExit("D5 record missing from the oracle")
             if set(native) != set(expected):
                 failures.append("{}: checkpoints {} vs oracle {}".format(
                     label, sorted(native), sorted(expected)))
@@ -97,8 +122,9 @@ def main():
     if failures:
         raise SystemExit("JS page differences:\n  " + "\n  ".join(failures))
     print("native JS pages match tests/fixtures/js_page_oracle.json "
-          "({} scenarios in 2 modes, {} checkpoints)".format(
-              len(js_page_fixture.SCENARIOS), checkpoints))
+          "({} scenarios, {} of them in 2 modes, {} checkpoints)".format(
+              len(js_page_fixture.SCENARIOS),
+              len(js_page_fixture.SCENARIOS) - len(TABSET_ONLY), checkpoints))
 
 
 if __name__ == "__main__":

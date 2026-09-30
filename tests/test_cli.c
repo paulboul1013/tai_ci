@@ -98,5 +98,25 @@ int main(int argc, char **argv) {
   assert(!strstr(buffer, "\"text\":\"zero\""));
   assert(!strstr(buffer, "\"text\":\"two\""));
   unlink(output);
+
+  /* D12: headless output is the state after load and that one frame; it
+   * does not wait for timers (even 0 ms) or asynchronous XHR, whose
+   * requests fail without a network owner to run them. */
+  const char *task_url =
+      "data:text/html,<p id=a>loaded</p><script>"
+      "setTimeout(function () { a.innerHTML = 'timer'; }, 0);"
+      "setInterval(function () { a.innerHTML = 'interval'; }, 1);"
+      "var x = new XMLHttpRequest(); x.open('GET', 'data:text/plain,hi', true);"
+      "x.onload = function () { a.innerHTML = 'onload'; }; x.send();"
+      "</script>";
+  char *tasks[] = {(char *)browser, (char *)task_url, NULL};
+  assert(run_to(browser, tasks, output) == 0);
+  json = fopen(output, "rb");
+  assert(json);
+  length = fread(buffer, 1, sizeof(buffer) - 1, json);
+  fclose(json);
+  buffer[length] = '\0';
+  assert(strstr(buffer, "\"text\":\"loaded\""));
+  unlink(output);
   return 0;
 }

@@ -13,10 +13,17 @@ A scenario is (name, path, heading, actions). Actions run in order:
     ("frames", "")     run animation frames until no requestAnimationFrame
                        callback is queued (the oracle's timers may run
                        some of them first; only the settled state counts)
+    ("until", title)   let timers and asynchronous XHR run until the page
+                       title is title (D5 pages)
     ("state", label)   record a checkpoint
 A checkpoint holds the DOM (no style), the page title (Python's fallback
 name is the empty string), the scroll offset, the URL and the id of the
 focused input (null when nothing is focused).
+
+The D5 scenarios (AUXILIARY_SCHEDULING) use timers and asynchronous XHR,
+which the frozen runtime lacks: the oracle probe loads the 7d536e0^
+scheduling runtime into their JSContext. Their timers are 50 ms or more
+apart so the oracle's timer threads cannot swap them.
 
 The XHR pages (slice 5) record each outcome in a data-v attribute. A bridge
 error is reduced in the page script to csp, cors or other, because Python
@@ -93,11 +100,23 @@ PAGES = {
     "/raf": page("RAF", "raf",
                  "<p id=target>Animate</p><p id=note>idle</p><div id=out></div>",
                  "raf"),
+    "/timers": page("Timers", "timers",
+                    "<p id=target>Later</p><div id=out></div>", "timers"),
+    "/xhr-async": page("XHR async", "xhr async",
+                       "<p id=target>Fetch later</p><div id=out></div>",
+                       "xhr-async"),
+    "/xhr-async-csp": page("XHR async CSP", "xhr async csp",
+                           "<div id=out></div>", "xhr-async-csp"),
     # Native-only pages for tests/test_tabset_xhr.c (no oracle scenario).
     "/xhr-hang": page("XHR hang", "xhr hang", "<div id=out></div>",
                       "xhr-hang"),
     "/xhr-wait": page("XHR wait", "xhr wait", "<div id=out></div>",
                       "xhr-wait"),
+    "/xhr-async-early": page("XHR async early", "xhr async early",
+                             "<div id=out></div>", "xhr-async-early"),
+    "/xhr-async-hang": page("XHR async hang", "xhr async hang",
+                            "<p id=target>Hang</p><div id=out></div>",
+                            "xhr-async-hang"),
 }
 
 # Extra response headers per page path.
@@ -105,6 +124,8 @@ PAGE_HEADERS = {
     "/xhr-csp": (("Content-Security-Policy",
                   "default-src http://127.0.0.1:<PORT>"),),
     "/xhr-norefer": (("Referrer-Policy", " No-Referrer "),),
+    "/xhr-async-csp": (("Content-Security-Policy",
+                        "default-src http://127.0.0.1:<PORT>"),),
 }
 
 # /xhr-slow waits this long: more than the 2 s script limit.
@@ -242,8 +263,128 @@ target.addEventListener('click', function () {
   });
 });
 """,
+    "/timers.js": XHR_HELPERS + """
+var seen = [];
+function note(label) {
+  seen.push(label);
+  out.setAttribute('data-seen', seen.join(' '));
+  var p = document.createElement('p');
+  p.innerHTML = label;
+  out.appendChild(p);
+}
+function title(text) {
+  document.querySelectorAll('title')[0].innerHTML = text;
+}
+setTimeout(function () { note('t300'); }, '300');
+setTimeout(function () {
+  note('t50');
+  setTimeout(function () { note('nested'); }, 125);
+}, 50);
+var ticks = 0;
+var interval = setInterval(function () {
+  ticks = ticks + 1;
+  note('i' + ticks);
+  if (ticks == 3) {
+    clearInterval(interval);
+    setTimeout(function () { title('Timers done'); }, 75);
+  }
+}, 125);
+setTimeout(function () { note('zero'); });
+setTimeout(function () { throw Error('timer boom'); }, 20);
+note('script ' + [typeof setTimeout(function () {}, 1e9), interval]);
+target.addEventListener('click', function () {
+  setTimeout(function () {
+    target.innerHTML = 'Changed';
+    title('Clicked later');
+  }, 60);
+});
+""",
+    "/xhr-async.js": XHR_HELPERS + """
+// The fast requests may finish in any order: results are written in label
+// order once all four have arrived; only the slow one's rank is fixed.
+var arrived = {};
+var count = 0;
+function arrive(label, text) {
+  count = count + 1;
+  arrived[label] = text;
+  if (label == 'slow') out.setAttribute('data-slow-rank', count);
+  if (count == 4) {
+    var labels = ['get', 'post', 'cross', 'slow'];
+    for (var i = 0; i < labels.length; i++)
+      record(labels[i], arrived[labels[i]]);
+    document.querySelectorAll('title')[0].innerHTML = 'XHR async done';
+  }
+}
+function start(label, method, url, body) {
+  var x = new XMLHttpRequest();
+  x.open(method, url, true);
+  x.onload = function (e) { arrive(label, e.type + ':' + this.responseText); };
+  x.send(body);
+  return x;
+}
+document.cookie = 'async=1';
+start('slow', 'GET', '/slow?seconds=0.6');
+start('get', 'GET', '/echo?n=1');
+start('post', 'POST', 'echo?n=2', 'k=v');
+start('cross', 'GET', 'http://localhost:<PORT>/echo?acao=star');
+start('cors', 'GET', 'http://localhost:<PORT>/echo?acao=wrong');
+start('refused', 'GET', 'http://127.0.0.1:1/');
+var thrower = start('throws', 'GET', '/slow?seconds=0.3');
+thrower.onload = function () {
+  out.setAttribute('data-throws', 'ran ' + count);
+  throw Error('onload boom');
+};
+record('sync-after', outcome(function () { return send('GET', '/echo?n=3'); }));
+target.addEventListener('click', function () {
+  var x = new XMLHttpRequest();
+  x.open('GET', '/echo?n=click', true);
+  x.onload = function () {
+    record('click', x.responseText);
+    document.querySelectorAll('title')[0].innerHTML = 'Clicked XHR';
+  };
+  x.send();
+  record('click-sent', 'yes');
+});
+""",
+    "/xhr-async-csp.js": XHR_HELPERS + """
+function start(label, url) {
+  return outcome(function () {
+    var x = new XMLHttpRequest();
+    x.open('GET', url, true);
+    x.onload = function () {
+      record(label + '-load', x.responseText);
+      document.querySelectorAll('title')[0].innerHTML = 'CSP async done';
+    };
+    x.send();
+    return 'sent';
+  });
+}
+record('cross', start('cross', 'http://localhost:<PORT>/echo?acao=star'));
+record('same', start('same', '/echo'));
+""",
     "/xhr-hang.js": XHR_HELPERS + """
 while (true) { try { send('GET', '/slow?seconds=30'); } catch (e) {} }
+""",
+    "/xhr-async-early.js": XHR_HELPERS + """
+var early = new XMLHttpRequest();
+early.open('GET', '/echo?n=early', true);
+early.onload = function () {
+  record('early', early.responseText);
+  document.querySelectorAll('title')[0].innerHTML = 'Early done';
+};
+early.send();
+record('sync', outcome(function () { return send('GET', '/slow?seconds=0.5'); }));
+""",
+    "/xhr-async-hang.js": XHR_HELPERS + """
+function hang() {
+  var x = new XMLHttpRequest();
+  x.open('GET', '/slow?seconds=20', true);
+  x.onload = function () { record('late', 'arrived'); };
+  x.send();
+}
+hang();
+setInterval(function () {}, 5);
+target.addEventListener('click', hang);
 """,
     "/xhr-wait.js": XHR_HELPERS + """
 record('slow', outcome(function () { return send('GET', '/slow?seconds=4'); }));
@@ -281,7 +422,21 @@ SCENARIOS = (
         ("frames", ""), ("state", "loaded"),
         ("click", "target"), ("frames", ""), ("state", "clicked"),
     )),
+    ("timers", "/timers", "timers", (
+        ("until", "Timers done"), ("state", "done"),
+        ("click", "target"), ("until", "Clicked later"), ("state", "clicked"),
+    )),
+    ("xhr_async", "/xhr-async", "xhr async", (
+        ("until", "XHR async done"), ("state", "loaded"),
+        ("click", "target"), ("until", "Clicked XHR"), ("state", "clicked"),
+    )),
+    ("xhr_async_csp", "/xhr-async-csp", "xhr async csp", (
+        ("until", "CSP async done"), ("state", "loaded"),
+    )),
 )
+
+# D5 scenarios: the oracle adds the 7d536e0^ scheduling runtime.
+AUXILIARY_SCHEDULING = frozenset(("timers", "xhr_async", "xhr_async_csp"))
 
 
 class JsPageServer:

@@ -4,6 +4,7 @@
 
 #include <limits.h>
 #include <math.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -31,6 +32,27 @@ struct TaiNavigationIntent {
     char *body;
 };
 
+/* Shared by the page (its list, one reference) and, once started, the owner
+ * performing the request (one reference). Only the atomics cross threads:
+ * the owner writes response/failure before setting done with release; the
+ * page reads them after seeing done with acquire. */
+struct TaiPageFetch {
+    atomic_uint references;
+    atomic_bool done;
+    atomic_bool abandoned;
+    TaiPageFetchRequest request; /* points into the owned copies below */
+    TaiUrl *url;
+    TaiUrl *referrer;
+    char *payload;
+    char *origin;
+    char *policy;
+    uint64_t handle;            /* page only from here on */
+    bool cross_origin;
+    TaiResponse *response;      /* owner, before done */
+    const char *failure;
+    TaiPageFetch *next;         /* the page's list */
+};
+
 struct TaiPage {
     TaiUrl *url;
     TaiDocument *document;
@@ -55,6 +77,7 @@ struct TaiPage {
     TaiPageNet net;
     TaiMap *csp_origins;     /* NULL: no valid CSP default-src */
     char *referrer_policy;   /* Python normalize_referrer_policy; NULL: none */
+    TaiPageFetch *fetches;   /* asynchronous XHR not yet delivered */
 };
 
 static bool diagnostic(char **error, const char *message) {
@@ -307,6 +330,109 @@ static TaiJsHostStatus page_xhr_send(void *opaque, const char *text,
     return status;
 }
 
+/* ---- asynchronous XMLHttpRequest (D5) --------------------------------------- */
+
+const TaiPageFetchRequest *tai_page_fetch_request(const TaiPageFetch *fetch) {
+    return &fetch->request;
+}
+
+bool tai_page_fetch_abandoned(const TaiPageFetch *fetch) {
+    return atomic_load_explicit(&fetch->abandoned, memory_order_acquire);
+}
+
+static void fetch_release(TaiPageFetch *fetch) {
+    if (atomic_fetch_sub_explicit(&fetch->references, 1,
+                                  memory_order_acq_rel) != 1)
+        return;
+    tai_response_destroy(fetch->response);
+    tai_url_destroy(fetch->url);
+    tai_url_destroy(fetch->referrer);
+    free(fetch->payload);
+    free(fetch->origin);
+    free(fetch->policy);
+    free(fetch);
+}
+
+void tai_page_fetch_finish(TaiPageFetch *fetch, TaiResponse *response,
+                           const char *failure) {
+    fetch->response = response;
+    fetch->failure = response ? NULL
+                              : (failure ? failure : "XMLHttpRequest failed");
+    atomic_store_explicit(&fetch->done, true, memory_order_release);
+    fetch_release(fetch);
+}
+
+static bool copy_optional(char **copy, const char *text) {
+    *copy = text ? tai_strdup(text) : NULL;
+    return !text || *copy;
+}
+
+/* Python XMLHttpRequest_send with isasync: the same URL, CSP, Origin and
+ * referrer rules as the synchronous path; the CORS check waits for the
+ * response. */
+static TaiJsHostStatus page_xhr_start(void *opaque, const char *text,
+                                      const char *body, uint64_t handle,
+                                      char **message) {
+    TaiPage *page = opaque;
+    TaiUrl *target = tai_url_resolve(page->url, text);
+    if (!target) return host_error(message, "XMLHttpRequest URL is invalid");
+    if (!allowed(page->csp_origins, target)) {
+        tai_url_destroy(target);
+        return host_error(message, "Cross-origin XHR blocked by CSP");
+    }
+    TaiPageFetch *fetch = calloc(1, sizeof(*fetch));
+    if (!fetch) {
+        tai_url_destroy(target);
+        return TAI_JS_HOST_NO_MEMORY;
+    }
+    atomic_init(&fetch->references, 1);
+    atomic_init(&fetch->done, false);
+    atomic_init(&fetch->abandoned, false);
+    fetch->url = target;
+    fetch->handle = handle;
+    const char *page_origin = tai_url_origin(page->url);
+    fetch->cross_origin = strcmp(tai_url_origin(target), page_origin) != 0;
+    fetch->referrer = tai_url_parse(tai_url_string(page->url));
+    if (!fetch->referrer || !copy_optional(&fetch->payload, body) ||
+        !copy_optional(&fetch->origin,
+                       fetch->cross_origin ? page_origin : NULL) ||
+        !copy_optional(&fetch->policy, page->referrer_policy)) {
+        fetch_release(fetch);
+        return TAI_JS_HOST_NO_MEMORY;
+    }
+    fetch->request = (TaiPageFetchRequest){
+        .url = fetch->url, .referrer = fetch->referrer,
+        .payload = fetch->payload, .origin = fetch->origin,
+        .referrer_policy = fetch->policy};
+    atomic_fetch_add_explicit(&fetch->references, 1, memory_order_relaxed);
+    if (!page->net.start || !page->net.start(page->net.userdata, fetch))
+        tai_page_fetch_finish(fetch, NULL, page->net.start
+            ? "XMLHttpRequest failed" : "XMLHttpRequest is not available");
+    /* Delivered in send order among those finished together. */
+    TaiPageFetch **tail = &page->fetches;
+    while (*tail) tail = &(*tail)->next;
+    *tail = fetch;
+    return TAI_JS_HOST_OK;
+}
+
+/* Runs onload for a finished request, or reports why it failed. */
+static bool fetch_deliver(TaiPage *page, TaiPageFetch *fetch, char **error) {
+    TaiResponse *response = fetch->response;
+    const char *failure = fetch->failure;
+    if (response && response->error) {
+        failure = response->error;
+    } else if (response && fetch->cross_origin) {
+        const char *allow = tai_map_get(&response->headers,
+                                        "access-control-allow-origin");
+        if (!allow || (strcmp(allow, fetch->origin) && strcmp(allow, "*")))
+            failure = "Cross-origin XHR blocked by CORS";
+    }
+    const char *body = failure ? NULL
+                               : (response->body ? response->body : "");
+    return tai_js_finish_xhr(page->javascript, fetch->handle, body, failure,
+                             error);
+}
+
 static void page_animation_frame_requested(void *opaque) {
     ((TaiPage *)opaque)->animation_frame_requested = true;
 }
@@ -435,6 +561,7 @@ static bool page_prepare_document(TaiPage *page, const TaiUrl *url,
                       .cookie_get = page_cookie_get,
                       .cookie_set = page_cookie_set,
                       .xhr_send = page_xhr_send,
+                      .xhr_start = page_xhr_start,
                       .cancelled = page_js_cancelled,
                       .animation_frame_requested =
                           page_animation_frame_requested,
@@ -925,6 +1052,13 @@ bool tai_page_replace_from_intent(TaiNetwork *network, TaiPage **page,
 
 void tai_page_destroy(TaiPage *page) {
     if (!page) return;
+    /* Python's discard: pending requests never reach this page's JS. */
+    while (page->fetches) {
+        TaiPageFetch *fetch = page->fetches;
+        page->fetches = fetch->next;
+        atomic_store_explicit(&fetch->abandoned, true, memory_order_release);
+        fetch_release(fetch);
+    }
     tai_navigation_intent_destroy(page->navigation);
     free(page->fragment_change);
     tai_url_destroy(page->fragment_previous_url);
@@ -1642,6 +1776,48 @@ bool tai_page_run_animation_frame(TaiPage *page, bool *changed, char **error) {
      * again set it for the next frame. */
     page->animation_frame_requested = false;
     if (!tai_js_run_animation_frame(page->javascript, error)) return false;
+    if (!page->dirty) return true;
+    if (!rebuild_dirty_page(page, error)) return false;
+    if (changed) *changed = true;
+    return true;
+}
+
+double tai_page_next_task(const TaiPage *page) {
+    if (!page || !page->javascript) return INFINITY;
+    for (const TaiPageFetch *fetch = page->fetches; fetch; fetch = fetch->next)
+        if (atomic_load_explicit(&fetch->done, memory_order_acquire))
+            return -INFINITY;
+    return tai_js_next_timer(page->javascript);
+}
+
+bool tai_page_run_tasks(TaiPage *page, double now, size_t budget,
+                        bool *changed, char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (changed) *changed = false;
+    if (!page || !page->document || !page->javascript || !page->styles ||
+        !page->layout || !page->display || isnan(now))
+        return diagnostic(error, "invalid page task input");
+    /* Python queues an onload as a NORMAL task, ahead of JS_TIMER ones.
+     * Only requests sent before this call are delivered: one an onload sends
+     * waits for the next call even when it has already failed. */
+    TaiPageFetch *last = page->fetches;
+    while (last && last->next) last = last->next;
+    TaiPageFetch **slot = &page->fetches;
+    while (*slot) {
+        TaiPageFetch *fetch = *slot;
+        bool final = fetch == last;
+        if (!atomic_load_explicit(&fetch->done, memory_order_acquire)) {
+            slot = &fetch->next;
+        } else {
+            *slot = fetch->next;
+            bool delivered = fetch_deliver(page, fetch, error);
+            fetch_release(fetch);
+            if (!delivered) return false;
+        }
+        if (final) break;
+    }
+    if (!tai_js_run_timers(page->javascript, now, budget, NULL, error))
+        return false;
     if (!page->dirty) return true;
     if (!rebuild_dirty_page(page, error)) return false;
     if (changed) *changed = true;

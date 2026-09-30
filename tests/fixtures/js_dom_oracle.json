@@ -3038,6 +3038,951 @@
       }
     ]
   },
+  "scheduling": {
+    "cases": {
+      "clear_interval_inside_and_timeout_handle": {
+        "cookie_jar": {},
+        "created": {
+          "dom": {
+            "attributes": {},
+            "children": [
+              {
+                "attributes": {},
+                "children": [
+                  {
+                    "attributes": {},
+                    "children": [
+                      {
+                        "text": "x"
+                      }
+                    ],
+                    "tag": "p"
+                  }
+                ],
+                "tag": "body"
+              }
+            ],
+            "tag": "html"
+          },
+          "invalidations": 0,
+          "output": [],
+          "raf_requests": 0
+        },
+        "steps": [
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": [
+              0,
+              1
+            ]
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": "interval,timeout"
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": "interval,timeout"
+          }
+        ]
+      },
+      "clear_interval_values": {
+        "cookie_jar": {},
+        "created": {
+          "dom": {
+            "attributes": {},
+            "children": [
+              {
+                "attributes": {},
+                "children": [
+                  {
+                    "attributes": {},
+                    "children": [
+                      {
+                        "text": "x"
+                      }
+                    ],
+                    "tag": "p"
+                  }
+                ],
+                "tag": "body"
+              }
+            ],
+            "tag": "html"
+          },
+          "invalidations": 0,
+          "output": [],
+          "raf_requests": 0
+        },
+        "steps": [
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": {
+              "undefined": true
+            }
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": "{\"c\":2,\"e\":2,\"f\":2}"
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": {
+              "undefined": true
+            }
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": "{\"c\":2,\"e\":2,\"f\":2}"
+          }
+        ]
+      },
+      "interval_basic": {
+        "cookie_jar": {},
+        "created": {
+          "dom": {
+            "attributes": {},
+            "children": [
+              {
+                "attributes": {},
+                "children": [
+                  {
+                    "attributes": {},
+                    "children": [
+                      {
+                        "text": "x"
+                      }
+                    ],
+                    "tag": "p"
+                  }
+                ],
+                "tag": "body"
+              }
+            ],
+            "tag": "html"
+          },
+          "invalidations": 0,
+          "output": [],
+          "raf_requests": 0
+        },
+        "steps": [
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": [
+              "number",
+              0
+            ]
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [
+              {
+                "log": "tick 1"
+              },
+              {
+                "log": "tick 2"
+              }
+            ],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [
+              {
+                "log": "tick 3"
+              }
+            ],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": 3
+          }
+        ]
+      },
+      "interval_floor_and_catch_up": {
+        "cookie_jar": {},
+        "created": {
+          "dom": {
+            "attributes": {},
+            "children": [
+              {
+                "attributes": {},
+                "children": [
+                  {
+                    "attributes": {},
+                    "children": [
+                      {
+                        "text": "x"
+                      }
+                    ],
+                    "tag": "p"
+                  }
+                ],
+                "tag": "body"
+              }
+            ],
+            "tag": "html"
+          },
+          "invalidations": 0,
+          "output": [],
+          "raf_requests": 0
+        },
+        "steps": [
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": [
+              0,
+              1
+            ]
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": [
+              3,
+              0
+            ]
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": [
+              13,
+              3
+            ]
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": [
+              13,
+              5
+            ]
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": [
+              13,
+              5
+            ]
+          }
+        ]
+      },
+      "timer_delays": {
+        "cookie_jar": {},
+        "created": {
+          "dom": {
+            "attributes": {},
+            "children": [
+              {
+                "attributes": {},
+                "children": [
+                  {
+                    "attributes": {},
+                    "children": [
+                      {
+                        "text": "x"
+                      }
+                    ],
+                    "tag": "p"
+                  }
+                ],
+                "tag": "body"
+              }
+            ],
+            "tag": "html"
+          },
+          "invalidations": 0,
+          "output": [],
+          "raf_requests": 0
+        },
+        "steps": [
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": {
+              "undefined": true
+            }
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": "none,null,negative,nan,infinity,abc,hex,array,object,function,inf-text,false,bad-underscore,empty"
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": "none,null,negative,nan,infinity,abc,hex,array,object,function,inf-text,false,bad-underscore,empty,true"
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": "none,null,negative,nan,infinity,abc,hex,array,object,function,inf-text,false,bad-underscore,empty,true,fraction,plus"
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": "none,null,negative,nan,infinity,abc,hex,array,object,function,inf-text,false,bad-underscore,empty,true,fraction,plus,dot,unicode-space,spaces,underscore,exponent"
+          }
+        ]
+      },
+      "timer_dom_and_raf": {
+        "cookie_jar": {},
+        "created": {
+          "dom": {
+            "attributes": {},
+            "children": [
+              {
+                "attributes": {},
+                "children": [
+                  {
+                    "attributes": {
+                      "id": "box"
+                    },
+                    "children": [
+                      {
+                        "text": "0"
+                      }
+                    ],
+                    "tag": "div"
+                  }
+                ],
+                "tag": "body"
+              }
+            ],
+            "tag": "html"
+          },
+          "invalidations": 0,
+          "output": [],
+          "raf_requests": 0
+        },
+        "steps": [
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": 1
+          },
+          {
+            "dom": {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "attributes": {
+                        "id": "box"
+                      },
+                      "children": [
+                        {
+                          "text": "one"
+                        },
+                        {
+                          "attributes": {
+                            "id": "added"
+                          },
+                          "children": [],
+                          "tag": "p"
+                        }
+                      ],
+                      "tag": "div"
+                    }
+                  ],
+                  "tag": "body"
+                }
+              ],
+              "tag": "html"
+            },
+            "invalidations": 3,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [
+              {
+                "log": "object"
+              }
+            ],
+            "raf_requests": 1
+          },
+          {
+            "invalidations": 0,
+            "output": [
+              {
+                "log": "frame"
+              }
+            ],
+            "raf_requests": 0
+          }
+        ]
+      },
+      "timer_errors": {
+        "cookie_jar": {},
+        "created": {
+          "dom": {
+            "attributes": {},
+            "children": [
+              {
+                "attributes": {},
+                "children": [
+                  {
+                    "attributes": {},
+                    "children": [
+                      {
+                        "text": "x"
+                      }
+                    ],
+                    "tag": "p"
+                  }
+                ],
+                "tag": "body"
+              }
+            ],
+            "tag": "html"
+          },
+          "invalidations": 0,
+          "output": [],
+          "raf_requests": 0
+        },
+        "steps": [
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": 3
+          },
+          {
+            "invalidations": 0,
+            "output": [
+              {
+                "crash": "setTimeout callback crashed",
+                "error": {
+                  "message": "timeout boom",
+                  "name": "Error",
+                  "type": "js"
+                }
+              },
+              {
+                "log": "after timeout"
+              }
+            ],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [
+              {
+                "crash": "setTimeout callback crashed",
+                "error": {
+                  "name": "TypeError",
+                  "type": "js"
+                }
+              }
+            ],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [
+              {
+                "crash": "setInterval callback crashed",
+                "error": {
+                  "message": "interval boom",
+                  "name": "Error",
+                  "type": "js"
+                }
+              }
+            ],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [
+              {
+                "log": "interval 2"
+              }
+            ],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          }
+        ]
+      },
+      "timer_nested": {
+        "cookie_jar": {},
+        "created": {
+          "dom": {
+            "attributes": {},
+            "children": [
+              {
+                "attributes": {},
+                "children": [
+                  {
+                    "attributes": {},
+                    "children": [
+                      {
+                        "text": "x"
+                      }
+                    ],
+                    "tag": "p"
+                  }
+                ],
+                "tag": "body"
+              }
+            ],
+            "tag": "html"
+          },
+          "invalidations": 0,
+          "output": [],
+          "raf_requests": 0
+        },
+        "steps": [
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": 1
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": "outer,zero"
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": "outer,zero,twelve"
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": "outer,zero,twelve,five"
+          }
+        ]
+      },
+      "timer_order": {
+        "cookie_jar": {},
+        "created": {
+          "dom": {
+            "attributes": {},
+            "children": [
+              {
+                "attributes": {},
+                "children": [
+                  {
+                    "attributes": {},
+                    "children": [
+                      {
+                        "text": "x"
+                      }
+                    ],
+                    "tag": "p"
+                  }
+                ],
+                "tag": "body"
+              }
+            ],
+            "tag": "html"
+          },
+          "invalidations": 0,
+          "output": [],
+          "raf_requests": 0
+        },
+        "steps": [
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": [
+              0,
+              1,
+              2,
+              3,
+              4
+            ]
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": ""
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": "5,10a,10b,20"
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": "5,10a,10b,20,30"
+          }
+        ]
+      },
+      "xhr_async": {
+        "cookie_jar": {},
+        "created": {
+          "dom": {
+            "attributes": {},
+            "children": [
+              {
+                "attributes": {},
+                "children": [
+                  {
+                    "attributes": {},
+                    "children": [
+                      {
+                        "text": "x"
+                      }
+                    ],
+                    "tag": "p"
+                  }
+                ],
+                "tag": "body"
+              }
+            ],
+            "tag": "html"
+          },
+          "invalidations": 0,
+          "output": [],
+          "raf_requests": 0
+        },
+        "steps": [
+          {
+            "invalidations": 0,
+            "output": [
+              {
+                "xhr": 0
+              },
+              {
+                "xhr": 1
+              },
+              {
+                "xhr": 2
+              },
+              {
+                "xhr": 3
+              }
+            ],
+            "raf_requests": 0,
+            "value": [
+              {
+                "undefined": true
+              },
+              {
+                "undefined": true
+              },
+              {
+                "undefined": true
+              },
+              {
+                "undefined": true
+              }
+            ]
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [
+              {
+                "crash": "XMLHttpRequest onload crashed",
+                "error": {
+                  "message": "onload boom",
+                  "name": "Error",
+                  "type": "js"
+                }
+              }
+            ],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [
+              {
+                "crash": "Async XMLHttpRequest failed",
+                "message": "connection refused"
+              }
+            ],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [],
+            "raf_requests": 0,
+            "value": "[[\"b\",true,\"load\",\"second body\"],[\"a\",true,\"load\",\"first body\"]]"
+          }
+        ]
+      },
+      "xhr_async_with_timers": {
+        "cookie_jar": {},
+        "created": {
+          "dom": {
+            "attributes": {},
+            "children": [
+              {
+                "attributes": {},
+                "children": [
+                  {
+                    "attributes": {
+                      "id": "list"
+                    },
+                    "children": [],
+                    "tag": "ul"
+                  }
+                ],
+                "tag": "body"
+              }
+            ],
+            "tag": "html"
+          },
+          "invalidations": 0,
+          "output": [],
+          "raf_requests": 0
+        },
+        "steps": [
+          {
+            "invalidations": 0,
+            "output": [
+              {
+                "xhr": 0
+              }
+            ],
+            "raf_requests": 0,
+            "value": {
+              "undefined": true
+            }
+          },
+          {
+            "dom": {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "attributes": {
+                        "id": "list"
+                      },
+                      "children": [
+                        {
+                          "attributes": {},
+                          "children": [
+                            {
+                              "text": "loaded "
+                            },
+                            {
+                              "attributes": {},
+                              "children": [
+                                {
+                                  "text": "text"
+                                }
+                              ],
+                              "tag": "b"
+                            }
+                          ],
+                          "tag": "li"
+                        }
+                      ],
+                      "tag": "ul"
+                    }
+                  ],
+                  "tag": "body"
+                }
+              ],
+              "tag": "html"
+            },
+            "invalidations": 2,
+            "output": [],
+            "raf_requests": 0
+          },
+          {
+            "invalidations": 0,
+            "output": [
+              {
+                "log": "later 1"
+              }
+            ],
+            "raf_requests": 0
+          }
+        ]
+      }
+    },
+    "source": "frozen browser.py JSContext + SCHEDULING_RUNTIME_JS of the original project at 7d536e0^ (tests/fixtures/scheduling_runtime_7d536e0.js), virtual clock"
+  },
   "scheduling_globals": {
     "cookie_jar": {},
     "created": {

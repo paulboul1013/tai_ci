@@ -3,8 +3,9 @@
  *
  *   js_page_probe [--tabset] CSS WIDTH HEIGHT URL ACTION...
  *
- * ACTION is click:ID, type:TEXT, frames: or state:LABEL (see
- * js_page_fixture.py). The
+ * ACTION is click:ID, type:TEXT, frames:, until:TITLE or state:LABEL (see
+ * js_page_fixture.py). until: runs page tasks (timers, asynchronous XHR)
+ * the way the window loop does until the title matches. The
  * output is one JSON object mapping each label to its checkpoint.
  *
  * By default the page loads synchronously on this thread (the headless path:
@@ -89,8 +90,41 @@ static void checkpoint(const TaiPage *page) {
   free(title);
 }
 
-static bool run_action(TaiPage *page, const char *action, bool *first,
-                       char **error) {
+/* Up to 10 s of the window loop's task handling: tabset pumps completions
+ * and runs every tab's tasks; headless runs the page's own. */
+static bool run_until(TaiTabSet *tabs, TaiPage *page, const char *title,
+                      char **error) {
+  for (int turn = 0; turn < 1000; turn++) {
+    char *current = tai_page_title(page);
+    if (!current) return false;
+    bool done = !strcmp(current, title);
+    free(current);
+    if (done) return true;
+    bool changed = false;
+    double now = tai_js_clock(), next = INFINITY;
+    if (tabs) {
+      if (!tai_tabset_pump(tabs, &changed, error) ||
+          !tai_tabset_run_tasks(tabs, now, 32, &changed, &next, error))
+        return false;
+    } else {
+      if (tai_page_next_task(page) <= now &&
+          !tai_page_run_tasks(page, now, 32, &changed, error))
+        return false;
+      next = tai_page_next_task(page);
+    }
+    double wait = next - tai_js_clock();
+    if (wait > 0.01) wait = 0.01;
+    if (wait > 0.0) {
+      struct timespec pause = {0, (long)(wait * 1e9)};
+      nanosleep(&pause, NULL);
+    }
+  }
+  fprintf(stderr, "title %s did not appear within 10 s\n", title);
+  return false;
+}
+
+static bool run_action(TaiTabSet *tabs, TaiPage *page, const char *action,
+                       bool *first, char **error) {
   bool changed = false;
   if (!strncmp(action, "click:", 6)) {
     TaiNode *target = find_id(tai_page_root(page), action + 6);
@@ -130,6 +164,8 @@ static bool run_action(TaiPage *page, const char *action, bool *first,
     }
     return true;
   }
+  if (!strncmp(action, "until:", 6))
+    return run_until(tabs, page, action + 6, error);
   if (!strncmp(action, "state:", 6)) {
     fputs(*first ? "" : ",", stdout);
     *first = false;
@@ -190,7 +226,7 @@ int main(int argc, char **argv) {
   bool ok = page != NULL, first = true;
   if (ok) fputc('{', stdout);
   for (int index = 5; ok && index < argc; index++)
-    ok = run_action(page, argv[index], &first, &error);
+    ok = run_action(tabs, page, argv[index], &first, &error);
   if (ok) puts("}");
   else fprintf(stderr, "js_page_probe failed: %s\n", error ? error : "");
   /* The tab set owns its committed page; the headless page goes before the

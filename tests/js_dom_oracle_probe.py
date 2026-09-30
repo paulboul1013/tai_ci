@@ -8,6 +8,13 @@ counters for set_needs_render() and set_needs_animation_frame(). Full-page
 scenarios (loading, networking, headless RAF) are frozen later by the
 integration tests.
 
+The "scheduling" section (D5) comes from an auxiliary oracle: the same
+JSContext plus the original project's SCHEDULING_RUNTIME_JS
+(tests/fixtures/scheduling_runtime_7d536e0.js), which the frozen runtime lost.
+Its Python half runs on real threading.Timer and interval threads; here they
+run on a virtual clock (VirtualTime) so every run is identical, and the tab's
+task runner and network are stand-ins driven by the steps.
+
 Per step the probe records:
   value / error    JS completion value, or the thrown error normalized so
                    engine-specific messages are dropped (see normalize_error)
@@ -23,7 +30,9 @@ Per step the probe records:
 """
 
 import ast
+import collections
 import contextlib
+import heapq
 import importlib.util
 import io
 import json
@@ -31,12 +40,21 @@ import os
 import pathlib
 import re
 import sys
+import threading
+import time
 
 sys.dont_write_bytecode = True
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 REFERENCE = ROOT / "tests" / "reference"
 FIXTURE = ROOT / "tests" / "fixtures" / "js_dom_oracle.json"
+SCHEDULING_JS = ROOT / "tests" / "fixtures" / "scheduling_runtime_7d536e0.js"
+SCHEDULING_SOURCE = ("frozen browser.py JSContext + SCHEDULING_RUNTIME_JS of "
+                     "the original project at 7d536e0^ "
+                     "(tests/fixtures/scheduling_runtime_7d536e0.js), "
+                     "virtual clock")
+TASK_PRINTS = ("setTimeout callback crashed", "setInterval callback crashed",
+               "XMLHttpRequest onload crashed")
 
 sys.path.insert(0, str(ROOT / "tests"))
 import js_dom_cases  # noqa: E402
@@ -126,6 +144,147 @@ class StubTab:
         self.invalidations += 1
 
 
+class VirtualTime:
+    """Stands in for the threading and time modules JSContext timers use.
+
+    threading.Timer callbacks and the setInterval worker's Event.wait()
+    become events on a virtual clock. Workers are real threads, but only one
+    runs at a time: the driver resumes a parked worker and waits until it
+    parks again or exits. Events at the same time run in the order they were
+    scheduled. Each event's resulting tasks run before the next event.
+    """
+
+    def __init__(self, drain):
+        self.clock = 0.0
+        self.sequence = 0
+        self.events = []
+        self.drain = drain
+        self.parked = threading.Semaphore(0)
+        virtual = self
+
+        class Timer:
+            def __init__(self, interval, function):
+                self.interval = interval
+                self.function = function
+                self.daemon = False
+
+            def start(self):
+                virtual.push(virtual.clock + self.interval, self.function)
+
+        class Waiter:
+            def __init__(self, event):
+                self.event = event
+                self.resume = threading.Semaphore(0)
+                self.result = False
+                self.cancelled = False
+
+        class Event:
+            def __init__(self):
+                self.flag = False
+                self.waiter = None
+
+            def is_set(self):
+                return self.flag
+
+            def set(self):
+                self.flag = True
+                waiter, self.waiter = self.waiter, None
+                if waiter is not None:
+                    waiter.cancelled = True
+                    virtual.resume(waiter, True)
+
+            def wait(self, timeout=None):
+                if self.flag:
+                    return True
+                waiter = Waiter(self)
+                self.waiter = waiter
+                virtual.push(virtual.clock + timeout, waiter)
+                virtual.parked.release()
+                waiter.resume.acquire()
+                return waiter.result
+
+        class Thread:
+            def __init__(self, target, name=None, daemon=None):
+                self.target = target
+                self.name = name
+                self.daemon = daemon
+
+            def start(self):
+                def run():
+                    try:
+                        self.target()
+                    finally:
+                        virtual.parked.release()
+                threading.Thread(target=run, daemon=True).start()
+                virtual.parked.acquire()
+
+        class ThreadingShim:
+            def __getattr__(self, name):
+                return getattr(threading, name)
+
+        class TimeShim:
+            def __getattr__(self, name):
+                return getattr(time, name)
+
+            def perf_counter(self):
+                return virtual.clock
+
+        self.threading = ThreadingShim()
+        self.threading.Timer = Timer
+        self.threading.Event = Event
+        self.threading.Thread = Thread
+        self.time = TimeShim()
+
+    def push(self, due, payload):
+        heapq.heappush(self.events, (due, self.sequence, payload))
+        self.sequence += 1
+
+    def resume(self, waiter, result):
+        waiter.result = result
+        waiter.resume.release()
+        self.parked.acquire()
+
+    def advance(self, seconds):
+        target = self.clock + seconds
+        while self.events and self.events[0][0] <= target:
+            due, _, payload = heapq.heappop(self.events)
+            if getattr(payload, "cancelled", False):
+                continue
+            self.clock = max(self.clock, due)
+            if callable(payload):
+                payload()
+            else:
+                payload.event.waiter = None
+                self.resume(payload, False)
+            self.drain()
+        self.clock = target
+
+
+class StubRunner:
+    def __init__(self):
+        self.queue = collections.deque()
+
+    def schedule_task(self, task):
+        self.queue.append(task)
+        return True
+
+    def drain(self):
+        while self.queue:
+            self.queue.popleft().run()
+
+
+class StubNetwork:
+    """Records asynchronous XHR submissions; steps complete them."""
+
+    def __init__(self, runner):
+        self.runner = runner
+        self.completions = []
+
+    def submit(self, work, on_complete=None, trace_name=None, source=None):
+        self.runner.output.append({"xhr": len(self.completions)})
+        self.completions.append(on_complete)
+
+
 class Runner:
     def __init__(self, browser):
         self.browser = browser
@@ -144,6 +303,10 @@ class Runner:
                                 "error": error_head(args[3])})
         elif len(args) == 2 and args[0] == "requestAnimationFrame callback crashed":
             self.output.append({"crash": "raf", "error": error_head(args[1])})
+        elif len(args) == 2 and args[0] in TASK_PRINTS:
+            self.output.append({"crash": args[0], "error": error_head(args[1])})
+        elif len(args) == 2 and args[0] == "Async XMLHttpRequest failed":
+            self.output.append({"crash": args[0], "message": str(args[1])})
         else:
             raise AssertionError("unexpected print: {!r}".format(args))
 
@@ -176,19 +339,50 @@ class Runner:
             except self.browser.dukpy.JSRuntimeError as error:
                 self.browser.print("requestAnimationFrame callback crashed",
                                    error)
+        elif kind == "tick":
+            self.virtual.advance(step[1] / 1000.0)
+        elif kind == "xhr_done":
+            tab.browser.app.network.completions[step[1]](step[2], None)
+        elif kind == "xhr_fail":
+            tab.browser.app.network.completions[step[1]](
+                None, Exception(step[2]))
         else:
             raise AssertionError("unknown step " + kind)
+        if self.virtual is not None:
+            tab.task_runner.drain()
         return result
 
-    def run_case(self, case):
+    def run_case(self, case, scheduling=False):
         browser = self.browser
         browser.COOKIE_JAR.clear()
         for host, (cookie, params) in case.get("cookie_jar", {}).items():
             browser.COOKIE_JAR[host] = (cookie, dict(params))
         tab = StubTab(browser, case["html"], case.get("url"))
+        self.virtual = None
+        if scheduling:
+            tab.task_runner = StubRunner()
+            tab.task_runner.output = None
+            tab.referrer_policy = None
+            tab.allowed_request = lambda url: True
+            tab.browser.app = type("StubApp", (), {})()
+            tab.browser.app.network = StubNetwork(self)
+            self.virtual = VirtualTime(tab.task_runner.drain)
+            real = (browser.threading, browser.time)
+            browser.threading = self.virtual.threading
+            browser.time = self.virtual.time
+            try:
+                return self.run_context(case, tab, scheduling)
+            finally:
+                browser.threading, browser.time = real
+        return self.run_context(case, tab, scheduling)
 
+    def run_context(self, case, tab, scheduling):
+        browser = self.browser
         self.output = []
         context = browser.JSContext(tab)
+        if scheduling:
+            # As the 7d536e0^ JSContext did right after RUNTIME_JS.
+            context.evaljs(SCHEDULING_JS.read_text(encoding="utf-8"))
         created = {"invalidations": tab.invalidations,
                    "raf_requests": tab.raf_requests,
                    "output": self.output,
@@ -207,8 +401,8 @@ class Runner:
             if after != dom:
                 result["dom"] = dom = after
             steps.append(result)
-        self.output = None
         context.discard()
+        self.output = None
         return {"created": created, "steps": steps,
                 "cookie_jar": {host: [cookie, params] for host, (cookie, params)
                                in sorted(browser.COOKIE_JAR.items())}}
@@ -222,10 +416,16 @@ def run_probe():
             browser = import_reference()
         runner = Runner(browser)
         names = [case["name"] for case in js_dom_cases.CASES]
-        if len(set(names)) != len(names):
+        names += [case["name"] for case in js_dom_cases.SCHEDULING_CASES]
+        if len(set(names)) != len(names) or "scheduling" in names:
             raise AssertionError("duplicate case names")
-        return {case["name"]: runner.run_case(case)
-                for case in js_dom_cases.CASES}
+        result = {case["name"]: runner.run_case(case)
+                  for case in js_dom_cases.CASES}
+        result["scheduling"] = {
+            "source": SCHEDULING_SOURCE,
+            "cases": {case["name"]: runner.run_case(case, scheduling=True)
+                      for case in js_dom_cases.SCHEDULING_CASES}}
+        return result
     finally:
         os.chdir(original_cwd)
 

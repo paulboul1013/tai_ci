@@ -3,6 +3,7 @@
 #include "tai/css.h"
 #include "tai_js_sources.h"
 
+#include <errno.h>
 #include <math.h>
 #include <quickjs.h>
 #include <stdint.h>
@@ -20,6 +21,16 @@
  * are numbered in first-use order and never reused; only this file converts
  * between handles and nodes (handle_of / node_arg). Wrappers live in JS; C
  * holds no JSValue for a node. */
+/* A pending setTimeout or setInterval; the callback stays in JS, keyed by
+ * handle (js_scheduling.js). */
+typedef struct {
+    int64_t handle;
+    bool interval;
+    double due;    /* on the host's clock */
+    double period; /* interval only, seconds */
+    uint64_t order;
+} Timer;
+
 struct TaiJsContext {
     JSRuntime *runtime;
     JSContext *context;
@@ -32,12 +43,21 @@ struct TaiJsContext {
     size_t handle_count, handle_capacity;
     size_t *node_handles;            /* node id -> handle + 1; 0 means none */
     size_t node_handles_capacity;
+    Timer *timers;                   /* unordered; see next_due_timer */
+    size_t timer_count, timer_capacity;
+    uint64_t timer_order;            /* arming order, breaks due-time ties */
 };
 
 static double seconds_now(void) {
     struct timespec time;
     if (clock_gettime(CLOCK_MONOTONIC, &time) != 0) return 0.0;
     return (double)time.tv_sec + (double)time.tv_nsec / 1000000000.0;
+}
+
+double tai_js_clock(void) { return seconds_now(); }
+
+static double timer_now(TaiJsContext *js) {
+    return js->host.now ? js->host.now(js->host.userdata) : seconds_now();
 }
 
 static int interrupt_handler(JSRuntime *runtime, void *opaque) {
@@ -97,6 +117,8 @@ static void report(TaiJsContext *js, const TaiJsReport *entry) {
     } else if (entry->kind == TAI_JS_REPORT_RAF_ERROR) {
         fprintf(stderr, "requestAnimationFrame callback crashed %s\n",
                 entry->text);
+    } else if (entry->kind == TAI_JS_REPORT_TASK_ERROR) {
+        fprintf(stderr, "%s %s\n", entry->event, entry->text);
     } else {
         fprintf(stderr, "Event %s crashed %s\n", entry->event, entry->text);
     }
@@ -111,6 +133,13 @@ static void report_event_error(TaiJsContext *js, const char *type,
 
 static void report_raf_error(TaiJsContext *js, const char *text) {
     TaiJsReport entry = {.kind = TAI_JS_REPORT_RAF_ERROR,
+                         .text = text ? text : "(unprintable exception)"};
+    report(js, &entry);
+}
+
+static void report_task_error(TaiJsContext *js, const char *prefix,
+                              const char *text) {
+    TaiJsReport entry = {.kind = TAI_JS_REPORT_TASK_ERROR, .event = prefix,
                          .text = text ? text : "(unprintable exception)"};
     report(js, &entry);
 }
@@ -615,12 +644,34 @@ static JSValue op_cookie_set(TaiJsContext *js, int argc, JSValueConst *argv) {
     return JS_UNDEFINED;
 }
 
+/* D5: the asynchronous branch of Python XMLHttpRequest_send. CSP (and any
+ * other failure to start) throws at send(); the result arrives later through
+ * tai_js_finish_xhr. */
+static JSValue xhr_start(TaiJsContext *js, const char *url, const char *body,
+                         JSValueConst handle_value) {
+    JSContext *context = js->context;
+    int64_t handle;
+    if (!JS_IsNumber(handle_value) ||
+        JS_ToInt64(context, &handle, handle_value) < 0 || handle < 0)
+        return JS_ThrowPlainError(context, "XMLHttpRequest handle is invalid");
+    if (!js->host.xhr_start)
+        return JS_ThrowPlainError(context, "XMLHttpRequest is not available");
+    char *message = NULL;
+    TaiJsHostStatus status = js->host.xhr_start(js->host.userdata, url, body,
+                                                (uint64_t)handle, &message);
+    if (status == TAI_JS_HOST_OK) {
+        free(message);
+        return JS_UNDEFINED;
+    }
+    return host_failure(context, status, message, "XMLHttpRequest failed");
+}
+
 /* Python XMLHttpRequest_send(method, url, body): method is only a label. A
  * non-string URL (open() never called) or body fails in Python's request. */
 static JSValue op_xhr_send(TaiJsContext *js, int argc, JSValueConst *argv) {
-    (void)argc;
     JSContext *context = js->context;
-    if (!js->host.xhr_send)
+    bool asynchronous = argc > 3 && JS_ToBool(context, argv[3]) > 0;
+    if (!asynchronous && !js->host.xhr_send)
         return JS_ThrowPlainError(context, "XMLHttpRequest is not available");
     if (!JS_IsString(argv[1]))
         return JS_ThrowPlainError(context, "XMLHttpRequest URL must be a string");
@@ -633,6 +684,12 @@ static JSValue op_xhr_send(TaiJsContext *js, int argc, JSValueConst *argv) {
     if (!url || (JS_IsString(argv[2]) && !body)) {
         JS_FreeCString(context, url);
         return JS_EXCEPTION;
+    }
+    if (asynchronous) {
+        JSValue started = xhr_start(js, url, body, argv[4]);
+        JS_FreeCString(context, body);
+        JS_FreeCString(context, url);
+        return started;
     }
     char *response = NULL, *message = NULL;
     double started = seconds_now();
@@ -671,6 +728,252 @@ static JSValue op_xhr_send(TaiJsContext *js, int argc, JSValueConst *argv) {
                         message, "XMLHttpRequest failed");
 }
 
+/* ---- timers (D5) ------------------------------------------------------------ */
+
+/* dukpy hands Python a JSON round trip of each argument: NaN, the
+ * infinities, functions and undefined arrive as None. Returns the parsed
+ * primitive, JS_NULL for None, or JS_EXCEPTION (a cyclic object also throws
+ * in dukpy). */
+static JSValue python_argument(JSContext *context, JSValueConst value) {
+    JSValue json = JS_JSONStringify(context, value, JS_UNDEFINED, JS_UNDEFINED);
+    if (JS_IsException(json) || JS_IsUndefined(json)) {
+        return JS_IsException(json) ? json : JS_NULL;
+    }
+    size_t length = 0;
+    const char *text = JS_ToCStringLen(context, &length, json);
+    JS_FreeValue(context, json);
+    if (!text) return JS_EXCEPTION;
+    JSValue parsed = JS_ParseJSON(context, text, length, "<argument>");
+    JS_FreeCString(context, text);
+    return parsed;
+}
+
+/* Python str.strip() whitespace. */
+static bool python_space(utf8proc_int32_t c) {
+    if (c == ' ' || (c >= 0x09 && c <= 0x0d) || (c >= 0x1c && c <= 0x1f) ||
+        c == 0x85 || c == 0x2028 || c == 0x2029)
+        return true;
+    return c > 0x7f && utf8proc_category(c) == UTF8PROC_CATEGORY_ZS;
+}
+
+/* The text between Python whitespace, as [*start, *end). */
+static void python_strip(const char *text, const char **start,
+                         const char **end) {
+    const utf8proc_uint8_t *bytes = (const utf8proc_uint8_t *)text;
+    utf8proc_ssize_t length = (utf8proc_ssize_t)strlen(text), at = 0;
+    *start = *end = text;
+    bool seen = false;
+    while (at < length) {
+        utf8proc_int32_t c;
+        utf8proc_ssize_t size = utf8proc_iterate(bytes + at, length - at, &c);
+        if (size <= 0) size = 1, c = -1;
+        if (c < 0 || !python_space(c)) {
+            if (!seen) *start = text + at;
+            seen = true;
+            *end = text + at + size;
+        }
+        at += size;
+    }
+}
+
+/* Digits with single underscores between them (Python's digitpart); appends
+ * the digits to *out. */
+static bool digit_part(const char **cursor, const char *end, char **out) {
+    const char *at = *cursor;
+    if (at >= end || *at < '0' || *at > '9') return false;
+    while (at < end) {
+        if (*at >= '0' && *at <= '9') {
+            *(*out)++ = *at++;
+        } else if (*at == '_' && at + 1 < end && at[1] >= '0' && at[1] <= '9') {
+            at++;
+        } else {
+            break;
+        }
+    }
+    *cursor = at;
+    return true;
+}
+
+static bool ascii_equal_nocase(const char *text, size_t length,
+                               const char *word) {
+    if (strlen(word) != length) return false;
+    for (size_t index = 0; index < length; index++) {
+        char c = text[index];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if (c != word[index]) return false;
+    }
+    return true;
+}
+
+/* Python float(str); false for a ValueError. Non-decimal digits that
+ * Python also accepts are not supported. */
+static bool python_float_text(const char *text, double *out) {
+    const char *at, *end;
+    python_strip(text, &at, &end);
+    size_t length = (size_t)(end - at);
+    char *copy = malloc(length + 2), *write = copy;
+    if (!copy) return false;
+    const char *body = at;
+    if (body < end && (*body == '+' || *body == '-')) *write++ = *body++;
+    bool ok;
+    if (ascii_equal_nocase(body, (size_t)(end - body), "inf") ||
+        ascii_equal_nocase(body, (size_t)(end - body), "infinity") ||
+        ascii_equal_nocase(body, (size_t)(end - body), "nan")) {
+        *out = ascii_equal_nocase(body, (size_t)(end - body), "nan")
+            ? NAN : (copy[0] == '-' && write > copy ? -INFINITY : INFINITY);
+        free(copy);
+        return true;
+    }
+    bool whole = digit_part(&body, end, &write);
+    bool fraction = false;
+    if (body < end && *body == '.') {
+        *write++ = *body++;
+        fraction = digit_part(&body, end, &write);
+    }
+    ok = whole || fraction;
+    if (ok && body < end && (*body == 'e' || *body == 'E')) {
+        *write++ = *body++;
+        if (body < end && (*body == '+' || *body == '-')) *write++ = *body++;
+        ok = digit_part(&body, end, &write);
+    }
+    ok = ok && body == end;
+    *write = '\0';
+    if (ok) *out = strtod(copy, NULL);
+    free(copy);
+    return ok;
+}
+
+/* Python JSContext._timer_delay_seconds of a dukpy argument. Leaves a
+ * pending exception and returns false only when the argument cannot be
+ * converted at all. */
+static bool timer_delay(JSContext *context, JSValueConst value, double *seconds) {
+    JSValue argument = python_argument(context, value);
+    if (JS_IsException(argument)) return false;
+    double milliseconds = 0.0;
+    if (JS_IsBool(argument)) {
+        milliseconds = JS_ToBool(context, argument) ? 1.0 : 0.0;
+    } else if (JS_IsNumber(argument)) {
+        if (JS_ToFloat64(context, &milliseconds, argument) < 0)
+            milliseconds = 0.0;
+    } else if (JS_IsString(argument)) {
+        const char *text = JS_ToCString(context, argument);
+        if (!text) {
+            JS_FreeValue(context, argument);
+            return false;
+        }
+        if (!python_float_text(text, &milliseconds)) milliseconds = 0.0;
+        JS_FreeCString(context, text);
+    }
+    JS_FreeValue(context, argument);
+    if (!isfinite(milliseconds) || milliseconds < 0.0) milliseconds = 0.0;
+    *seconds = milliseconds / 1000.0;
+    return true;
+}
+
+/* Python int() of a dukpy argument, for clearInterval: false (and no
+ * exception) for None or a TypeError/ValueError, and for a value outside
+ * int64_t, which names no timer. */
+static bool python_int(JSContext *context, JSValueConst value, int64_t *out,
+                       bool *failed) {
+    *failed = false;
+    JSValue argument = python_argument(context, value);
+    if (JS_IsException(argument)) {
+        *failed = true;
+        return false;
+    }
+    bool ok = false;
+    if (JS_IsBool(argument)) {
+        *out = JS_ToBool(context, argument);
+        ok = true;
+    } else if (JS_IsNumber(argument)) {
+        double number = 0.0;
+        ok = JS_ToFloat64(context, &number, argument) == 0 && isfinite(number) &&
+             fabs(number) < 9.2e18;
+        if (ok) *out = (int64_t)trunc(number);
+    } else if (JS_IsString(argument)) {
+        const char *text = JS_ToCString(context, argument);
+        if (!text) {
+            *failed = true;
+        } else {
+            const char *at, *end;
+            python_strip(text, &at, &end);
+            size_t length = (size_t)(end - at);
+            char *digits = malloc(length + 2), *write = digits;
+            if (!digits) {
+                JS_ThrowOutOfMemory(context);
+                *failed = true;
+            } else {
+                if (at < end && (*at == '+' || *at == '-')) *write++ = *at++;
+                ok = digit_part(&at, end, &write) && at == end;
+                *write = '\0';
+                if (ok) {
+                    errno = 0;
+                    long long parsed = strtoll(digits, NULL, 10);
+                    ok = errno == 0;
+                    *out = parsed;
+                }
+                free(digits);
+            }
+            JS_FreeCString(context, text);
+        }
+    }
+    JS_FreeValue(context, argument);
+    return ok;
+}
+
+static JSValue arm_timer(TaiJsContext *js, JSValueConst handle_value,
+                         JSValueConst delay_value, bool interval) {
+    JSContext *context = js->context;
+    int64_t handle;
+    if (!JS_IsNumber(handle_value) ||
+        JS_ToInt64(context, &handle, handle_value) < 0)
+        return JS_ThrowPlainError(context, "timer handle is invalid");
+    double delay;
+    if (!timer_delay(context, delay_value, &delay)) return JS_EXCEPTION;
+    /* Python: a 0 ms repeating worker would spin, so intervals wait 1 ms. */
+    if (interval && delay < 0.001) delay = 0.001;
+    if (!grow_array((void **)&js->timers, &js->timer_capacity,
+                    js->timer_count + 1, sizeof(*js->timers)))
+        return JS_ThrowOutOfMemory(context);
+    /* Python replaces (and stops) an interval armed again under its handle. */
+    for (size_t index = 0; interval && index < js->timer_count; index++)
+        if (js->timers[index].interval && js->timers[index].handle == handle) {
+            js->timers[index] = js->timers[--js->timer_count];
+            break;
+        }
+    js->timers[js->timer_count++] = (Timer){
+        .handle = handle, .interval = interval,
+        .due = timer_now(js) + delay, .period = delay,
+        .order = js->timer_order++};
+    return JS_UNDEFINED;
+}
+
+static JSValue op_set_timeout(TaiJsContext *js, int argc, JSValueConst *argv) {
+    (void)argc;
+    return arm_timer(js, argv[0], argv[1], false);
+}
+
+static JSValue op_set_interval(TaiJsContext *js, int argc, JSValueConst *argv) {
+    (void)argc;
+    return arm_timer(js, argv[0], argv[1], true);
+}
+
+/* Python clearInterval: int() of the handle stops future ticks; a value
+ * int() rejects is ignored. js_scheduling.js has dropped the callback. */
+static JSValue op_clear_interval(TaiJsContext *js, int argc, JSValueConst *argv) {
+    (void)argc;
+    int64_t handle;
+    bool failed;
+    if (!python_int(js->context, argv[0], &handle, &failed))
+        return failed ? JS_EXCEPTION : JS_UNDEFINED;
+    for (size_t index = 0; index < js->timer_count; index++)
+        if (js->timers[index].interval && js->timers[index].handle == handle) {
+            js->timers[index] = js->timers[--js->timer_count];
+            break;
+        }
+    return JS_UNDEFINED;
+}
+
 static const struct {
     const char *name;
     int arguments; /* after the operation name */
@@ -693,7 +996,10 @@ static const struct {
     {"outerHTML_get", 1, op_outer_html_get},
     {"document_cookie_get", 0, op_cookie_get},
     {"document_cookie_set", 1, op_cookie_set},
-    {"XMLHttpRequest_send", 3, op_xhr_send},
+    {"XMLHttpRequest_send", 5, op_xhr_send},
+    {"setTimeout", 2, op_set_timeout},
+    {"setInterval", 2, op_set_interval},
+    {"clearInterval", 1, op_clear_interval},
 };
 
 static JSValue call_python(JSContext *context, JSValueConst this_value,
@@ -709,8 +1015,9 @@ static JSValue call_python(JSContext *context, JSValueConst this_value,
         if (strcmp(name, operations[index].name)) continue;
         found = true;
         /* Missing arguments read as undefined, as in dukpy. */
-        JSValueConst arguments[3] = {JS_UNDEFINED, JS_UNDEFINED, JS_UNDEFINED};
-        for (int i = 1; i < argc && i <= 3; i++) arguments[i - 1] = argv[i];
+        JSValueConst arguments[5] = {JS_UNDEFINED, JS_UNDEFINED, JS_UNDEFINED,
+                                     JS_UNDEFINED, JS_UNDEFINED};
+        for (int i = 1; i < argc && i <= 5; i++) arguments[i - 1] = argv[i];
         result = operations[index].run(js, argc - 1, arguments);
         break;
     }
@@ -762,7 +1069,9 @@ TaiJsContext *tai_js_create(TaiNode *root, const TaiJsHost *host, char **error) 
     JS_FreeValue(js->context, global);
     if (!bound) goto fail;
     if (!evaluate(js, "runtime.js", (const char *)tai_runtime_js, NULL, error) ||
-        !evaluate(js, "js_prelude.js", (const char *)tai_prelude_js, NULL, error))
+        !evaluate(js, "js_prelude.js", (const char *)tai_prelude_js, NULL, error) ||
+        !evaluate(js, "js_scheduling.js", (const char *)tai_scheduling_js, NULL,
+                  error))
         goto destroy;
     enter_js(js);
     bool synced = sync_id_globals(js);
@@ -785,6 +1094,7 @@ void tai_js_destroy(TaiJsContext *js) {
     if (js->runtime) JS_FreeRuntime(js->runtime);
     free(js->handle_nodes);
     free(js->node_handles);
+    free(js->timers);
     free(js);
 }
 
@@ -863,5 +1173,102 @@ bool tai_js_run_animation_frame(TaiJsContext *js, char **error) {
         free(text);
     }
     JS_FreeValue(js->context, value);
+    return true;
+}
+
+/* Calls the global function name(arguments...) as one outermost task and
+ * reports what escapes it as "<prefix> <error>", like Python's task
+ * wrappers. The arguments are freed. */
+static void run_task(TaiJsContext *js, const char *name, const char *prefix,
+                     int argc, JSValue *argv) {
+    JSContext *context = js->context;
+    JSValue global = JS_GetGlobalObject(context);
+    JSValue function = JS_GetPropertyStr(context, global, name);
+    bool built = !JS_IsException(function);
+    for (int index = 0; index < argc; index++)
+        built = built && !JS_IsException(argv[index]);
+    JSValue result = JS_EXCEPTION;
+    if (built) {
+        enter_js(js);
+        result = JS_Call(context, function, global, argc, (JSValueConst *)argv);
+        leave_js(js);
+    }
+    if (JS_IsException(result)) {
+        char *text = take_exception_text(context);
+        report_task_error(js, prefix, text);
+        free(text);
+    }
+    JS_FreeValue(context, result);
+    for (int index = 0; index < argc; index++) JS_FreeValue(context, argv[index]);
+    JS_FreeValue(context, function);
+    JS_FreeValue(context, global);
+}
+
+static bool timer_before(const Timer *left, const Timer *right) {
+    return left->due < right->due ||
+           (left->due == right->due && left->order < right->order);
+}
+
+/* The earliest timer, or SIZE_MAX without timers. */
+static size_t next_due_timer(const TaiJsContext *js) {
+    size_t best = SIZE_MAX;
+    for (size_t index = 0; index < js->timer_count; index++)
+        if (best == SIZE_MAX || timer_before(&js->timers[index], &js->timers[best]))
+            best = index;
+    return best;
+}
+
+double tai_js_next_timer(const TaiJsContext *js) {
+    size_t index = js ? next_due_timer(js) : SIZE_MAX;
+    return index == SIZE_MAX ? INFINITY : js->timers[index].due;
+}
+
+bool tai_js_run_timers(TaiJsContext *js, double now, size_t budget,
+                       size_t *ran, char **error) {
+    if (ran) *ran = 0;
+    if (!js || isnan(now)) return set_error(error, "missing timer input");
+    for (size_t count = 0; count < budget; count++) {
+        size_t index = next_due_timer(js);
+        if (index == SIZE_MAX || js->timers[index].due > now) break;
+        Timer *timer = &js->timers[index];
+        int64_t handle = timer->handle;
+        bool interval = timer->interval;
+        if (interval) {
+            /* Python's worker re-arms on the ideal timeline before the
+             * queued tick runs. */
+            timer->due += timer->period;
+            timer->order = js->timer_order++;
+        } else {
+            *timer = js->timers[--js->timer_count];
+        }
+        JSValue argument = JS_NewInt64(js->context, handle);
+        if (interval)
+            run_task(js, "runSetInterval", "setInterval callback crashed", 1,
+                     &argument);
+        else
+            run_task(js, "runSetTimeout", "setTimeout callback crashed", 1,
+                     &argument);
+        if (ran) (*ran)++;
+    }
+    return true;
+}
+
+bool tai_js_finish_xhr(TaiJsContext *js, uint64_t handle, const char *body,
+                       const char *message, char **error) {
+    if (!js || handle > (uint64_t)INT64_MAX)
+        return set_error(error, "missing XMLHttpRequest input");
+    JSContext *context = js->context;
+    if (!body) {
+        /* Python prints the failure from the network thread; the JS object
+         * never hears of it. */
+        report_task_error(js, "Async XMLHttpRequest failed",
+                          message ? message : "XMLHttpRequest failed");
+        JSValue argument = JS_NewInt64(context, (int64_t)handle);
+        run_task(js, "dropXHR", "XMLHttpRequest onload crashed", 1, &argument);
+        return true;
+    }
+    JSValue arguments[2] = {JS_NewString(context, body),
+                            JS_NewInt64(context, (int64_t)handle)};
+    run_task(js, "runXHROnload", "XMLHttpRequest onload crashed", 2, arguments);
     return true;
 }

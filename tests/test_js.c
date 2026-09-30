@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tai/js.h"
 #include <assert.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -555,7 +556,130 @@ static void test_host_callbacks(void) {
     tai_document_destroy(doc);
 }
 
+/* ---- timers and asynchronous XHR (D5) ------------------------------------- */
+
+typedef struct {
+    double clock;
+    int starts;
+    uint64_t handles[8];
+    TaiJsHostStatus status;
+} TaskHost;
+
+static double task_now(void *opaque) { return ((TaskHost *)opaque)->clock; }
+
+static TaiJsHostStatus task_start(void *opaque, const char *url,
+                                  const char *body, uint64_t handle,
+                                  char **message) {
+    (void)url;
+    (void)body;
+    TaskHost *host = opaque;
+    if (host->status == TAI_JS_HOST_ERROR) {
+        *message = strdup("start refused");
+        return TAI_JS_HOST_ERROR;
+    }
+    if (host->status == TAI_JS_HOST_NO_MEMORY) return TAI_JS_HOST_NO_MEMORY;
+    host->handles[host->starts++] = handle;
+    return TAI_JS_HOST_OK;
+}
+
+#define START_XHR "var x = new XMLHttpRequest(); x.open('GET', 'u', true);" \
+    " x.onload = function () { got.push(this.responseText); }; x.send()"
+
+static void test_tasks(void) {
+    char *error = NULL;
+    TaiDocument *doc = tai_html_parse("<p>x</p>", &error);
+    assert(doc && !error);
+
+    /* The default clock, and no host for asynchronous XHR. */
+    TaiJsContext *bare = tai_js_create(tai_document_root(doc), NULL, &error);
+    assert(bare && !error);
+    assert(tai_js_next_timer(bare) == INFINITY);
+    double before = tai_js_clock();
+    expect_text(bare, "setTimeout(function () {}, 20)", "0");
+    double due = tai_js_next_timer(bare);
+    assert(due >= before + 0.02 && due <= tai_js_clock() + 0.02);
+    expect_text(bare, "var got = []; " CAUGHT(START_XHR),
+                "Error:XMLHttpRequest is not available");
+    expect_text(bare, "Object.keys(XHR_REQUESTS).length", "0");
+    /* Pending timers go with the context (Python's discard). */
+    tai_js_destroy(bare);
+
+    TaskHost fake = {.clock = 10.0};
+    TaiJsHost host = {.now = task_now, .xhr_start = task_start,
+                      .userdata = &fake};
+    TaiJsContext *js = tai_js_create(tai_document_root(doc), &host, &error);
+    assert(js && !error);
+
+    /* The budget bounds one call; the rest stay due. */
+    expect_text(js, "var n = 0; for (var i = 0; i < 5; i++)"
+                    " setTimeout(function () { n++; }, 0); n", "0");
+    size_t ran = 99;
+    assert(tai_js_run_timers(js, fake.clock, 2, &ran, &error) && ran == 2);
+    assert(tai_js_next_timer(js) <= fake.clock);
+    assert(tai_js_run_timers(js, fake.clock, 10, &ran, &error) && ran == 3);
+    assert(tai_js_next_timer(js) == INFINITY);
+    expect_text(js, "n", "5");
+    /* Nothing is due before its time. */
+    expect_text(js, "setTimeout(function () { n = -1; }, 5); n", "5");
+    assert(tai_js_run_timers(js, fake.clock + 0.004, 10, &ran, &error) &&
+           ran == 0);
+
+    /* Each callback has its own time limit; the next one still runs. */
+    expect_text(js, "setTimeout(function () { while (true) {} }, 0);"
+                    " setTimeout(function () { n = 'after'; }, 0); 1", "1");
+    StderrCapture capture;
+    capture_begin(&capture);
+    double started = seconds_now();
+    assert(tai_js_run_timers(js, fake.clock, 10, &ran, &error) && ran == 2);
+    double elapsed = seconds_now() - started;
+    char *reported = capture_end(&capture);
+    assert(elapsed >= 1.5 && elapsed < 10.0);
+    assert(strstr(reported, "setTimeout callback crashed"));
+    free(reported);
+    expect_text(js, "n", "after");
+    /* The earlier 5 ms timer is still pending. */
+    assert(tai_js_next_timer(js) == fake.clock + 0.005);
+
+    /* Asynchronous XHR: refused starts throw at send() and leave nothing
+     * behind; a finished request runs onload once. */
+    expect_text(js, "var got = []; " CAUGHT(START_XHR), "none");
+    assert(fake.starts == 1);
+    fake.status = TAI_JS_HOST_ERROR;
+    expect_text(js, CAUGHT(START_XHR), "Error:start refused");
+    fake.status = TAI_JS_HOST_NO_MEMORY;
+    expect_text(js, CAUGHT(START_XHR), "InternalError:out of memory");
+    fake.status = TAI_JS_HOST_OK;
+    expect_text(js, "Object.keys(XHR_REQUESTS).join()", "0");
+    assert(tai_js_finish_xhr(js, fake.handles[0], "body", NULL, &error));
+    assert(tai_js_finish_xhr(js, fake.handles[0], "again", NULL, &error));
+    expect_text(js, "got.join() + '|' + Object.keys(XHR_REQUESTS).length",
+                "body|0");
+    /* A failure is reported and forgets the request. */
+    expect_text(js, CAUGHT(START_XHR), "none");
+    capture_begin(&capture);
+    assert(tai_js_finish_xhr(js, fake.handles[1], NULL, "gone", &error));
+    reported = capture_end(&capture);
+    assert(!strcmp(reported, "Async XMLHttpRequest failed gone\n"));
+    free(reported);
+    expect_text(js, "got.join() + '|' + Object.keys(XHR_REQUESTS).length",
+                "body|0");
+
+    assert(!tai_js_run_timers(NULL, 0.0, 1, &ran, &error) && error);
+    free(error);
+    error = NULL;
+    assert(!tai_js_run_timers(js, NAN, 1, &ran, &error) && error);
+    free(error);
+    error = NULL;
+    assert(!tai_js_finish_xhr(js, UINT64_MAX, "x", NULL, &error) && error);
+    free(error);
+    error = NULL;
+    assert(tai_js_next_timer(NULL) == INFINITY);
+    tai_js_destroy(js);
+    tai_document_destroy(doc);
+}
+
 int main(void) {
+    test_tasks();
     test_host_callbacks();
     test_mutation_callbacks();
     test_inner_html();

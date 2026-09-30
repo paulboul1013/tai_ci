@@ -8,6 +8,19 @@ it and runs ``steps`` in order. Step forms:
                                  document order matching selector
     ("raf",)                     run one animation frame's RAF callbacks
 
+SCHEDULING_CASES (D5) add timer and asynchronous XHR steps, run on a virtual
+clock that starts at 0 ms:
+
+    ("tick", ms)                 advance the clock by ms, running each timer
+                                 when its time comes, earliest first
+    ("xhr_done", n, body)        the n-th asynchronous request (in send()
+                                 order) completes with body
+    ("xhr_fail", n, message)     the n-th asynchronous request fails
+
+Their oracle is the auxiliary one described in js_dom_oracle_probe.py. They
+avoid what differs between that runtime's XMLHttpRequest and the frozen one
+native keeps (the constructor's fields and synchronous send's return value).
+
 Optional ``url`` sets the document URL (used by document.cookie).
 
 The JavaScript side of a "js" step is ``step_source(code)``; both runners use
@@ -428,6 +441,227 @@ CASES = [
         "steps": [
             ("js", "document.cookie"),
             ("js", "document.cookie = 'sid=stolen'; document.cookie"),
+        ],
+    },
+]
+
+
+SCHEDULING_CASES = [
+    {
+        "name": "timer_order",
+        "html": "<p>x</p>",
+        "steps": [
+            ("js", "var order = [];"
+                   " [setTimeout(function () { order.push('30'); }, 30),"
+                   "  setTimeout(function () { order.push('10a'); }, 10),"
+                   "  setTimeout(function () { order.push('20'); }, 20),"
+                   "  setTimeout(function () { order.push('10b'); }, 10),"
+                   "  setTimeout(function () { order.push('5'); }, '5')]"),
+            ("tick", 4),
+            ("js", "order.join()"),
+            ("tick", 21),
+            ("js", "order.join()"),
+            ("tick", 5),
+            ("js", "order.join()"),
+        ],
+    },
+    {
+        "name": "timer_delays",
+        "html": "<p>x</p>",
+        "steps": [
+            ("js", "var fired = [];"
+                   " function at(label, delay) {"
+                   "   setTimeout(function () { fired.push(label); }, delay); }"
+                   " at('none'); at('null', null); at('negative', -5);"
+                   " at('nan', NaN); at('infinity', Infinity); at('abc', 'abc');"
+                   " at('hex', '0x10'); at('array', [3]); at('object', {});"
+                   " at('function', function () {}); at('inf-text', 'inf');"
+                   " at('true', true); at('false', false); at('spaces', ' 7 ');"
+                   " at('underscore', '1_0'); at('exponent', '1e1');"
+                   " at('fraction', 2.5); at('dot', '.5e1'); at('plus', '+3');"
+                   " at('bad-underscore', '1__0'); at('empty', '');"
+                   " at('unicode-space', '\u20036\u3000')"),
+            ("tick", 0),
+            ("js", "fired.join()"),
+            ("tick", 1),
+            ("js", "fired.join()"),
+            ("tick", 2.5),
+            ("js", "fired.join()"),
+            ("tick", 10),
+            ("js", "fired.join()"),
+        ],
+    },
+    {
+        "name": "timer_nested",
+        "html": "<p>x</p>",
+        "steps": [
+            ("js", "var seen = [];"
+                   " setTimeout(function () {"
+                   "   seen.push('outer');"
+                   "   setTimeout(function () { seen.push('zero'); }, 0);"
+                   "   setTimeout(function () { seen.push('five'); }, 5);"
+                   " }, 10);"
+                   " setTimeout(function () { seen.push('twelve'); }, 12)"),
+            ("tick", 10),
+            ("js", "seen.join()"),
+            ("tick", 3),
+            ("js", "seen.join()"),
+            ("tick", 2),
+            ("js", "seen.join()"),
+        ],
+    },
+    {
+        "name": "interval_basic",
+        "html": "<p>x</p>",
+        "steps": [
+            ("js", "var n = 0;"
+                   " var id = setInterval(function () {"
+                   "   n = n + 1; log('tick ' + n);"
+                   "   if (n == 3) clearInterval(id);"
+                   " }, 10); [typeof id, id]"),
+            ("tick", 9),
+            ("tick", 16),
+            ("tick", 10),
+            ("tick", 50),
+            ("js", "n"),
+        ],
+    },
+    {
+        "name": "interval_floor_and_catch_up",
+        "html": "<p>x</p>",
+        "steps": [
+            ("js", "var fast = 0, slow = 0;"
+                   " var f = setInterval(function () { fast++; }, 0);"
+                   " var s = setInterval(function () { slow++; }, 4); [f, s]"),
+            ("tick", 3.5),
+            ("js", "[fast, slow]"),
+            ("tick", 10),
+            ("js", "clearInterval(f); [fast, slow]"),
+            ("tick", 10),
+            ("js", "clearInterval(s); [fast, slow]"),
+            ("tick", 10),
+            ("js", "[fast, slow]"),
+        ],
+    },
+    {
+        "name": "clear_interval_values",
+        "html": "<p>x</p>",
+        "steps": [
+            ("js", "var ticks = {};"
+                   " function every(label) {"
+                   "   return setInterval(function () {"
+                   "     ticks[label] = (ticks[label] || 0) + 1; }, 10); }"
+                   " [every('a'), every('b'), every('c'), every('d'),"
+                   "  every('e'), every('f')]"),
+            ("js", "clearInterval('1'); clearInterval(0.9); clearInterval(true);"
+                   " clearInterval(null); clearInterval('x'); clearInterval({});"
+                   " clearInterval(' 3 '); clearInterval('4.0');"
+                   " clearInterval(undefined); clearInterval(99)"),
+            ("tick", 25),
+            ("js", "JSON.stringify(ticks)"),
+            ("js", "clearInterval(5); clearInterval(2); clearInterval(4)"),
+            ("tick", 20),
+            ("js", "JSON.stringify(ticks)"),
+        ],
+    },
+    {
+        "name": "clear_interval_inside_and_timeout_handle",
+        "html": "<p>x</p>",
+        "steps": [
+            ("js", "var calls = [];"
+                   " var t = setTimeout(function () { calls.push('timeout'); }, 15);"
+                   " var i = setInterval(function () {"
+                   "   calls.push('interval');"
+                   "   clearInterval(t);"
+                   " }, 10); [t, i]"),
+            ("tick", 12),
+            ("tick", 6),
+            ("js", "clearInterval(i); calls.join()"),
+            ("tick", 30),
+            ("js", "calls.join()"),
+        ],
+    },
+    {
+        "name": "timer_errors",
+        "html": "<p>x</p>",
+        "steps": [
+            ("js", "setTimeout(function () { throw Error('timeout boom'); }, 1);"
+                   " setTimeout(function () { log('after timeout'); }, 1);"
+                   " setTimeout('log(1)', 2);"
+                   " setTimeout(undefined, 2);"
+                   " var k = 0;"
+                   " var i = setInterval(function () {"
+                   "   k++; if (k == 1) throw Error('interval boom');"
+                   "   log('interval ' + k); if (k == 2) clearInterval(i);"
+                   " }, 3)"),
+            ("tick", 1),
+            ("tick", 1),
+            ("tick", 1),
+            ("tick", 3),
+            ("tick", 10),
+        ],
+    },
+    {
+        "name": "timer_dom_and_raf",
+        "html": "<div id=box>0</div>",
+        "steps": [
+            ("js", "setTimeout(function () {"
+                   "   box.innerHTML = 'one';"
+                   "   var p = document.createElement('p');"
+                   "   p.setAttribute('id', 'added');"
+                   "   box.appendChild(p);"
+                   " }, 5);"
+                   " setTimeout(function () {"
+                   "   requestAnimationFrame(function () { log('frame'); });"
+                   "   log(typeof added);"
+                   " }, 6)"),
+            ("tick", 5),
+            ("tick", 1),
+            ("raf",),
+        ],
+    },
+    {
+        "name": "xhr_async",
+        "url": "http://example.test/dir/page",
+        "html": "<p>x</p>",
+        "steps": [
+            ("js", "var events = [];"
+                   " var a = new XMLHttpRequest();"
+                   " a.onload = function (e) {"
+                   "   events.push(['a', this === a, e.type, this.responseText]); };"
+                   " a.open('GET', 'one', true);"
+                   " var b = new XMLHttpRequest();"
+                   " b.open('POST', '/two', true);"
+                   " b.onload = function (e) {"
+                   "   events.push(['b', this === b, e.type, b.responseText]);"
+                   "   throw Error('onload boom'); };"
+                   " var c = new XMLHttpRequest(); c.open('GET', '/three', 1);"
+                   " c.onload = function () { events.push(['c']); };"
+                   " var d = new XMLHttpRequest(); d.open('GET', '/four', true);"
+                   " [a.send(), b.send('payload'), c.send(), d.send()]"),
+            ("js", "events.length"),
+            ("xhr_done", 1, "second body"),
+            ("xhr_done", 0, "first body"),
+            ("xhr_fail", 2, "connection refused"),
+            ("xhr_done", 3, ""),
+            ("js", "JSON.stringify(events)"),
+        ],
+    },
+    {
+        "name": "xhr_async_with_timers",
+        "url": "http://example.test/",
+        "html": "<ul id=list></ul>",
+        "steps": [
+            ("js", "var x = new XMLHttpRequest(); x.open('GET', '/data', true);"
+                   " x.onload = function () {"
+                   "   var li = document.createElement('li');"
+                   "   li.innerHTML = x.responseText;"
+                   "   list.appendChild(li);"
+                   "   setTimeout(function () { log('later ' + list.children.length); }, 5);"
+                   " };"
+                   " x.send()"),
+            ("xhr_done", 0, "loaded <b>text</b>"),
+            ("tick", 5),
         ],
     },
 ]

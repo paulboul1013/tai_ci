@@ -124,6 +124,15 @@ bool tai_tabset_resize(TaiTabSet *tabs, double width, double height,
 /* Drains completed work on the window owner thread. changed reports whether a
  * page, URL/history, or loading state changed and needs repainting. */
 bool tai_tabset_pump(TaiTabSet *tabs, bool *changed, char **error);
+/* Runs the page tasks (D5: timers, finished asynchronous XHR) of every tab's
+ * committed page that has work due by now, background tabs included, like
+ * Python's per-tab task runners; at most budget timer callbacks per page.
+ * *active_changed reports a repaint of the active page; *next (may be NULL)
+ * receives the earliest pending task afterwards on tai_js_clock(), INFINITY
+ * when none. A failing page does not stop the others; the first error is
+ * returned. */
+bool tai_tabset_run_tasks(TaiTabSet *tabs, double now, size_t budget,
+                          bool *active_changed, double *next, char **error);
 bool tai_tabset_view(const TaiTabSet *tabs, TaiTabSetView *view);
 /* Returns an owned URL of the active tab's history entry at index, counting
  * the provisional entry of an in-flight navigation like TaiTabSetView does,

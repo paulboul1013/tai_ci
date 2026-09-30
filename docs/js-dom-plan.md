@@ -1,6 +1,6 @@
 # JS DOM 補齊：整體計畫與交接
 
-**狀態：實作中（2026-09-30）。** 九項決定皆已確認；切片 0–6 完成，切片 6b 起尚未開始。
+**狀態：實作中（2026-09-30）。** 九項決定皆已確認；切片 0–6、6b 完成，切片 7 尚未開始。
 計畫已經四路獨立驗證（oracle 實跑、native 程式碼、所有權設計、文件一致性），結果已併入本文。
 本工作處理 [ACCEPTANCE.md](../ACCEPTANCE.md) 的「JS-visible DOM mutation、query、event
 propagation/default prevention、XHR 與實際可用 scheduling APIs」，並滿足同檔「ASan 重複
@@ -45,7 +45,9 @@ load/mutate/render/close」與「獨立 verifier」兩項；也處理 [PORTING_P
   `ReferenceError`。browser.py 雖有 export，頁面實際不可用。原因是原始專案 commit `7d536e0`
   （2026-09-04）刪除 `SCHEDULING_RUNTIME_JS` 時只把 RAF 搬進 runtime.js，timer 與非同步 XHR 的 JS
   包裝被意外移除；較舊的完整副本 `/home/paulboul/tai_gar/server.py`（3233 行起）仍保留該段。
-  `setInterval` 則在任何版本都沒有 JS 包裝。
+  `setInterval` 則在任何版本都沒有 JS 包裝。**更正（切片 6b）：** `server.py` 是較舊的副本、
+  沒有 `setInterval`；原專案 git 的 `7d536e0^`（`e5e8ed4`）`browser.py` 有完整的
+  `setInterval`／`clearInterval` 包裝，且是凍結版的直接前身，切片 6b 改以它為輔助 oracle。
 - **XHR：** `open(m, u, true)` 丟 `Asynchronous XHR is not supported`。同步路徑的網路部分（CSP／CORS）
   在切片 5 以 fixture server 另行凍結。
 - **Inline script：** 不執行（`_collect_page_resources` 要求 `src`）。
@@ -432,6 +434,51 @@ Native 規格：
 - 測試：延遲順序、`clearInterval`、callback 內再排 timer、導覽後舊 timer 不執行、非同步 XHR onload
   與失敗、關視窗時 timer／XHR 進行中（ASan＋LSan）。
 
+實作紀錄（2026-09-30）：
+- **輔助 oracle：** 原專案 `7d536e0^` 的 `SCHEDULING_RUNTIME_JS` 原文存為
+  `tests/fixtures/scheduling_runtime_7d536e0.js`。`js_dom_oracle_probe.py` 在凍結 `JSContext` 建立後
+  evaljs 它（同 `7d536e0^` 的 `JSContext`），以 `VirtualTime` 取代 `threading.Timer`、interval 執行緒的
+  `Event.wait` 與 `time.perf_counter`（worker 仍是真執行緒，但一次只跑一個），task runner 與 network 以
+  stub 驅動；結果凍結在 `js_dom_oracle.json` 的 `scheduling` 區段（註明來源），既有區段不變。整頁
+  oracle（`js_page_oracle_probe.py`）只對 `AUXILIARY_SCHEDULING` 情境在每個新 `JSContext` 後注入同一檔。
+- **JS 層：** `src/js_scheduling.js`（嵌入，runtime.js 與 js_prelude.js 之後執行）：timer 部分照
+  `7d536e0^`；XHR 只補非同步分支（`send()` 時編號、`runXHROnload`、失敗時 `dropXHR`），建構子與同步
+  行為維持凍結版。`src/js.c`：timer 存在 context（依到期時間、同時到期依排入順序；interval 在 callback
+  之前重排，對應 Python worker 先排下一次再讓 task 執行）；延遲以 dukpy 的 JSON 轉換加 Python `float()`
+  語法（含 `_`、`inf`、Unicode 空白）換算；`clearInterval` 以 Python `int()`；`TaiJsHost` 新增
+  `xhr_start`、`now`；`tai_js_run_timers`（有 budget）、`tai_js_next_timer`、`tai_js_finish_xhr`、
+  `tai_js_clock`；新 report 種類 `TAI_JS_REPORT_TASK_ERROR`。每個 callback 各自受 2 秒上限。
+- **頁面：** `TaiPageFetch`（page 與 network 擁有者以 atomic 參考計數共享；擁有者 `finish` 一次，
+  release／acquire 發布結果）、`tai_page_next_task`、`tai_page_run_tasks`（先交付完成的請求並做 CORS
+  檢查，再跑 timer，dirty 時重建）。頁面銷毀時標記 `abandoned` 並釋放。
+- **執行緒：** `TaiPageNet.start`：載入期在 loader 上直接送出，事件期經 app 的 `async` 佇列交給
+  loader；loader 以 `AsyncJob` 追蹤，允許巢狀派送（callback 只設結果），逾時 30 秒、頁面離開、network
+  失敗或 loader 結束時取消並 `finish`。`tai_tabset_run_tasks` 在 SDL 執行緒跑每個分頁已提交頁面的
+  task（背景分頁也跑）；視窗迴圈每輪呼叫一次（每頁最多 32 個 timer callback），等待時間縮短到最早的
+  task。Headless 不跑 task（D12）。
+- **測試：**
+  - `js_dom_differential`：11 個 scheduling 情境（順序、延遲換算、巢狀、interval 地板與補跑、
+    `clearInterval` 各種值、interval 內清 timeout handle、錯誤回報、DOM／RAF、非同步 XHR 完成與失敗、
+    onload 內再排 timer）與輔助 oracle 相符；`scheduling_globals`、`xhr_open` 套用 D5。共 37 個情境。
+  - `js_dom_integration`：新增 `timers`（兩種模式）、`xhr_async`、`xhr_async_csp`（只跑 `--tabset`，
+    headless 沒有非同步 network），`xhr.loaded` 的 `async` 紀錄套用 D5；14 情境、43 檢查點。新動作
+    `until:TITLE` 以視窗迴圈的方式跑 task。`js_page_oracle_probe --check` 連跑兩次相同。
+  - `test_js.c` `test_tasks`：預設時鐘、budget、每個 callback 各自逾時、拒絕啟動不留殘餘、`onload` 只跑
+    一次、失敗回報、無效輸入、帶待執行 timer 銷毀。
+  - `test_tabset_xhr.c`：載入期請求在巢狀 poll 內完成、提交後才交付；背景分頁 timer 執行且不回報
+    active 重繪；請求進行中導覽與關閉 app（0.01 秒）。
+  - `test_timer_window.c`（CTest `timer_window`，dummy SDL）：interval 比理想時間軸晚 0.4–1.3 ms、從不
+    提早，4 個 tick 間 24 次迴圈（無忙等）；背景分頁 timer；帶 interval 與非同步請求關閉視窗。
+  - `test_cli.c`：headless 輸出不含 timer／onload 的結果（D12）。
+- **證據：** Debug CTest 53/53；`build-asan/` 全套 53/53（ASan/UBSan＋LSan，只排除文件記載的
+  fontconfig／cairo 洩漏）。
+- **審查：** `ownership-reviewer`（只讀、未執行）判定 fetch 參考計數與記憶體順序、巢狀 poll 中的
+  `async_done`、timer 陣列在 callback 中變動、交付迴圈與執行緒邊界皆無缺陷。低嚴重度意見：（1）`onload`
+  內送出且立即失敗的請求會在同一次呼叫交付——已改為只交付呼叫開始時已在清單上的請求；（2）page task
+  失敗（重建失敗等）讓視窗迴圈結束，與 RAF 失敗的既有處理一致，未改；（3）loader 完成請求不喚醒 SDL
+  迴圈，延遲上限為 16 ms 閒置等待，已加註解。
+- **未做：** Xvfb 真實視窗、配置故障掃描涵蓋新 bridge、ACCEPTANCE 紀錄留待切片 7。
+
 ### 切片 7：收尾
 
 - 完整 CTest；`build-asan/` 全套 ASan/UBSan＋LSan，含反覆 load → mutate → render → close；
@@ -471,6 +518,7 @@ Native 規格：
 | D3 | `node.handle` 數值 | 只有確認頁面不可觀察時才列 |
 | D4 | 載入期同步 XHR 期間新的導覽要等它結束才開始；已送出的傳輸照常推進，其他分頁已完成的下載延到 XHR 結束才處理（巢狀 poll 只派送自己的請求與事件期 XHR） | native 單一 loader 迴圈；設計見 [cookie／XHR 設計](js-cookie-xhr-design.md) 10.2 |
 | D5 | 提供 `setTimeout`、`setInterval`／`clearInterval`、非同步 XHR（凍結 oracle 不可用） | 原版 `7d536e0` 意外移除 JS 包裝；使用者 2026-09-29 決定補回 |
+| D12 | Headless CLI 不等待 timer 與非同步 XHR，後者因沒有 network 擁有者而失敗（Python 無 headless） | 輸出確定，與 D11「只跑一輪 RAF」一致；計畫原定「由輔助 oracle 決定」，但輔助 oracle 沒有 headless，切片 6b 採此保守規則 |
 | D6 | 執行 inline `<script>`（Python 只執行有 `src` 的 script），與外部 script 依 source 順序執行；頁面有 CSP `default-src` 時不執行 inline script | 真實網頁大量依賴 inline script；使用者 2026-09-29 決定保留。oracle 比對的頁面含 inline script 時，該腳本造成的 DOM 變化不在 Python 答案內，測試頁面以外部 script 為主 |
 | D7 | Listener 丟錯只影響該 listener：同節點其他 listener 與冒泡照常執行，先前的 `preventDefault` 有效（Python 會中斷整個派送、default action 一律照做） | 真實瀏覽器語意；使用者 2026-09-29 決定。oracle 比對只對「丟錯 listener」情境套用此規則 |
 | D8 | 移除含焦點 input 的子樹時清除焦點（Python 焦點留在脫離的節點，按鍵仍改它的值） | 真實瀏覽器語意；使用者 2026-09-29 指定為切片 4 範圍 |
@@ -486,7 +534,8 @@ Native 規格：
 
 1. **Timer 與非同步 XHR：補回。** `setTimeout`、`setInterval`／`clearInterval` 與非同步 XHR 都提供
    （切片 6b，刻意差異 D5）。理由：原版 `7d536e0` 意外移除，且 ACCEPTANCE 要求「實際可用
-   scheduling APIs」。`setInterval`／`clearInterval` 原版從未有 JS 包裝（非誤刪），使用者另行確認一併補上。
+   scheduling APIs」。`setInterval`／`clearInterval` 使用者另行確認一併補上（當時以為原版從未有 JS 包裝；切片 6b 查到
+   `7d536e0^` 其實有，見上方更正）。
 2. **cookie／同步 XHR 的執行緒：** 採切片 5 的注入介面＋佇列設計。原理由寫「事件期 XHR 期間該視窗
    不重繪，與 Python 同步 XHR 阻塞 Tab 相同」，經對照 oracle 修正：Python 的同步 XHR
    （`JSContext.XMLHttpRequest_send` → `network.run_sync`）只卡該 Tab 的主執行緒，視窗執行緒仍重繪、

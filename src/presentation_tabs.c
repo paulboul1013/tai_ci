@@ -1,5 +1,6 @@
 #include "presentation_internal.h"
 
+#include <math.h>
 #include <stdio.h>
 
 /* One native window: its SDL resources, address editor and tab set. All of
@@ -33,12 +34,18 @@ typedef struct {
   const TaiPage *raf_page;
   Uint64 next_raf_ns;
   bool raf_wanted;
+  /* The earliest page task (D5) of any tab, on tai_js_clock(), as of the
+   * last window_frame. */
+  double next_task;
 } PresWindow;
 
 /* Decision 7: the fixed 33 ms frame interval of Python's REFRESH_RATE_SEC,
  * without its adaptive multiples. */
 #define PRES_FRAME_NS SDL_MS_TO_NS(33)
 enum { PRES_IDLE_WAIT_MS = 16 };
+/* Timer callbacks per page per loop turn: a backlog of interval ticks
+ * yields to input and painting between turns. */
+enum { PRES_TASK_BUDGET = 32 };
 
 /* The windows of one presentation loop. Without an app the loop presents a
  * single caller-owned tab set, as tai_present_window_with_tabs always did. */
@@ -112,6 +119,7 @@ static PresWindow *window_open(TaiTabSet *tabs, bool owns_tabs,
     set_error(error, "window allocation failed");
     return NULL;
   }
+  w->next_task = INFINITY;
   w->tabs = tabs;
   w->owns_tabs = owns_tabs;
   w->focused = true;
@@ -367,6 +375,11 @@ static bool window_frame(PresWindow *w, char **error) {
     set_error(error, "address URL snapshot allocation failed");
     return false;
   }
+  bool tasks_changed = false;
+  if (!tai_tabset_run_tasks(tabs, tai_js_clock(), PRES_TASK_BUDGET,
+                            &tasks_changed, &w->next_task, error))
+    return false;
+  w->page_changed = w->page_changed || tasks_changed;
   if (!window_animation_frame(w, view.page, error)) return false;
   /* New Tab (or switching which label is bold) can wrap or unwrap the tab
    * strip; keep every page viewport equal to the area below the chrome. */
@@ -451,13 +464,19 @@ static void open_new_window(PresBrowser *b) {
   free(error);
 }
 
-/* Waits for input at most until the next due animation frame, rounded up so
- * the loop does not wake early and spin. */
+/* Waits for input at most until the next due animation frame or page task,
+ * rounded up so the loop does not wake early and spin. The loader does not
+ * wake the loop when an asynchronous XHR finishes; the 16 ms idle cap bounds
+ * that delay. */
 static Sint32 wait_timeout(const PresBrowser *b) {
   Uint64 now = SDL_GetTicksNS();
+  double clock = tai_js_clock();
   Sint32 timeout = PRES_IDLE_WAIT_MS;
   for (size_t index = 0; index < b->count; index++) {
     const PresWindow *w = b->windows[index];
+    if (w->next_task <= clock) return 0;
+    double task_ms = ceil((w->next_task - clock) * 1000.0);
+    if (task_ms < (double)timeout) timeout = (Sint32)task_ms;
     if (!w->raf_wanted) continue;
     Uint64 remaining = w->next_raf_ns > now ? w->next_raf_ns - now : 0;
     Uint64 remaining_ms = (remaining + SDL_NS_PER_MS - 1) / SDL_NS_PER_MS;

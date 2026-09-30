@@ -7,7 +7,9 @@
  * as a Set-Cookie header would.
  *
  * STEPS_FILE holds NUL-terminated fields: "js" SOURCE | "dispatch" TYPE
- * SELECTOR | "raf". SOURCE is already wrapped by js_dom_cases.step_source(),
+ * SELECTOR | "raf" | "tick" MS | "xhr_done" N BODY | "xhr_fail" N MESSAGE.
+ * Timers run on a virtual clock starting at 0; asynchronous requests are
+ * numbered in send() order and complete only through the xhr steps. SOURCE is already wrapped by js_dom_cases.step_source(),
  * so its completion value is the step outcome as JSON. Prints one JSON object
  * with the raw native results; the differential normalizes and compares. */
 #define _POSIX_C_SOURCE 200809L
@@ -15,6 +17,7 @@
 #include "tai/js.h"
 #include "tai/network.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +29,9 @@ typedef struct {
     bool first_output;
     TaiCookieJar *jar;
     TaiUrl *url;
+    double clock;          /* seconds */
+    uint64_t xhr[64];      /* handle of each asynchronous request */
+    size_t xhr_count;
 } Counters;
 
 static TaiJsHostStatus cookie_get(void *opaque, char **value) {
@@ -44,6 +50,26 @@ static TaiJsHostStatus cookie_set(void *opaque, const char *value) {
 }
 
 static void invalidated(void *opaque) { ((Counters *)opaque)->invalidations++; }
+
+static double virtual_now(void *opaque) { return ((Counters *)opaque)->clock; }
+
+static void output_separator(Counters *counters);
+
+static TaiJsHostStatus xhr_start(void *opaque, const char *url,
+                                 const char *body, uint64_t handle,
+                                 char **message) {
+    (void)url;
+    (void)body;
+    Counters *counters = opaque;
+    if (counters->xhr_count == sizeof(counters->xhr) / sizeof(*counters->xhr)) {
+        *message = tai_strdup("too many requests");
+        return *message ? TAI_JS_HOST_ERROR : TAI_JS_HOST_NO_MEMORY;
+    }
+    output_separator(counters);
+    printf("{\"xhr\":%zu}", counters->xhr_count);
+    counters->xhr[counters->xhr_count++] = handle;
+    return TAI_JS_HOST_OK;
+}
 
 static void raf_requested(void *opaque) {
     ((Counters *)opaque)->raf_requests++;
@@ -66,6 +92,12 @@ static void reported(void *opaque, const TaiJsReport *report) {
         printf("{\"log\":%s}", report->json);
     } else if (report->kind == TAI_JS_REPORT_RAF_ERROR) {
         fputs("{\"crash\":\"raf\",\"text\":", stdout);
+        tai_json_string(stdout, report->text);
+        fputc('}', stdout);
+    } else if (report->kind == TAI_JS_REPORT_TASK_ERROR) {
+        fputs("{\"crash\":", stdout);
+        tai_json_string(stdout, report->event);
+        fputs(",\"text\":", stdout);
         tai_json_string(stdout, report->text);
         fputc('}', stdout);
     } else {
@@ -127,6 +159,7 @@ int main(int argc, char **argv) {
                       .report = reported, .cookie_get = cookie_get,
                       .cookie_set = cookie_set,
                       .animation_frame_requested = raf_requested,
+                      .xhr_start = xhr_start, .now = virtual_now,
                       .userdata = &counters};
 
     fputs("{\"created\":{\"output\":[", stdout);
@@ -183,6 +216,36 @@ int main(int argc, char **argv) {
             if (!tai_js_run_animation_frame(js, &error)) {
                 fprintf(stderr, "js_probe: raf failed: %s\n",
                         error ? error : "");
+                return 1;
+            }
+            fputc(']', stdout);
+        } else if (!strcmp(kind, "tick")) {
+            /* Each timer runs at its own due time, so the timers it arms
+             * count from there, as on the oracle's virtual clock. */
+            const char *milliseconds = next_field(&cursor, end);
+            double target = counters.clock +
+                (milliseconds ? strtod(milliseconds, NULL) : 0.0) / 1000.0;
+            for (;;) {
+                double due = tai_js_next_timer(js);
+                if (!(due <= target)) break;
+                if (due > counters.clock) counters.clock = due;
+                if (!tai_js_run_timers(js, counters.clock, 1, NULL, &error)) {
+                    fprintf(stderr, "js_probe: timers failed: %s\n",
+                            error ? error : "");
+                    return 1;
+                }
+            }
+            counters.clock = target;
+            fputc(']', stdout);
+        } else if (!strcmp(kind, "xhr_done") || !strcmp(kind, "xhr_fail")) {
+            const char *number = next_field(&cursor, end);
+            const char *text = next_field(&cursor, end);
+            size_t index = number ? strtoul(number, NULL, 10) : SIZE_MAX;
+            bool done = !strcmp(kind, "xhr_done");
+            if (!text || index >= counters.xhr_count ||
+                !tai_js_finish_xhr(js, counters.xhr[index], done ? text : NULL,
+                                   done ? NULL : text, &error)) {
+                fprintf(stderr, "js_probe: %s failed\n", kind);
                 return 1;
             }
             fputc(']', stdout);

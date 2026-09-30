@@ -10,9 +10,12 @@ Comparison rules:
     Error with the same message; one without (KeyError for an unknown handle)
     must be a native Error. JS errors must match by name, and by message when
     the oracle kept one (a plain Error thrown by runtime.js or the page).
-  * Intentional differences D7 (a throwing listener is isolated) and D10 (a
-    throwing animation frame callback is isolated): the steps in
-    INTENTIONAL replace the oracle's answer; see PORTING_PLAN.md.
+  * Intentional differences D7 (a throwing listener is isolated), D10 (a
+    throwing animation frame callback is isolated) and D5 (timers and
+    asynchronous XHR exist): the steps in INTENTIONAL replace the oracle's
+    answer; see PORTING_PLAN.md.
+  * The SCHEDULING_CASES compare with the fixture's "scheduling" section,
+    frozen from the auxiliary oracle (the 7d536e0^ scheduling runtime).
   * PENDING cases need bridge operations of a later slice and are skipped.
   Everything else must be equal.
 
@@ -70,7 +73,24 @@ D10_EXPECTED = {
     },
 }
 
-INTENTIONAL = {**D7_EXPECTED, **D10_EXPECTED}
+# D5: the frozen runtime has no timers and rejects asynchronous XHR; native
+# provides them as the 7d536e0^ runtime did (timers share one handle
+# counter) and leaves the frozen constructor's fields alone.
+D5_EXPECTED = {
+    "scheduling_globals": {
+        0: {"value": ["function", "function", "function", "function",
+                      "function", "undefined"]},
+        1: {"value": 0},
+        2: {"value": 1},
+        3: {"value": {"undefined": True}},
+    },
+    "xhr_open": {
+        0: {"value": {"undefined": True}},
+        1: {"value": ["GET", "/a", None]},
+    },
+}
+
+INTENTIONAL = {**D7_EXPECTED, **D10_EXPECTED, **D5_EXPECTED}
 
 
 def native_error(raw):
@@ -93,6 +113,13 @@ def normalize_output(entries):
     for entry in entries:
         if "log" in entry:
             out.append({"log": entry["log"]})
+        elif "xhr" in entry:
+            out.append(entry)
+        elif entry["crash"] == "Async XMLHttpRequest failed":
+            out.append({"crash": entry["crash"], "message": entry["text"]})
+        elif entry["crash"] not in ("event", "raf"):
+            out.append({"crash": entry["crash"],
+                        "error": error_head(entry["text"])})
         elif entry["crash"] == "event":
             out.append({"crash": "event", "event": entry["event"],
                         "error": error_head(entry["text"])})
@@ -111,7 +138,7 @@ def run_native(probe, case, directory):
             fields += ["js", js_dom_cases.step_source(step[1])]
         else:
             fields += list(step)
-    steps_path.write_bytes(b"".join(f.encode() + b"\0" for f in fields))
+    steps_path.write_bytes(b"".join(str(f).encode() + b"\0" for f in fields))
     command = [probe, str(html_path), str(steps_path)]
     if case.get("url"):
         command.append(case["url"])
@@ -149,6 +176,8 @@ def compare_case(name, expected, actual):
     overrides = INTENTIONAL.get(name, {})
     for index, (want, got) in enumerate(zip(expected["steps"], actual["steps"])):
         want = dict(want, **overrides.get(index, {}))
+        if "value" in overrides.get(index, {}):
+            want.pop("error", None)
         label = "step {}".format(index)
         check(label + "/output", want["output"], normalize_output(got["output"]))
         check(label + "/invalidations", want["invalidations"], got["invalidations"])
@@ -180,7 +209,9 @@ def main():
     probe = sys.argv[1]
     oracle = json.loads(FIXTURE.read_text(encoding="utf-8"))
     names = [case["name"] for case in js_dom_cases.CASES]
-    if set(names) != set(oracle):
+    scheduling = oracle.pop("scheduling", {}).get("cases", {})
+    if set(names) != set(oracle) or set(scheduling) != {
+            case["name"] for case in js_dom_cases.SCHEDULING_CASES}:
         raise SystemExit("oracle fixture is stale; rerun js_dom_oracle_probe.py")
     unknown = (set(PENDING) | set(INTENTIONAL)) - set(names)
     if unknown:
@@ -193,6 +224,13 @@ def main():
                 continue
             actual = run_native(probe, case, pathlib.Path(directory))
             problems = compare_case(case["name"], oracle[case["name"]], actual)
+            compared += 1
+            if problems:
+                failures[case["name"]] = problems
+        for case in js_dom_cases.SCHEDULING_CASES:
+            actual = run_native(probe, case, pathlib.Path(directory))
+            problems = compare_case(case["name"], scheduling[case["name"]],
+                                    actual)
             compared += 1
             if problems:
                 failures[case["name"]] = problems

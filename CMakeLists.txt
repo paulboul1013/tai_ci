@@ -52,14 +52,16 @@ set(SDL_TESTS OFF CACHE BOOL "" FORCE)
 set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(deps/SDL EXCLUDE_FROM_ALL)
 
-# js.c embeds the frozen runtime.js verbatim plus the native prelude.
+# js.c embeds the frozen runtime.js verbatim plus the native prelude and the
+# scheduling wrappers (D5), which the oracle probes also load.
 set(TAI_JS_SOURCES_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/tai_js_sources.h")
 set(TAI_JS_INPUTS
   "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/runtime.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/js_prelude.js")
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/js_prelude.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/js_scheduling.js")
 add_custom_command(OUTPUT "${TAI_JS_SOURCES_HEADER}"
   COMMAND "${CMAKE_COMMAND}" "-DOUTPUT=${TAI_JS_SOURCES_HEADER}"
-    "-DINPUTS=${TAI_JS_INPUTS}" "-DNAMES=tai_runtime_js;tai_prelude_js"
+    "-DINPUTS=${TAI_JS_INPUTS}" "-DNAMES=tai_runtime_js;tai_prelude_js;tai_scheduling_js"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_text.cmake"
   DEPENDS ${TAI_JS_INPUTS} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_text.cmake"
   COMMENT "Embedding JavaScript runtime sources" VERBATIM)
@@ -271,6 +273,10 @@ if(BUILD_TESTING)
   target_link_libraries(test_raf_window PRIVATE tai_presentation)
   target_compile_options(test_raf_window PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME raf_window COMMAND test_raf_window)
+  add_executable(test_timer_window tests/test_timer_window.c)
+  target_link_libraries(test_timer_window PRIVATE tai_presentation)
+  target_compile_options(test_timer_window PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME timer_window COMMAND test_timer_window)
   add_executable(test_new_window tests/test_new_window.c)
   target_link_libraries(test_new_window PRIVATE tai_presentation)
   target_compile_options(test_new_window PRIVATE -Wall -Wextra -Wpedantic -Werror)

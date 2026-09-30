@@ -20,6 +20,28 @@ typedef enum {
   TAI_PAGE_KEY_RETURN
 } TaiPageKey;
 
+/* One asynchronous XMLHttpRequest of a page (D5). The page and, after a
+ * successful TaiPageNet.start, the owner that performs the request share it;
+ * whichever releases it last frees it, so either may go first. */
+typedef struct TaiPageFetch TaiPageFetch;
+/* Borrowed from the fetch, immutable and valid until finish. */
+typedef struct {
+    const TaiUrl *url;
+    const TaiUrl *referrer;
+    const char *payload;          /* NULL: GET */
+    const char *origin;           /* cross-origin requests only */
+    const char *referrer_policy;
+} TaiPageFetchRequest;
+const TaiPageFetchRequest *tai_page_fetch_request(const TaiPageFetch *fetch);
+/* True once the page is gone; the owner may stop the request early. Any
+ * thread, lock-free. */
+bool tai_page_fetch_abandoned(const TaiPageFetch *fetch);
+/* The owner's one and only completion, from any thread: takes response
+ * (NULL with failure, a static message, when there is none) and drops the
+ * owner's reference. The page sees it on its own thread later. */
+void tai_page_fetch_finish(TaiPageFetch *fetch, TaiResponse *response,
+                           const char *failure);
+
 /* How a page's scripts reach the network: document.cookie and synchronous
  * XMLHttpRequest. The owner that runs the page's JS injects it; every
  * pointer is borrowed and must outlive the page's use of it.
@@ -31,6 +53,11 @@ typedef enum {
  *               false means the load was cancelled: the remaining scripts
  *               are skipped and the load fails. May be NULL
  *   cancelled   lock-free; true stops the running script. May be NULL
+ *   start       asynchronous XMLHttpRequest (D5), on the thread running the
+ *               page's JS: true means the owner now holds fetch and will
+ *               call tai_page_fetch_finish exactly once; false means it
+ *               could not start (the page reports a failure). NULL: every
+ *               asynchronous request fails
  *   cookies     the shared jar; NULL makes document.cookie read "" */
 typedef struct {
     TaiResponse *(*request)(void *userdata, const TaiUrl *url,
@@ -39,6 +66,7 @@ typedef struct {
                             char **message);
     bool (*checkpoint)(void *userdata);
     bool (*cancelled)(void *userdata);
+    bool (*start)(void *userdata, TaiPageFetch *fetch);
     TaiCookieJar *cookies;
     void *userdata;
 } TaiPageNet;
@@ -161,6 +189,18 @@ bool tai_page_needs_animation_frame(const TaiPage *page);
  * navigation (runtime.js has no API for it), so the page is never replaced
  * during a frame. */
 bool tai_page_run_animation_frame(TaiPage *page, bool *changed, char **error);
+/* Page tasks (D5): timers and finished asynchronous XMLHttpRequests, which
+ * run on the page's owner thread like Python's Tab task runner. Times are on
+ * tai_js_clock(). The next time tai_page_run_tasks has work: now or earlier
+ * when a request has finished, INFINITY when nothing is pending. */
+double tai_page_next_task(const TaiPage *page);
+/* Delivers finished requests (onload, or a reported failure; the CORS check
+ * happens here), then runs up to budget timer callbacks due by now. On a JS
+ * invalidation rebuilds the layout and display list and reports *changed
+ * true. Callback errors are reported, not returned. Like animation frames,
+ * tasks never replace the page. */
+bool tai_page_run_tasks(TaiPage *page, double now, size_t budget,
+                        bool *changed, char **error);
 /* Clear the currently focused page control, rebuilding its display list when
  * focus styling changes. */
 bool tai_page_blur_input(TaiPage *page, bool *changed, char **error);

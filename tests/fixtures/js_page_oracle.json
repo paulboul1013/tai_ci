@@ -917,6 +917,290 @@
         "url": "http://127.0.0.1:<PORT>/throw"
       }
     },
+    "timers": {
+      "clicked": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Clicked later"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/timers.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "timers"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "target"
+                  },
+                  "children": [
+                    {
+                      "text": "Changed"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "data-seen": "script number,2 zero t50 i1 nested i2 t300 i3",
+                    "id": "out"
+                  },
+                  "children": [
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "script number,2"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "zero"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "t50"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "i1"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "nested"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "i2"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "t300"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "i3"
+                        }
+                      ],
+                      "tag": "p"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "Clicked later",
+        "url": "http://127.0.0.1:<PORT>/timers"
+      },
+      "done": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Timers done"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/timers.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "timers"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "target"
+                  },
+                  "children": [
+                    {
+                      "text": "Later"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "data-seen": "script number,2 zero t50 i1 nested i2 t300 i3",
+                    "id": "out"
+                  },
+                  "children": [
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "script number,2"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "zero"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "t50"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "i1"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "nested"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "i2"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "t300"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {},
+                      "children": [
+                        {
+                          "text": "i3"
+                        }
+                      ],
+                      "tag": "p"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "Timers done",
+        "url": "http://127.0.0.1:<PORT>/timers"
+      }
+    },
     "xhr": {
       "loaded": {
         "dom": {
@@ -1158,6 +1442,327 @@
         "scroll": 0,
         "title": "XHR",
         "url": "http://127.0.0.1:<PORT>/xhr"
+      }
+    },
+    "xhr_async": {
+      "clicked": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Clicked XHR"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/xhr-async.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "xhr async"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "target"
+                  },
+                  "children": [
+                    {
+                      "text": "Fetch later"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "data-slow-rank": "4",
+                    "data-throws": "ran 3",
+                    "id": "out"
+                  },
+                  "children": [
+                    {
+                      "attributes": {
+                        "class": "sync-after",
+                        "data-v": "ok:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr-async|c=async=1|b=-|q=n=3"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "get",
+                        "data-v": "load:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr-async|c=async=1|b=-|q=n=1"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "post",
+                        "data-v": "load:m=POST|o=-|r=http://127.0.0.1:<PORT>/xhr-async|c=async=1|b=k=v|q=n=2"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cross",
+                        "data-v": "load:m=GET|o=http://127.0.0.1:<PORT>|r=http://127.0.0.1:<PORT>/xhr-async|c=-|b=-|q=acao=star"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "slow",
+                        "data-v": "load:slow"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "click-sent",
+                        "data-v": "yes"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "click",
+                        "data-v": "m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr-async|c=async=1|b=-|q=n=click"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "Clicked XHR",
+        "url": "http://127.0.0.1:<PORT>/xhr-async"
+      },
+      "loaded": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "XHR async done"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/xhr-async.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "xhr async"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "target"
+                  },
+                  "children": [
+                    {
+                      "text": "Fetch later"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "data-slow-rank": "4",
+                    "data-throws": "ran 3",
+                    "id": "out"
+                  },
+                  "children": [
+                    {
+                      "attributes": {
+                        "class": "sync-after",
+                        "data-v": "ok:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr-async|c=async=1|b=-|q=n=3"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "get",
+                        "data-v": "load:m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr-async|c=async=1|b=-|q=n=1"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "post",
+                        "data-v": "load:m=POST|o=-|r=http://127.0.0.1:<PORT>/xhr-async|c=async=1|b=k=v|q=n=2"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "cross",
+                        "data-v": "load:m=GET|o=http://127.0.0.1:<PORT>|r=http://127.0.0.1:<PORT>/xhr-async|c=-|b=-|q=acao=star"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "slow",
+                        "data-v": "load:slow"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "XHR async done",
+        "url": "http://127.0.0.1:<PORT>/xhr-async"
+      }
+    },
+    "xhr_async_csp": {
+      "loaded": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "CSP async done"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/xhr-async-csp.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "xhr async csp"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "out"
+                  },
+                  "children": [
+                    {
+                      "attributes": {
+                        "class": "cross",
+                        "data-v": "error:csp"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "same",
+                        "data-v": "ok:sent"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "same-load",
+                        "data-v": "m=GET|o=-|r=http://127.0.0.1:<PORT>/xhr-async-csp|c=-|b=-|q=-"
+                      },
+                      "children": [],
+                      "tag": "p"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "CSP async done",
+        "url": "http://127.0.0.1:<PORT>/xhr-async-csp"
       }
     },
     "xhr_click": {

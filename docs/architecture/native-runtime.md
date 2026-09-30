@@ -125,7 +125,10 @@ private, incompatible node layouts.
   page's first); the request flag lives in `TaiPage`, so background tabs keep
   theirs and a replaced page drops it. The wait for the next SDL event is 16 ms,
   shortened to the next due frame. The legacy single-page adapter runs no
-  animation frames. The loop ends when no
+  animation frames. Before the animation frame, a window runs the page tasks
+  (timers and finished asynchronous XHR, D5) of every tab's committed page,
+  background tabs included, at most 32 timer callbacks per page per turn,
+  and shortens the wait to the earliest pending task. The loop ends when no
   window remains or on `SDL_EVENT_QUIT`, destroying all windows before
   `SDL_Quit`; `main` destroys the app afterwards. `tai_present_window_with_tabs`
   presents one caller-owned tab set through the same loop without Ctrl+N.
@@ -192,6 +195,22 @@ private, incompatible node layouts.
   it waits, no window repaints or handles input (D9). Headless and
   single-session pages use the caller's network on the caller's thread and
   must be destroyed before it.
+- Timers and asynchronous XHR (JS DOM slice 6b, D5). Timers live in the
+  page's `TaiJsContext` (handle, due time on `tai_js_clock()`, period) and
+  run only when the page's owner calls `tai_page_run_tasks`; destroying the
+  context drops them. An asynchronous `send()` creates a `TaiPageFetch`
+  shared by the page (its `fetches` list) and the network owner through an
+  atomic reference count: `TaiPageNet.start` hands it over and the owner calls
+  `tai_page_fetch_finish` exactly once, from any thread, publishing the
+  response with a release store the page reads with acquire before running
+  `onload` (the CORS check happens there). In the tab set both load-time
+  (`loader_start`, directly on the loader) and event-time (`app_start`,
+  queued under the app mutex) requests become heap `AsyncJob`s the loader
+  submits with nested dispatch allowed; the loader finishes each one on
+  completion, a 30 s total limit, a destroyed page (`abandoned`), network
+  failure or loader exit, and never touches the page. Headless and
+  single-session pages have no `start`, so their asynchronous requests fail
+  (D12).
 - A navigation snapshots its Referer from the same tab's committed page URL;
   if it supersedes a pending navigation, it uses that provisional URL, matching
   Python's capture-before-assignment behavior. Other tabs never supply a

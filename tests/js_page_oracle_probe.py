@@ -8,7 +8,9 @@ DOM and the title, a throwing listener, a fragment link whose listener moves
 the target, a keydown listener that removes the focused input, and
 synchronous XHR with document.cookie (load time, in a click listener, under
 CSP and Referrer-Policy, and against a server slower than 2 s), and
-requestAnimationFrame chains started at load and by a click. Each
+requestAnimationFrame chains started at load and by a click; and (D5)
+timers and asynchronous XHR, for which the 7d536e0^ scheduling runtime is
+evaluated right after each new JSContext's runtime.js, as it was there. Each
 checkpoint is taken after a committed frame. The Tab viewport size is recorded
 so the native side lays the pages out at the same size.
 
@@ -27,6 +29,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixtures" / "js_page_oracle.json"
+SCHEDULING_JS = ROOT / "tests" / "fixtures" / "scheduling_runtime_7d536e0.js"
 
 sys.path.insert(0, str(ROOT / "tests"))
 import js_page_fixture  # noqa: E402
@@ -119,6 +122,12 @@ def run_scenario(probe, path, heading, actions):
                                       "RAF_LISTENERS.length") == 0
             title_oracle_probe.wait_for(settled, "animation frames of " + path)
             continue
+        elif verb == "until":
+            def titled():
+                probe.commit(window, tab)
+                return probe.tab_call(window, tab, tab.get_title) == argument
+            title_oracle_probe.wait_for(titled, "title " + argument)
+            continue
         elif verb == "state":
             steps[argument] = checkpoint(probe, window, tab)
             continue
@@ -135,12 +144,22 @@ def run_probe():
     try:
         browser, trace_path = title_oracle_probe.import_reference()
         result = {"scenarios": {}}
+        frozen_init = browser.JSContext.__init__
+        scheduling = SCHEDULING_JS.read_text(encoding="utf-8")
+
+        def scheduling_init(context, tab):
+            frozen_init(context, tab)
+            context.evaljs(scheduling)
+
         for name, path, heading, actions in js_page_fixture.SCENARIOS:
             server = js_page_fixture.JsPageServer()
             probe = title_oracle_probe.Probe(browser, server, None)
+            if name in js_page_fixture.AUXILIARY_SCHEDULING:
+                browser.JSContext.__init__ = scheduling_init
             try:
                 steps, viewport = run_scenario(probe, path, heading, actions)
             finally:
+                browser.JSContext.__init__ = frozen_init
                 probe.close()
                 server.close()
             result["scenarios"][name] = steps
