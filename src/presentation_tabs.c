@@ -27,7 +27,18 @@ typedef struct {
   bool page_changed;
   bool chrome_changed;
   bool force_present;
+  /* Animation frames of the active page. raf_page only identifies the page
+   * the schedule belongs to and is never dereferenced; raf_wanted is its
+   * request as of the last window_frame. */
+  const TaiPage *raf_page;
+  Uint64 next_raf_ns;
+  bool raf_wanted;
 } PresWindow;
+
+/* Decision 7: the fixed 33 ms frame interval of Python's REFRESH_RATE_SEC,
+ * without its adaptive multiples. */
+#define PRES_FRAME_NS SDL_MS_TO_NS(33)
+enum { PRES_IDLE_WAIT_MS = 16 };
 
 /* The windows of one presentation loop. Without an app the loop presents a
  * single caller-owned tab set, as tai_present_window_with_tabs always did. */
@@ -308,6 +319,26 @@ static bool window_event(PresWindow *w, SDL_Event *event, char **error) {
   return true;
 }
 
+/* Python runs animation frames for the active tab only; a background tab's
+ * requests wait on its page and a newly shown page gets a frame at once
+ * (set_active_tab). Frames are at least PRES_FRAME_NS apart. */
+static bool window_animation_frame(PresWindow *w, TaiPage *page,
+                                   char **error) {
+  if (page != w->raf_page) {
+    w->raf_page = page;
+    w->next_raf_ns = 0;
+  }
+  Uint64 now = SDL_GetTicksNS();
+  if (tai_page_needs_animation_frame(page) && now >= w->next_raf_ns) {
+    bool changed = false;
+    if (!tai_page_run_animation_frame(page, &changed, error)) return false;
+    w->next_raf_ns = now + PRES_FRAME_NS;
+    w->page_changed = w->page_changed || changed;
+  }
+  w->raf_wanted = tai_page_needs_animation_frame(page);
+  return true;
+}
+
 /* Commits completed loads, applies the draft rule and repaints if needed. */
 static bool window_frame(PresWindow *w, char **error) {
   TaiTabSet *tabs = w->tabs;
@@ -336,6 +367,7 @@ static bool window_frame(PresWindow *w, char **error) {
     set_error(error, "address URL snapshot allocation failed");
     return false;
   }
+  if (!window_animation_frame(w, view.page, error)) return false;
   /* New Tab (or switching which label is bold) can wrap or unwrap the tab
    * strip; keep every page viewport equal to the area below the chrome. */
   bool wraps_now = tai_pres_tab_row_wraps(&view, w->pixel_width);
@@ -419,6 +451,21 @@ static void open_new_window(PresBrowser *b) {
   free(error);
 }
 
+/* Waits for input at most until the next due animation frame, rounded up so
+ * the loop does not wake early and spin. */
+static Sint32 wait_timeout(const PresBrowser *b) {
+  Uint64 now = SDL_GetTicksNS();
+  Sint32 timeout = PRES_IDLE_WAIT_MS;
+  for (size_t index = 0; index < b->count; index++) {
+    const PresWindow *w = b->windows[index];
+    if (!w->raf_wanted) continue;
+    Uint64 remaining = w->next_raf_ns > now ? w->next_raf_ns - now : 0;
+    Uint64 remaining_ms = (remaining + SDL_NS_PER_MS - 1) / SDL_NS_PER_MS;
+    if (remaining_ms < (Uint64)timeout) timeout = (Sint32)remaining_ms;
+  }
+  return timeout;
+}
+
 /* Runs until every window is closed, SDL_EVENT_QUIT arrives or the observer
  * stops it. Windows are destroyed before returning. */
 static bool run_windows(PresBrowser *b, PresFrame frame, void *opaque,
@@ -427,7 +474,7 @@ static bool run_windows(PresBrowser *b, PresFrame frame, void *opaque,
   while (ok && b->count) {
     bool new_window = false;
     SDL_Event event;
-    if (SDL_WaitEventTimeout(&event, 16)) {
+    if (SDL_WaitEventTimeout(&event, wait_timeout(b))) {
       if (event.type == SDL_EVENT_QUIT) break;
       PresWindow *target = window_for_event(b, &event);
       new_window = target && b->app && is_new_window_key(&event);

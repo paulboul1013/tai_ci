@@ -10,6 +10,9 @@ A scenario is (name, path, heading, actions). Actions run in order:
                        input: its control box), in viewport coordinates
                        truncated to int like the SDL event path
     ("type", text)     one keypress per character
+    ("frames", "")     run animation frames until no requestAnimationFrame
+                       callback is queued (the oracle's timers may run
+                       some of them first; only the settled state counts)
     ("state", label)   record a checkpoint
 A checkpoint holds the DOM (no style), the page title (Python's fallback
 name is the empty string), the scroll offset, the URL and the id of the
@@ -87,6 +90,9 @@ PAGES = {
                          "<div id=out></div>", "xhr-norefer"),
     "/xhr-slow": page("XHR slow", "xhr slow", "<div id=out></div>",
                       "xhr-slow"),
+    "/raf": page("RAF", "raf",
+                 "<p id=target>Animate</p><p id=note>idle</p><div id=out></div>",
+                 "raf"),
     # Native-only pages for tests/test_tabset_xhr.c (no oracle scenario).
     "/xhr-hang": page("XHR hang", "xhr hang", "<div id=out></div>",
                       "xhr-hang"),
@@ -214,6 +220,28 @@ record('cross', outcome(function () {
 record('slow', outcome(function () { return send('GET', '/slow'); }));
 record('after', 'done');
 """,
+    "/raf.js": """
+var frames = 0;
+function tick() {
+  frames = frames + 1;
+  var p = document.createElement('p');
+  p.setAttribute('class', 'frame');
+  p.innerHTML = 'frame ' + frames;
+  out.appendChild(p);
+  document.querySelectorAll('title')[0].innerHTML = 'Frame ' + frames;
+  if (frames < 3) requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+target.addEventListener('click', function () {
+  requestAnimationFrame(function () { note.innerHTML = 'first ' + frames; });
+  requestAnimationFrame(function () {
+    requestAnimationFrame(function () {
+      note.setAttribute('class', 'second');
+      document.querySelectorAll('title')[0].innerHTML = 'Clicked';
+    });
+  });
+});
+""",
     "/xhr-hang.js": XHR_HELPERS + """
 while (true) { try { send('GET', '/slow?seconds=30'); } catch (e) {} }
 """,
@@ -249,6 +277,10 @@ SCENARIOS = (
     ("xhr_csp", "/xhr-csp", "xhr csp", (("state", "loaded"),)),
     ("xhr_norefer", "/xhr-norefer", "xhr no referrer", (("state", "loaded"),)),
     ("xhr_slow", "/xhr-slow", "xhr slow", (("state", "loaded"),)),
+    ("raf", "/raf", "raf", (
+        ("frames", ""), ("state", "loaded"),
+        ("click", "target"), ("frames", ""), ("state", "clicked"),
+    )),
 )
 
 

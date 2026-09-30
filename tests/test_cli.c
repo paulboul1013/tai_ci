@@ -1,17 +1,26 @@
 #define _POSIX_C_SOURCE 200809L
 #include <cairo/cairo.h>
 #include <assert.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-static int run(const char *browser, char *const arguments[]) {
+/* stdout_path, when non-NULL, receives the child's standard output. */
+static int run_to(const char *browser, char *const arguments[],
+                  const char *stdout_path) {
   pid_t child = fork();
   assert(child >= 0);
   if (child == 0) {
+    if (stdout_path) {
+      int out = open(stdout_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+      if (out < 0 || dup2(out, STDOUT_FILENO) < 0) _exit(126);
+      close(out);
+    }
     execv(browser, arguments);
     _exit(127);
   }
@@ -19,6 +28,10 @@ static int run(const char *browser, char *const arguments[]) {
   assert(waitpid(child, &status, 0) == child);
   assert(WIFEXITED(status));
   return WEXITSTATUS(status);
+}
+
+static int run(const char *browser, char *const arguments[]) {
+  return run_to(browser, arguments, NULL);
 }
 
 static uint32_t pixel(cairo_surface_t *surface, int x, int y) {
@@ -63,6 +76,27 @@ int main(int argc, char **argv) {
   char *incompatible_options[] = {(char *)browser, "--window",
                                   "--screenshot", (char *)output, NULL};
   assert(run(browser, incompatible_options) == 2);
+
+  /* D11: headless output follows one animation frame. Its throwing callback
+   * does not stop the batch (D10); the callback it queues does not run. */
+  const char *raf_url =
+      "data:text/html,<p id=a>zero</p><script>"
+      "requestAnimationFrame(function () { throw Error('boom'); });"
+      "requestAnimationFrame(function () { a.innerHTML = 'one';"
+      " requestAnimationFrame(function () { a.innerHTML = 'two'; }); });"
+      "</script>";
+  char *headless[] = {(char *)browser, (char *)raf_url, NULL};
+  assert(run_to(browser, headless, output) == 0);
+  size_t length = 0;
+  FILE *json = fopen(output, "rb");
+  assert(json);
+  char buffer[65536];
+  length = fread(buffer, 1, sizeof(buffer) - 1, json);
+  fclose(json);
+  buffer[length] = '\0';
+  assert(strstr(buffer, "\"text\":\"one\""));
+  assert(!strstr(buffer, "\"text\":\"zero\""));
+  assert(!strstr(buffer, "\"text\":\"two\""));
   unlink(output);
   return 0;
 }

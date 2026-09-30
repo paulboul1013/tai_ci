@@ -118,7 +118,14 @@ private, incompatible node layouts.
   `TaiTabSet` created in the app. A window is created before its initial
   navigation starts. Each loop iteration routes one SDL event to its window,
   closes windows that asked to close (tab set first, then SDL resources), opens
-  a Ctrl+N window, then pumps and repaints every window. The loop ends when no
+  a Ctrl+N window, then pumps and repaints every window. Between pump and
+  repaint, a window runs one animation frame for its active tab's committed
+  page when that page asked for one (`tai_page_needs_animation_frame`) and at
+  least 33 ms passed since the window's last frame (none before a newly shown
+  page's first); the request flag lives in `TaiPage`, so background tabs keep
+  theirs and a replaced page drops it. The wait for the next SDL event is 16 ms,
+  shortened to the next due frame. The legacy single-page adapter runs no
+  animation frames. The loop ends when no
   window remains or on `SDL_EVENT_QUIT`, destroying all windows before
   `SDL_Quit`; `main` destroys the app afterwards. `tai_present_window_with_tabs`
   presents one caller-owned tab set through the same loop without Ctrl+N.

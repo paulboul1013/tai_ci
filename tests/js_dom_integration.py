@@ -8,7 +8,9 @@ tests/js_page_probe.c loads each tests/js_page_fixture.py page from a
 actions: load-time mutation, click listeners that change the DOM and the
 title, a throwing listener, a fragment link whose listener moves the target
 (the scroll uses the rebuilt layout) and a keydown listener that removes the
-focused input; and synchronous XHR with document.cookie (slice 5). Every
+focused input; synchronous XHR with document.cookie (slice 5); and
+requestAnimationFrame chains run to completion after load and after a click
+(slice 6: frames:, one tai_page_run_animation_frame per frame). Every
 scenario runs twice: headless (scripts use the network on the probe's
 thread) and --tabset (load-time scripts on the loader thread, event-time
 XHR queued to it from the probe's thread, as from the SDL thread).

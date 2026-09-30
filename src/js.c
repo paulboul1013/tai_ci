@@ -94,6 +94,9 @@ static void report(TaiJsContext *js, const TaiJsReport *entry) {
         js->host.report(js->host.userdata, entry);
     } else if (entry->kind == TAI_JS_REPORT_LOG) {
         fprintf(stderr, "%s\n", entry->text);
+    } else if (entry->kind == TAI_JS_REPORT_RAF_ERROR) {
+        fprintf(stderr, "requestAnimationFrame callback crashed %s\n",
+                entry->text);
     } else {
         fprintf(stderr, "Event %s crashed %s\n", entry->event, entry->text);
     }
@@ -102,6 +105,12 @@ static void report(TaiJsContext *js, const TaiJsReport *entry) {
 static void report_event_error(TaiJsContext *js, const char *type,
                                const char *text) {
     TaiJsReport entry = {.kind = TAI_JS_REPORT_EVENT_ERROR, .event = type,
+                         .text = text ? text : "(unprintable exception)"};
+    report(js, &entry);
+}
+
+static void report_raf_error(TaiJsContext *js, const char *text) {
+    TaiJsReport entry = {.kind = TAI_JS_REPORT_RAF_ERROR,
                          .text = text ? text : "(unprintable exception)"};
     report(js, &entry);
 }
@@ -343,6 +352,28 @@ static JSValue op_listener_error(TaiJsContext *js, int argc, JSValueConst *argv)
     report_event_error(js, type ? type : "?", text);
     JS_FreeCString(context, text);
     JS_FreeCString(context, type);
+    return JS_UNDEFINED;
+}
+
+/* D10: js_prelude.js reports a throwing animation frame callback here and
+ * runs the rest of the batch. */
+static JSValue op_raf_error(TaiJsContext *js, int argc, JSValueConst *argv) {
+    JSContext *context = js->context;
+    const char *text = argc > 0 ? JS_ToCString(context, argv[0]) : NULL;
+    if (argc > 0 && !text) JS_FreeValue(context, JS_GetException(context));
+    report_raf_error(js, text);
+    JS_FreeCString(context, text);
+    return JS_UNDEFINED;
+}
+
+/* Python JSContext.requestAnimationFrame: the callback is already queued in
+ * RAF_LISTENERS; only the owner learns that a frame is needed. */
+static JSValue op_request_animation_frame(TaiJsContext *js, int argc,
+                                          JSValueConst *argv) {
+    (void)argc;
+    (void)argv;
+    if (js->host.animation_frame_requested)
+        js->host.animation_frame_requested(js->host.userdata);
     return JS_UNDEFINED;
 }
 
@@ -647,6 +678,8 @@ static const struct {
 } operations[] = {
     {"log", 0, op_log},
     {"listener_error", 1, op_listener_error},
+    {"raf_error", 1, op_raf_error},
+    {"requestAnimationFrame", 0, op_request_animation_frame},
     {"querySelectorAll", 1, op_query_selector_all},
     {"getAttribute", 2, op_get_attribute},
     {"setAttribute", 3, op_set_attribute},
@@ -812,5 +845,23 @@ bool tai_js_dispatch_event(TaiJsContext *js, const char *type, TaiNode *target,
     }
     JS_FreeValue(context, result);
     if (default_prevented) *default_prevented = !do_default;
+    return true;
+}
+
+bool tai_js_run_animation_frame(TaiJsContext *js, char **error) {
+    if (!js) return set_error(error, "missing animation frame input");
+    /* Python Tab.run_animation_frame evaluates RAF_JS and reports whatever
+     * escapes it as "requestAnimationFrame callback crashed". */
+    static const char code[] = "runRAFHandlers()";
+    enter_js(js);
+    JSValue value = JS_Eval(js->context, code, sizeof(code) - 1, "raf.js",
+                            JS_EVAL_TYPE_GLOBAL);
+    leave_js(js);
+    if (JS_IsException(value)) {
+        char *text = take_exception_text(js->context);
+        report_raf_error(js, text);
+        free(text);
+    }
+    JS_FreeValue(js->context, value);
     return true;
 }

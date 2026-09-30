@@ -44,6 +44,9 @@ struct TaiPage {
     bool rtl;
     bool secure;
     bool dirty;
+    /* requestAnimationFrame since the last frame; per page, so a navigation
+     * that replaces the page drops it. */
+    bool animation_frame_requested;
     TaiNode *focused;
     TaiNavigationIntent *navigation;
     char *fragment_change;
@@ -304,6 +307,10 @@ static TaiJsHostStatus page_xhr_send(void *opaque, const char *text,
     return status;
 }
 
+static void page_animation_frame_requested(void *opaque) {
+    ((TaiPage *)opaque)->animation_frame_requested = true;
+}
+
 static bool page_js_cancelled(void *opaque) {
     TaiPage *page = opaque;
     return page->net.cancelled && page->net.cancelled(page->net.userdata);
@@ -428,7 +435,10 @@ static bool page_prepare_document(TaiPage *page, const TaiUrl *url,
                       .cookie_get = page_cookie_get,
                       .cookie_set = page_cookie_set,
                       .xhr_send = page_xhr_send,
-                      .cancelled = page_js_cancelled, .userdata = page};
+                      .cancelled = page_js_cancelled,
+                      .animation_frame_requested =
+                          page_animation_frame_requested,
+                      .userdata = page};
     page->javascript = tai_js_create(tai_document_root(page->document), &host,
                                      error);
     return page->javascript != NULL;
@@ -1613,6 +1623,26 @@ bool tai_page_activate_viewport(TaiPage *page, double x, double y,
         }
     }
     if (!page->dirty && !frame_changed) return true;
+    if (!rebuild_dirty_page(page, error)) return false;
+    if (changed) *changed = true;
+    return true;
+}
+
+bool tai_page_needs_animation_frame(const TaiPage *page) {
+    return page && page->animation_frame_requested;
+}
+
+bool tai_page_run_animation_frame(TaiPage *page, bool *changed, char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (changed) *changed = false;
+    if (!page || !page->document || !page->javascript || !page->styles ||
+        !page->layout || !page->display)
+        return diagnostic(error, "invalid animation frame input");
+    /* Python consumes the request before the frame runs; callbacks that ask
+     * again set it for the next frame. */
+    page->animation_frame_requested = false;
+    if (!tai_js_run_animation_frame(page->javascript, error)) return false;
+    if (!page->dirty) return true;
     if (!rebuild_dirty_page(page, error)) return false;
     if (changed) *changed = true;
     return true;

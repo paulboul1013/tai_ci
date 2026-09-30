@@ -118,6 +118,63 @@ static void test_listener_errors(void) {
     tai_document_destroy(doc);
 }
 
+static void count_request(void *opaque) { (*(int *)opaque)++; }
+
+/* Slice 6: every requestAnimationFrame call tells the host; a frame runs the
+ * queued batch only; a throwing callback is isolated (D10) but the deadline
+ * interrupt ends its batch, and the context stays usable. */
+static void test_animation_frames(void) {
+    char *error = NULL;
+    TaiDocument *doc = tai_html_parse("<p id=a>0</p>", &error);
+    assert(doc && !error);
+    int requests = 0;
+    TaiJsHost host = {.animation_frame_requested = count_request,
+                      .userdata = &requests};
+    TaiJsContext *js = tai_js_create(tai_document_root(doc), &host, &error);
+    assert(js && !error);
+    TaiNode *p = find_element(tai_document_root(doc), "p");
+    assert(tai_js_eval(js, "raf.js",
+        "var seen = [];"
+        "requestAnimationFrame(function () { seen.push('one');"
+        " requestAnimationFrame(function () { seen.push('next'); }); });"
+        "requestAnimationFrame(function () { null.x; });"
+        "requestAnimationFrame(function () { seen.push('three');"
+        " a.setAttribute('data-seen', seen.join(',')); });", &error));
+    assert(requests == 3);
+
+    StderrCapture capture;
+    capture_begin(&capture);
+    assert(tai_js_run_animation_frame(js, &error) && !error);
+    char *reported = capture_end(&capture);
+    assert(requests == 4);
+    assert(!strcmp(tai_map_get(&p->attributes, "data-seen"), "one,three"));
+    assert(strstr(reported, "requestAnimationFrame callback crashed TypeError"));
+    free(reported);
+
+    assert(tai_js_eval(js, "raf2.js",
+        "requestAnimationFrame(function () { while (true) {} });"
+        "requestAnimationFrame(function () { seen.push('dropped'); });",
+        &error));
+    capture_begin(&capture);
+    double started = seconds_now();
+    assert(tai_js_run_animation_frame(js, &error) && !error);
+    double elapsed = seconds_now() - started;
+    reported = capture_end(&capture);
+    assert(elapsed >= 1.5 && elapsed < 10.0);
+    assert(strstr(reported, "requestAnimationFrame callback crashed"));
+    free(reported);
+    /* 'next' ran in the interrupted batch; 'dropped' was lost with it. */
+    char *seen = NULL;
+    assert(tai_js_eval_value(js, "seen.js",
+        "seen.join(',') + '|' + RAF_LISTENERS.length", &seen, &error));
+    assert(!strcmp(seen, "one,three,next|0"));
+    free(seen);
+    assert(!tai_js_run_animation_frame(NULL, &error) && error);
+    free(error);
+    tai_js_destroy(js);
+    tai_document_destroy(doc);
+}
+
 typedef struct {
     TaiJsContext *js;
     bool shallow_ok;
@@ -506,6 +563,7 @@ int main(void) {
     test_append_cost();
     test_node_limit();
     test_listener_errors();
+    test_animation_frames();
     test_other_thread_stack();
     char *error = NULL;
     TaiDocument *doc = tai_html_parse(

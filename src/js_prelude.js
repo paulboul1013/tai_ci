@@ -22,3 +22,19 @@ Node.prototype.dispatchEvent = function (event) {
 
     return event.do_default;
 };
+
+// D10: a throwing animation frame callback is reported and skipped, like a
+// real browser; the rest of the batch still runs. Python drops the rest.
+// As in the frozen version, callbacks queued meanwhile wait for the next frame.
+function runRAFHandlers() {
+    var handlers = RAF_LISTENERS;
+    RAF_LISTENERS = [];
+
+    for (var i = 0; i < handlers.length; i++) {
+        try {
+            handlers[i]();
+        } catch (error) {
+            call_python("raf_error", error);
+        }
+    }
+}

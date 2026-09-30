@@ -543,6 +543,233 @@
         "url": "http://127.0.0.1:<PORT>/mutate"
       }
     },
+    "raf": {
+      "clicked": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Clicked"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/raf.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "raf"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "target"
+                  },
+                  "children": [
+                    {
+                      "text": "Animate"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "class": "second",
+                    "id": "note"
+                  },
+                  "children": [
+                    {
+                      "text": "first 3"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "id": "out"
+                  },
+                  "children": [
+                    {
+                      "attributes": {
+                        "class": "frame"
+                      },
+                      "children": [
+                        {
+                          "text": "frame 1"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "frame"
+                      },
+                      "children": [
+                        {
+                          "text": "frame 2"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "frame"
+                      },
+                      "children": [
+                        {
+                          "text": "frame 3"
+                        }
+                      ],
+                      "tag": "p"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "Clicked",
+        "url": "http://127.0.0.1:<PORT>/raf"
+      },
+      "loaded": {
+        "dom": {
+          "attributes": {},
+          "children": [
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "Frame 3"
+                    }
+                  ],
+                  "tag": "title"
+                },
+                {
+                  "attributes": {
+                    "src": "/raf.js"
+                  },
+                  "children": [],
+                  "tag": "script"
+                }
+              ],
+              "tag": "head"
+            },
+            {
+              "attributes": {},
+              "children": [
+                {
+                  "attributes": {},
+                  "children": [
+                    {
+                      "text": "raf"
+                    }
+                  ],
+                  "tag": "h1"
+                },
+                {
+                  "attributes": {
+                    "id": "target"
+                  },
+                  "children": [
+                    {
+                      "text": "Animate"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "id": "note"
+                  },
+                  "children": [
+                    {
+                      "text": "idle"
+                    }
+                  ],
+                  "tag": "p"
+                },
+                {
+                  "attributes": {
+                    "id": "out"
+                  },
+                  "children": [
+                    {
+                      "attributes": {
+                        "class": "frame"
+                      },
+                      "children": [
+                        {
+                          "text": "frame 1"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "frame"
+                      },
+                      "children": [
+                        {
+                          "text": "frame 2"
+                        }
+                      ],
+                      "tag": "p"
+                    },
+                    {
+                      "attributes": {
+                        "class": "frame"
+                      },
+                      "children": [
+                        {
+                          "text": "frame 3"
+                        }
+                      ],
+                      "tag": "p"
+                    }
+                  ],
+                  "tag": "div"
+                }
+              ],
+              "tag": "body"
+            }
+          ],
+          "tag": "html"
+        },
+        "focus": null,
+        "scroll": 0,
+        "title": "Frame 3",
+        "url": "http://127.0.0.1:<PORT>/raf"
+      }
+    },
     "throw": {
       "after_next": {
         "dom": {

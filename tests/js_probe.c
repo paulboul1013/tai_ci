@@ -22,6 +22,7 @@
 typedef struct {
     size_t invalidations;
     size_t removed;
+    size_t raf_requests;
     bool first_output;
     TaiCookieJar *jar;
     TaiUrl *url;
@@ -44,6 +45,10 @@ static TaiJsHostStatus cookie_set(void *opaque, const char *value) {
 
 static void invalidated(void *opaque) { ((Counters *)opaque)->invalidations++; }
 
+static void raf_requested(void *opaque) {
+    ((Counters *)opaque)->raf_requests++;
+}
+
 static void node_removed(void *opaque, TaiNode *node) {
     (void)node;
     ((Counters *)opaque)->removed++;
@@ -59,6 +64,10 @@ static void reported(void *opaque, const TaiJsReport *report) {
     output_separator(counters);
     if (report->kind == TAI_JS_REPORT_LOG) {
         printf("{\"log\":%s}", report->json);
+    } else if (report->kind == TAI_JS_REPORT_RAF_ERROR) {
+        fputs("{\"crash\":\"raf\",\"text\":", stdout);
+        tai_json_string(stdout, report->text);
+        fputc('}', stdout);
     } else {
         fputs("{\"crash\":\"event\",\"event\":", stdout);
         tai_json_string(stdout, report->event);
@@ -116,7 +125,9 @@ int main(int argc, char **argv) {
     }
     TaiJsHost host = {.invalidated = invalidated, .node_removed = node_removed,
                       .report = reported, .cookie_get = cookie_get,
-                      .cookie_set = cookie_set, .userdata = &counters};
+                      .cookie_set = cookie_set,
+                      .animation_frame_requested = raf_requested,
+                      .userdata = &counters};
 
     fputs("{\"created\":{\"output\":[", stdout);
     TaiJsContext *js = tai_js_create(root, &host, &error);
@@ -124,8 +135,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "js_probe: %s\n", error ? error : "context failed");
         return 1;
     }
-    printf("],\"invalidations\":%zu,\"raf_requests\":0,\"dom\":",
-           counters.invalidations);
+    printf("],\"invalidations\":%zu,\"raf_requests\":%zu,\"dom\":",
+           counters.invalidations, counters.raf_requests);
     tai_dom_json(stdout, root, false);
     fputs("},\"steps\":[", stdout);
 
@@ -136,6 +147,7 @@ int main(int argc, char **argv) {
         fputs(first_step ? "{" : ",{", stdout);
         first_step = false;
         counters.invalidations = 0;
+        counters.raf_requests = 0;
         counters.first_output = true;
         fputs("\"output\":[", stdout);
         if (!strcmp(kind, "js")) {
@@ -168,12 +180,10 @@ int main(int argc, char **argv) {
             }
             printf("],\"prevented\":%s", prevented ? "true" : "false");
         } else if (!strcmp(kind, "raf")) {
-            bool ok = tai_js_eval(js, "raf.js", "runRAFHandlers()", &error);
-            if (!ok) {
-                output_separator(&counters);
-                fputs("{\"crash\":\"raf\",\"text\":", stdout);
-                tai_json_string(stdout, error ? error : "");
-                fputc('}', stdout);
+            if (!tai_js_run_animation_frame(js, &error)) {
+                fprintf(stderr, "js_probe: raf failed: %s\n",
+                        error ? error : "");
+                return 1;
             }
             fputc(']', stdout);
         } else {
@@ -182,8 +192,8 @@ int main(int argc, char **argv) {
         }
         free(error);
         error = NULL;
-        printf(",\"invalidations\":%zu,\"raf_requests\":0,\"dom\":",
-               counters.invalidations);
+        printf(",\"invalidations\":%zu,\"raf_requests\":%zu,\"dom\":",
+               counters.invalidations, counters.raf_requests);
         tai_dom_json(stdout, root, false);
         fputc('}', stdout);
     }

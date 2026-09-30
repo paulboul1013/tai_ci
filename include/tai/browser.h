@@ -151,6 +151,16 @@ TaiNode *tai_page_viewport_hit_test(const TaiPage *page, double x, double y,
  * layout and immutable display list before reporting *changed true. */
 bool tai_page_activate_viewport(TaiPage *page, double x, double y,
                                 bool *changed, char **error);
+/* True when the page's script called requestAnimationFrame since its last
+ * animation frame. */
+bool tai_page_needs_animation_frame(const TaiPage *page);
+/* Runs one animation frame (Python Tab.run_animation_frame): consumes the
+ * request, runs the queued requestAnimationFrame callbacks and, on a JS
+ * invalidation, rebuilds the layout and display list and reports *changed
+ * true. Callback errors are reported, not returned. Scripts cannot start a
+ * navigation (runtime.js has no API for it), so the page is never replaced
+ * during a frame. */
+bool tai_page_run_animation_frame(TaiPage *page, bool *changed, char **error);
 /* Clear the currently focused page control, rebuilding its display list when
  * focus styling changes. */
 bool tai_page_blur_input(TaiPage *page, bool *changed, char **error);

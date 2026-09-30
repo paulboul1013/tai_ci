@@ -7,7 +7,8 @@ replays its scenarios: load-time mutation, click listeners that mutate the
 DOM and the title, a throwing listener, a fragment link whose listener moves
 the target, a keydown listener that removes the focused input, and
 synchronous XHR with document.cookie (load time, in a click listener, under
-CSP and Referrer-Policy, and against a server slower than 2 s). Each
+CSP and Referrer-Policy, and against a server slower than 2 s), and
+requestAnimationFrame chains started at load and by a click. Each
 checkpoint is taken after a committed frame. The Tab viewport size is recorded
 so the native side lays the pages out at the same size.
 
@@ -109,6 +110,15 @@ def run_scenario(probe, path, heading, actions):
         elif verb == "type":
             for char in argument:
                 probe.tab_call(window, tab, tab.keypress, char)
+        elif verb == "frames":
+            # Each commit runs one Tab.run_animation_frame; the window's own
+            # frame timers may run others in between.
+            def settled():
+                probe.commit(window, tab)
+                return probe.tab_call(window, tab, tab.js.evaljs,
+                                      "RAF_LISTENERS.length") == 0
+            title_oracle_probe.wait_for(settled, "animation frames of " + path)
+            continue
         elif verb == "state":
             steps[argument] = checkpoint(probe, window, tab)
             continue

@@ -3,7 +3,8 @@
  *
  *   js_page_probe [--tabset] CSS WIDTH HEIGHT URL ACTION...
  *
- * ACTION is click:ID, type:TEXT or state:LABEL (see js_page_fixture.py). The
+ * ACTION is click:ID, type:TEXT, frames: or state:LABEL (see
+ * js_page_fixture.py). The
  * output is one JSON object mapping each label to its checkpoint.
  *
  * By default the page loads synchronously on this thread (the headless path:
@@ -115,6 +116,17 @@ static bool run_action(TaiPage *page, const char *action, bool *first,
       memcpy(text, p, length);
       if (!tai_page_text_input(page, text, &changed, error)) return false;
       p += length;
+    }
+    return true;
+  }
+  if (!strcmp(action, "frames:")) {
+    /* A bounded chain: the fixture pages stop requesting frames. */
+    for (int frame = 0; tai_page_needs_animation_frame(page); frame++) {
+      if (frame == 100) {
+        fputs("animation frames did not settle\n", stderr);
+        return false;
+      }
+      if (!tai_page_run_animation_frame(page, &changed, error)) return false;
     }
     return true;
   }

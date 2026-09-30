@@ -1,6 +1,6 @@
 # JS DOM 補齊：整體計畫與交接
 
-**狀態：實作中（2026-09-29）。** 六項決定皆已確認；切片 0–5 完成，切片 6 起尚未開始。
+**狀態：實作中（2026-09-30）。** 九項決定皆已確認；切片 0–6 完成，切片 6b 起尚未開始。
 計畫已經四路獨立驗證（oracle 實跑、native 程式碼、所有權設計、文件一致性），結果已併入本文。
 本工作處理 [ACCEPTANCE.md](../ACCEPTANCE.md) 的「JS-visible DOM mutation、query、event
 propagation/default prevention、XHR 與實際可用 scheduling APIs」，並滿足同檔「ASan 重複
@@ -67,7 +67,7 @@ load/mutate/render/close」與「獨立 verifier」兩項；也處理 [PORTING_P
 - **其他：** `createElement` 名稱用 Python `casefold()`（`'İ'` → `i̇`）；`children` 略過 Text；
   `Node` 沒有 `parentNode`；handle 依首次取用順序編號；`log` 印到 stdout。
 - **RAF：** 整批取出後清空，callback 內新註冊的留到下一 frame；每次呼叫都通知需要 frame；
-  callback 丟錯時同批剩下的被丟棄。Headless 是否跑 RAF 延到切片 6 以完整 `Tab` 凍結。
+  callback 丟錯時同批剩下的被丟棄。Python 沒有 headless；native headless 跑一輪（決定 9，D11）。
 
 ## 現況與缺口（native，已對照程式碼）
 
@@ -82,7 +82,7 @@ load/mutate/render/close」與「獨立 verifier」兩項；也處理 [PORTING_P
 | Listener 丟錯 | `tai_js_dispatch_event` 回錯誤，`browser.c:1205/1348/1450` 直接 `return false`，一路讓**視窗事件迴圈結束** | **既有缺陷**，改成真實瀏覽器語意（決定 6，D7） |
 | `document.cookie` | `tai_network_cookie_get/set` 存在，但 src/ 無呼叫者；network 屬於 loader 執行緒 | 接 JS，先定執行緒設計 |
 | 同步 XHR | 無 | 全補 |
-| RAF | 無 | 全補 |
+| RAF | 切片 6 前：無 | 切片 6 已完成（D10、D11） |
 | Mutation 後重建 | 切片 4 前：`invalidated` 只設 `page->dirty`，重建在事件處理尾端；caret 與 fragment 捲動用舊 layout | 切片 4 已完成 |
 | 焦點節點被移除 | 切片 4 前：`page->focused` 與 `node->focused` 會留在 detached 節點 | 切片 4 已完成（D8） |
 | QuickJS 跨執行緒 | runtime 在 loader 建立、在 SDL 執行緒執行，從未呼叫 `JS_UpdateStackTop` | 每次進入 JS 前更新 |
@@ -341,10 +341,79 @@ bridge 內 ID 同步出現後補測。
 
 ### 切片 6：requestAnimationFrame
 
-- 「需要 frame」旗標放在 `TaiPage` 內（不放 tabset／window 全域佇列），導覽換頁後自然失效；視窗
-  frame 迴圈以目前已提交的 page 取 context 執行 `runRAFHandlers()`；RAF 執行中觸發導覽時延後替換。
-- Headless 行為依切片 0／6 凍結結果。
-- 測試：dummy SDL 下 callback 次數、順序與 DOM 結果比對 oracle；RAF 中導覽。
+**狀態：完成（2026-09-30）。** 實作紀錄在本節末「實作紀錄」。
+
+Oracle 行為（凍結 browser.py／runtime.js，已對照程式碼）：
+- `requestAnimationFrame(cb)` 把 callback 推入 JS 端 `RAF_LISTENERS`，再呼叫 bridge
+  `requestAnimationFrame`；Python 端只呼叫 `browser.set_needs_animation_frame(tab)`（4788），不執行 JS；
+  `discarded` 的 context 直接忽略。
+- `set_needs_animation_frame` 只接受 active tab（7876–7881）：背景分頁的請求被忽略，但 callback 留在
+  該頁 `RAF_LISTENERS`，切回該分頁時 `set_active_tab` 排的 frame 才執行。
+- `Tab.run_animation_frame`（6219）每個 frame 先 `evaljs("runRAFHandlers()")` 再 `render()` 與 commit；
+  `runRAFHandlers` 先取出並清空清單，callback 內新註冊的留到下一個 frame（`raf_batches` 已凍結）。
+- Callback 丟錯：dukpy 例外中斷整批，剩下的 callback 被丟棄，印 `requestAnimationFrame callback
+  crashed`（`raf_throws` 已凍結）。
+- Frame 間隔：`REFRESH_RATE_SEC = .033`，adaptive 模式依量測耗時改成 33 ms 的整數倍。
+
+Native 規格：
+- **需要 frame 旗標在 `TaiPage` 內**（不放 tabset／window 全域佇列），導覽換頁後自然失效。視窗 frame
+  迴圈只對 **active 分頁已提交的 page** 執行 `runRAFHandlers()`，再重建 dirty 頁面並重繪；背景分頁的
+  請求保留在其 page，切成 active 時立即排一個 frame（同 Python）。
+- **Frame 間隔固定 33 ms**（決定 7）：有 frame 需求時以 33 ms 為最短間隔排程，不做 adaptive 倍數
+  調整；以 SDL 等待逾時接到既有視窗迴圈。無需求時照舊閒置等待事件。
+- **Callback 逐一隔離**（決定 8，刻意差異 D10）：native 前言覆寫 `runRAFHandlers`，照凍結版先取出並
+  清空 `RAF_LISTENERS`，再對每個 callback 個別 `try/catch`，錯誤經 C 回報為
+  `requestAnimationFrame callback crashed <error>`（stderr，D1）後繼續同批其餘 callback。凍結
+  runtime.js 不改。無法攔截的錯誤（2 秒上限、OOM）仍中止該批，剩餘 callback 丟棄。
+- **Headless 輸出前跑一輪**（決定 9，刻意差異 D11）：`tai_page_load*` 完成、輸出 JSON／截圖前，若頁面
+  有 RAF 請求就執行一次 `runRAFHandlers()` 並重建；callback 內新註冊的不再執行。Python 沒有
+  headless，無 oracle 可比；記為 native 規格。
+- **RAF 中導覽：** callback 觸發的導覽 intent 照既有路徑在這一輪結束後才處理（延後替換），不在
+  RAF 執行中銷毀 page。
+- **每一輪各自受 2 秒 JS 上限**；無限 RAF 迴圈以 33 ms 間隔持續重繪（同 Python），不額外限制。
+- 每次進入 JS 仍經 `enter_js`（`JS_UpdateStackTop`）。
+
+測試：
+- `js_dom_differential` 接上 `raf_batches`（照 oracle）與 `raf_throws`（套用 D10 預期答案）。
+- 整頁 oracle（`js_page_fixture.py`）新增 RAF 情境：載入期註冊、callback 改 DOM／標題、callback 內
+  再註冊、背景分頁請求在切回時才執行；以 dummy SDL 或 tabset 路徑比對 callback 次數、順序與 DOM。
+- Frame 間隔：dummy SDL 下量測連續 RAF 的間隔 ≥ 33 ms 且無忙迴圈。
+- Headless：一輪規則（第二輪註冊的不執行）；RAF 中導覽；關閉視窗時 RAF 待執行（ASan＋LSan）。
+
+實作紀錄：
+- **JS 層：** `TaiJsHost.animation_frame_requested`（bridge `requestAnimationFrame` 每次呼叫都通知）、
+  `tai_js_run_animation_frame()`（經 `enter_js` 執行 `runRAFHandlers()`，逸出的錯誤以新的
+  `TAI_JS_REPORT_RAF_ERROR` 回報，沒有 host sink 時寫 stderr）。`src/js_prelude.js` 覆寫
+  `runRAFHandlers`，每個 callback 各自 `try/catch`，經 bridge `raf_error` 回報（D10）。
+- **頁面：** `TaiPage.animation_frame_requested` 旗標；`tai_page_needs_animation_frame()`、
+  `tai_page_run_animation_frame()`（先清旗標再跑 callback，dirty 時重建並回報 changed）。
+- **視窗：** `src/presentation_tabs.c` 的 `window_frame` 在 pump 之後、重繪之前對 active 分頁已提交的
+  page 跑一個 frame；以 `SDL_GetTicksNS` 保證 ≥ 33 ms，換成另一個 page 時立即排一個 frame；
+  `SDL_WaitEventTimeout` 縮短到下一個到期 frame（向上取整，不會提早醒來空轉）。舊的單頁
+  `tai_present_window*` 不跑 RAF（只有測試使用）。
+- **Headless（D11）：** `src/main.c` 在 `tai_page_load` 之後、輸出前跑一輪。
+- **RAF 中導覽：** runtime.js 沒有 `location` 等導覽 API，RAF callback 無法產生導覽 intent，所以沒有
+  「執行中被銷毀」的路徑；實際情境是「RAF 待執行時導覽換頁」，旗標隨舊 page 銷毀。
+- **測試：**
+  - `js_dom_differential` 移除全部 pending，26 個情境與 oracle 相符，並新增逐步比對 `raf_requests`；
+    `raf_throws` 第 1 步套用 D10。
+  - 整頁 oracle 新增 `raf` 情境（新動作 `frames`：oracle 端每次 commit 跑一個
+    `Tab.run_animation_frame`，直到 `RAF_LISTENERS` 為空；native 端逐 frame 呼叫
+    `tai_page_run_animation_frame`）：載入期三個 frame 的鏈、點擊註冊的兩層 callback、改 DOM 與標題。
+    重新凍結 `js_page_oracle.json`（其他情境不變），`--check` 連跑兩次相同；headless 與 `--tabset`
+    兩種模式皆相符（11 情境、36 檢查點）。
+  - `tests/test_raf_window.c`（CTest `raf_window`，dummy SDL、data: URL＋inline script）：10 個 frame
+    的間隔以 `performance.now()` 量測，最短 33.1–33.4 ms、9 個間隔約 300 ms、期間約 21 次迴圈
+    （無忙迴圈）；鏈結束後閒置；丟錯 callback 不影響同批；背景分頁載入時註冊的 frame 在 400 ms
+    內未執行、切成 active 後 200 ms 內執行；無限 RAF 時導覽換頁後新頁無請求；無限 RAF 時關閉視窗。
+    量測曾用 `Date.now()`，WSL2 realtime 時鐘跳動（一次量到 229 秒）而改用單調的 `performance.now()`；
+    原本以 `SDL_GetTicks` 毫秒排程時實際間隔只有 32.3 ms，改為奈秒。
+  - `tests/test_js.c` `test_animation_frames`：通知次數、批次邊界、D10、逾時中斷結束該批並丟棄其餘、
+    context 之後仍可用。
+  - `tests/test_cli.c`：headless 輸出含第一輪結果、不含第二輪，丟錯 callback 不影響 exit code。
+- **證據：** Debug CTest 52/52；`build-asan/` 全套 52/52（ASan/UBSan＋LSan 開啟，只排除文件記載的
+  fontconfig／cairo 洩漏）；`js_page_oracle_probe` 連跑三次輸出相同；`raf_window` 連跑 5 次通過。
+- **未做：** `ownership-reviewer` 審查、Xvfb 真實視窗與 RAF 相關配置故障掃描留待切片 7。
 
 ### 切片 6b：補回 timer 與非同步 XHR（決定 1）
 
@@ -406,6 +475,8 @@ bridge 內 ID 同步出現後補測。
 | D7 | Listener 丟錯只影響該 listener：同節點其他 listener 與冒泡照常執行，先前的 `preventDefault` 有效（Python 會中斷整個派送、default action 一律照做） | 真實瀏覽器語意；使用者 2026-09-29 決定。oracle 比對只對「丟錯 listener」情境套用此規則 |
 | D8 | 移除含焦點 input 的子樹時清除焦點（Python 焦點留在脫離的節點，按鍵仍改它的值） | 真實瀏覽器語意；使用者 2026-09-29 指定為切片 4 範圍 |
 | D9 | 事件期同步 XHR 等待期間所有視窗無回應（不重繪、不處理輸入、無法關閉），最長約 30 秒傳輸總時限（跨重新導向）加上 loader 正在執行的單一載入期 script 時間（Python 只卡該 Tab，視窗照常）；設計見 [cookie／XHR 設計](js-cookie-xhr-design.md) 10.5 | native JS 在 SDL 執行緒執行；使用者 2026-09-29 選擇接受（決定 2） |
+| D10 | RAF callback 丟錯只影響該 callback，同批其餘照常執行（Python 丟棄同批剩餘 callback） | 真實瀏覽器語意，與 D7 一致；使用者 2026-09-30 決定（決定 8）。oracle 比對只對 `raf_throws` 套用此規則 |
+| D11 | Headless CLI 在輸出前執行一輪 RAF（Python 無 headless） | 讓第一個 frame 的效果進入輸出且結果確定；使用者 2026-09-30 決定（決定 9） |
 
 ## 不在本工作範圍
 
@@ -428,6 +499,15 @@ bridge 內 ID 同步出現後補測。
    `default-src` 時一律不執行 inline script。`'unsafe-inline'`、nonce、hash 不支援，因為 Python 與 native
    的 CSP 解析都只接受 URL 來源。
 6. **Listener 丟錯：比照真實瀏覽器**，逐一隔離 listener（切片 1，刻意差異 D7）。
+
+### 切片 6 的決定（2026-09-30，使用者確認「照建議」）
+
+7. **Frame 間隔固定 33 ms**：與 Python 基準 `REFRESH_RATE_SEC` 相同，不做 adaptive 倍數調整（Python
+   依量測改成 66 ms 等倍數）；以 RAF 計數推進的動畫速度與 Python 基準一致。不跟螢幕更新率（60 fps
+   會讓動畫比 Python 快一倍）。
+8. **RAF callback 丟錯逐一隔離**，比照真實瀏覽器並與 D7 一致，記為刻意差異 D10。
+9. **Headless 輸出前跑一輪 RAF**，記為刻意差異 D11；不採「不跑」（callback 永不執行）或「跑到沒有
+   新請求」（無限動畫只能靠上限截斷）。
 
 ## 風險
 

@@ -113,7 +113,14 @@ int main(int argc, char **argv) {
         : NULL;
     bool success = page != NULL;
     if (!page) fprintf(stderr, "load failed: %s\n", error ? error : "allocation failed");
-    else if (screenshot_path) {
+    /* D11: one animation frame before the output, so a first-frame effect is
+     * in it; callbacks that frame queues do not run. */
+    else if (tai_page_needs_animation_frame(page) &&
+             !tai_page_run_animation_frame(page, NULL, &error)) {
+        fprintf(stderr, "animation frame failed: %s\n",
+                error ? error : "allocation failed");
+        success = false;
+    } else if (screenshot_path) {
         success = tai_page_write_viewport_png(page, screenshot_path, &error);
         if (!success)
             fprintf(stderr, "screenshot failed: %s\n",

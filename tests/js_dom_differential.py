@@ -10,8 +10,9 @@ Comparison rules:
     Error with the same message; one without (KeyError for an unknown handle)
     must be a native Error. JS errors must match by name, and by message when
     the oracle kept one (a plain Error thrown by runtime.js or the page).
-  * Intentional difference D7 (a throwing listener is isolated): the steps in
-    D7_EXPECTED replace the oracle's answer; see PORTING_PLAN.md.
+  * Intentional differences D7 (a throwing listener is isolated) and D10 (a
+    throwing animation frame callback is isolated): the steps in
+    INTENTIONAL replace the oracle's answer; see PORTING_PLAN.md.
   * PENDING cases need bridge operations of a later slice and are skipped.
   Everything else must be equal.
 
@@ -32,10 +33,7 @@ from js_dom_oracle_probe import error_head, normalize_error  # noqa: E402
 FIXTURE = ROOT / "tests" / "fixtures" / "js_dom_oracle.json"
 
 # case -> the later plan slice that provides what it needs.
-PENDING = {
-    "raf_batches": "slice 6 (requestAnimationFrame)",
-    "raf_throws": "slice 6 (requestAnimationFrame)",
-}
+PENDING = {}
 
 
 def js_error(name, message=None):
@@ -60,6 +58,19 @@ D7_EXPECTED = {
             "prevented": False},
     },
 }
+
+
+# D10: native runs the rest of the batch after a throwing callback, so
+# 'dropped' is logged in the same frame.
+D10_EXPECTED = {
+    "raf_throws": {
+        1: {"output": [{"log": "one"},
+                       {"crash": "raf", "error": js_error("Error", "raf boom")},
+                       {"log": "dropped"}]},
+    },
+}
+
+INTENTIONAL = {**D7_EXPECTED, **D10_EXPECTED}
 
 
 def native_error(raw):
@@ -129,16 +140,19 @@ def compare_case(name, expected, actual):
           normalize_output(created["output"]))
     check("created/invalidations", expected["created"]["invalidations"],
           created["invalidations"])
+    check("created/raf_requests", expected["created"]["raf_requests"],
+          created["raf_requests"])
     check("created/dom", expected["created"]["dom"], created["dom"])
     check("step count", len(expected["steps"]), len(actual["steps"]))
 
     dom = created["dom"]
-    overrides = D7_EXPECTED.get(name, {})
+    overrides = INTENTIONAL.get(name, {})
     for index, (want, got) in enumerate(zip(expected["steps"], actual["steps"])):
         want = dict(want, **overrides.get(index, {}))
         label = "step {}".format(index)
         check(label + "/output", want["output"], normalize_output(got["output"]))
         check(label + "/invalidations", want["invalidations"], got["invalidations"])
+        check(label + "/raf_requests", want["raf_requests"], got["raf_requests"])
         if "prevented" in want or "prevented" in got:
             check(label + "/prevented", want.get("prevented"), got.get("prevented"))
         if got["dom"] != dom:
@@ -168,7 +182,7 @@ def main():
     names = [case["name"] for case in js_dom_cases.CASES]
     if set(names) != set(oracle):
         raise SystemExit("oracle fixture is stale; rerun js_dom_oracle_probe.py")
-    unknown = (set(PENDING) | set(D7_EXPECTED)) - set(names)
+    unknown = (set(PENDING) | set(INTENTIONAL)) - set(names)
     if unknown:
         raise SystemExit("unknown cases: {}".format(sorted(unknown)))
     failures = {}

@@ -7,7 +7,8 @@ typedef struct TaiJsContext TaiJsContext;
 
 typedef enum {
     TAI_JS_REPORT_LOG,         /* log(x): text is display text, json the value */
-    TAI_JS_REPORT_EVENT_ERROR  /* a listener or dispatch failed: event, text */
+    TAI_JS_REPORT_EVENT_ERROR, /* a listener or dispatch failed: event, text */
+    TAI_JS_REPORT_RAF_ERROR    /* an animation frame callback failed: text */
 } TaiJsReportKind;
 
 /* Borrowed for the duration of the report callback only. */
@@ -40,7 +41,10 @@ typedef enum {
  *                 does not count against the script time limit, up to 30 s
  *                 per outermost entry. NULL throws Error
  *   cancelled     polled by the interrupt handler: true stops the running
- *                 script uncatchably. Must be cheap and lock-free */
+ *                 script uncatchably. Must be cheap and lock-free
+ *   animation_frame_requested
+ *                 requestAnimationFrame(cb) queued cb; the owner should run
+ *                 tai_js_run_animation_frame at its next frame */
 typedef struct {
     void (*invalidated)(void *userdata);
     void (*node_removed)(void *userdata, TaiNode *node);
@@ -51,6 +55,7 @@ typedef struct {
                                 const char *body, char **response,
                                 char **message);
     bool (*cancelled)(void *userdata);
+    void (*animation_frame_requested)(void *userdata);
     void *userdata;
 } TaiJsHost;
 
@@ -71,5 +76,11 @@ bool tai_js_eval(TaiJsContext *context, const char *source_name,
  * prevented. */
 bool tai_js_dispatch_event(TaiJsContext *context, const char *type,
     TaiNode *target, bool *default_prevented, char **error);
+/* One animation frame's callbacks: runRAFHandlers() takes the queued batch;
+ * callbacks queued meanwhile wait for the next frame. A throwing callback is
+ * reported and the rest of the batch still runs (D10); an error that escapes
+ * the batch (the time limit, out of memory) is reported and ends it. Returns
+ * false only for invalid input. */
+bool tai_js_run_animation_frame(TaiJsContext *context, char **error);
 
 #endif

@@ -267,6 +267,10 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/title_integration.py"
     $<TARGET_FILE:test_page_title> $<TARGET_FILE:test_title_window>
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
+  add_executable(test_raf_window tests/test_raf_window.c)
+  target_link_libraries(test_raf_window PRIVATE tai_presentation)
+  target_compile_options(test_raf_window PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME raf_window COMMAND test_raf_window)
   add_executable(test_new_window tests/test_new_window.c)
   target_link_libraries(test_new_window PRIVATE tai_presentation)
   target_compile_options(test_new_window PRIVATE -Wall -Wextra -Wpedantic -Werror)
