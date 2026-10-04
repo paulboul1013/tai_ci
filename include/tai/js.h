@@ -125,4 +125,8 @@ bool tai_js_run_timers(TaiJsContext *context, double now, size_t budget,
 bool tai_js_finish_xhr(TaiJsContext *context, uint64_t handle,
     const char *body, const char *message, char **error);
 
+/* Testing only: replaces the JS heap limit (0 = none) and returns the bytes
+ * the JS heap already uses, so tests can fail JS allocations one by one. */
+size_t tai_js_set_memory_limit_for_test(TaiJsContext *context, size_t limit);
+
 #endif

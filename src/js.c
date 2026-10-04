@@ -222,6 +222,8 @@ static JSValue throw_dom_status(JSContext *context, TaiDomStatus status) {
     case TAI_DOM_NO_MEMORY: return JS_ThrowOutOfMemory(context);
     case TAI_DOM_NODE_LIMIT:
         return JS_ThrowPlainError(context, "Document node limit reached");
+    case TAI_DOM_DEPTH_LIMIT:
+        return JS_ThrowPlainError(context, "Document depth limit reached");
     case TAI_DOM_CYCLE:
         return JS_ThrowPlainError(context,
             "Cannot insert a node into itself or its descendant");
@@ -243,11 +245,50 @@ static JSValue throw_dom_status(JSContext *context, TaiDomStatus status) {
 
 /* ---- ID globals ----------------------------------------------------------- */
 
+/* Open-addressing set of borrowed id strings: a TaiMap lookup is linear,
+ * which made the walk quadratic in the number of ids (Python uses a dict). */
+typedef struct {
+    const char **slots;
+    size_t capacity, count;
+} IdSet;
+
+static size_t id_hash(const char *id) {
+    uint64_t hash = 1469598103934665603u; /* FNV-1a */
+    for (const unsigned char *c = (const unsigned char *)id; *c; c++)
+        hash = (hash ^ *c) * 1099511628211u;
+    return (size_t)hash;
+}
+
+/* 1 when added, 0 when already present, -1 on allocation failure. */
+static int id_set_add(IdSet *set, const char *id) {
+    if (set->count >= set->capacity / 2) {
+        size_t capacity = set->capacity ? set->capacity * 2 : 64;
+        if (capacity < set->capacity) return -1;
+        const char **slots = calloc(capacity, sizeof(*slots));
+        if (!slots) return -1;
+        for (size_t i = 0; i < set->capacity; i++) {
+            if (!set->slots[i]) continue;
+            size_t slot = id_hash(set->slots[i]) & (capacity - 1);
+            while (slots[slot]) slot = (slot + 1) & (capacity - 1);
+            slots[slot] = set->slots[i];
+        }
+        free(set->slots);
+        set->slots = slots;
+        set->capacity = capacity;
+    }
+    size_t slot = id_hash(id) & (set->capacity - 1);
+    for (; set->slots[slot]; slot = (slot + 1) & (set->capacity - 1))
+        if (!strcmp(set->slots[slot], id)) return 0;
+    set->slots[slot] = id;
+    set->count++;
+    return 1;
+}
+
 typedef struct {
     TaiJsContext *js;
     JSValue entries;
     uint32_t count;
-    TaiMap seen;
+    IdSet seen;
 } IdEntries;
 
 /* Python update_id_globals: the first element in document order for each
@@ -256,10 +297,10 @@ static bool collect_ids(IdEntries *ids, TaiNode *node) {
     JSContext *context = ids->js->context;
     if (node->kind == TAI_ELEMENT) {
         const char *id = tai_map_get(&node->attributes, "id");
-        if (id && *id && !tai_map_get(&ids->seen, id)) {
+        int added = id && *id ? id_set_add(&ids->seen, id) : 0;
+        if (added) {
             int64_t handle;
-            if (!tai_map_set(&ids->seen, id, "", 0) ||
-                !handle_of(ids->js, node, &handle)) {
+            if (added < 0 || !handle_of(ids->js, node, &handle)) {
                 JS_ThrowOutOfMemory(context);
                 return false;
             }
@@ -284,7 +325,7 @@ static bool sync_id_globals(TaiJsContext *js) {
     JSContext *context = js->context;
     IdEntries ids = {.js = js, .entries = JS_NewArray(context)};
     bool ok = !JS_IsException(ids.entries) && collect_ids(&ids, js->root);
-    tai_map_clear(&ids.seen);
+    free(ids.seen.slots);
     if (ok) {
         JSValue global = JS_GetGlobalObject(context);
         JSValue function = JS_GetPropertyStr(context, global, "sync_id_globals");
@@ -1271,4 +1312,11 @@ bool tai_js_finish_xhr(TaiJsContext *js, uint64_t handle, const char *body,
                             JS_NewInt64(context, (int64_t)handle)};
     run_task(js, "runXHROnload", "XMLHttpRequest onload crashed", 2, arguments);
     return true;
+}
+
+size_t tai_js_set_memory_limit_for_test(TaiJsContext *js, size_t limit) {
+    JSMemoryUsage usage;
+    JS_ComputeMemoryUsage(js->runtime, &usage);
+    JS_SetMemoryLimit(js->runtime, limit);
+    return (size_t)usage.malloc_size;
 }

@@ -4054,6 +4054,91 @@
       }
     ]
   },
+  "script_dispatch_event": {
+    "cookie_jar": {},
+    "created": {
+      "dom": {
+        "attributes": {},
+        "children": [
+          {
+            "attributes": {},
+            "children": [
+              {
+                "attributes": {
+                  "id": "outer"
+                },
+                "children": [
+                  {
+                    "attributes": {
+                      "id": "b"
+                    },
+                    "children": [
+                      {
+                        "text": "go"
+                      }
+                    ],
+                    "tag": "button"
+                  }
+                ],
+                "tag": "div"
+              }
+            ],
+            "tag": "body"
+          }
+        ],
+        "tag": "html"
+      },
+      "invalidations": 0,
+      "output": [],
+      "raf_requests": 0
+    },
+    "steps": [
+      {
+        "invalidations": 0,
+        "output": [],
+        "raf_requests": 0,
+        "value": [
+          false,
+          "ping:true:true",
+          false,
+          false,
+          null
+        ]
+      },
+      {
+        "invalidations": 0,
+        "output": [],
+        "raf_requests": 0,
+        "value": [
+          true,
+          true,
+          "none"
+        ]
+      },
+      {
+        "invalidations": 0,
+        "output": [],
+        "raf_requests": 0,
+        "value": [
+          true,
+          true,
+          "ping:true:true,outer"
+        ]
+      },
+      {
+        "invalidations": 0,
+        "output": [],
+        "prevented": true,
+        "raf_requests": 0
+      },
+      {
+        "invalidations": 0,
+        "output": [],
+        "raf_requests": 0,
+        "value": "ping:true:true,outer,ping:false:true,outer"
+      }
+    ]
+  },
   "serialize": {
     "cookie_jar": {},
     "created": {

@@ -594,10 +594,17 @@ static bool page_apply_resources(TaiPage *page, Resource *resources,
             if (!tai_css_extend(page->styles, content ? content : "", error))
                 return false;
         } else {
+            /* Python's JSContext.run reports and continues (D1: stderr). A
+             * script stopped by a cancelled navigation is not reported; the
+             * next checkpoint ends the load. */
             char *script_error = NULL;
-            tai_js_eval(page->javascript, resource->source,
-                        content ? content : "", &script_error);
-            free(script_error); /* Python reports and continues after script errors. */
+            if (!tai_js_eval(page->javascript, resource->source,
+                             content ? content : "", &script_error) &&
+                (!page->net.checkpoint ||
+                 page->net.checkpoint(page->net.userdata)))
+                fprintf(stderr, "Script %s crashed %s\n", resource->source,
+                        script_error ? script_error : "(no message)");
+            free(script_error);
         }
     }
     return true;

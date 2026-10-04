@@ -159,6 +159,33 @@ CASES = [
         ],
     },
     {
+        # runtime.js Event and Node.prototype.dispatchEvent called by a script:
+        # only the node's own listeners run (no bubbling) and the return value
+        # is do_default. A page dispatch of the same custom type bubbles.
+        "name": "script_dispatch_event",
+        "html": "<div id=outer><button id=b>go</button></div>",
+        "steps": [
+            ("js", "var seen = [];"
+                   " outer.addEventListener('ping', function () {"
+                   " seen.push('outer'); });"
+                   " b.addEventListener('ping', function (e) {"
+                   " seen.push(e.type + ':' + (e.target === null) + ':' +"
+                   " (e.currentTarget.handle === this.handle));"
+                   " e.preventDefault(); });"
+                   " var ev = new Event('ping');"
+                   " [b.dispatchEvent(ev), seen.join(), ev.do_default,"
+                   " ev.propagation_stopped, ev.target]"),
+            ("js", "var quiet = new Event('none');"
+                   " [b.dispatchEvent(quiet), quiet.currentTarget.handle === b.handle,"
+                   " quiet.type]"),
+            ("js", "var stopped = new Event('ping'); stopped.stopPropagation();"
+                   " [outer.dispatchEvent(stopped), stopped.propagation_stopped,"
+                   " seen.join()]"),
+            ("dispatch", "ping", "#b"),
+            ("js", "seen.join()"),
+        ],
+    },
+    {
         "name": "listener_mutates_during_dispatch",
         "html": "<div id=outer><section id=mid><button id=b>go</button>"
                 "</section></div>",

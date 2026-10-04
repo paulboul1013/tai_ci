@@ -411,6 +411,55 @@ static void test_node_limit(void) {
     tai_document_destroy(doc);
 }
 
+/* D13: appendChild past the depth cap is a catchable JS error. */
+static void test_depth_limit(void) {
+    char *error = NULL, *result = NULL;
+    TaiDocument *doc = tai_html_parse("<div id=root></div>", &error);
+    assert(doc && !error);
+    TaiJsContext *js = tai_js_create(tai_document_root(doc), NULL, &error);
+    assert(js && !error);
+    assert(tai_js_eval_value(js, "deep.js",
+        "var p = root, i = 0;"
+        "try { for (; i < 1000; i++) {"
+        " var c = document.createElement('div'); p.appendChild(c); p = c; } }"
+        "catch (e) { i + ' ' + e.message }", &result, &error));
+    /* html, body and root take depths 0-2; 510 more reach the cap of 512. */
+    assert(!strcmp(result, "510 Document depth limit reached"));
+    free(result);
+    tai_js_destroy(js);
+    tai_document_destroy(doc);
+}
+
+/* Review finding: ID-global collection used a linear map, making a page with
+ * tens of thousands of ids run out the 2 s deadline before any script. */
+#define MANY_IDS 40000
+#define MANY_IDS_TEXT "40000"
+static void test_many_ids(void) {
+    size_t size = MANY_IDS * 24 + 32;
+    char *html = malloc(size), *at = html;
+    assert(html);
+    for (int i = 0; i < MANY_IDS; i++)
+        at += sprintf(at, "<i id=a%d></i>", i);
+    *at = 0;
+    char *error = NULL, *result = NULL;
+    TaiDocument *doc = tai_html_parse(html, &error);
+    free(html);
+    assert(doc && !error);
+    double started = seconds_now();
+    TaiJsContext *js = tai_js_create(tai_document_root(doc), NULL, &error);
+    assert(js && !error);
+    assert(tai_js_eval_value(js, "ids.js",
+        "a0.setAttribute('id', 'a39999'); typeof a39999 + ' ' + typeof a0",
+        &result, &error));
+    double elapsed = seconds_now() - started;
+    fprintf(stderr, MANY_IDS_TEXT " ids: %.3f s\n", elapsed);
+    assert(!strcmp(result, "object undefined"));
+    free(result);
+    assert(elapsed < 1.0);
+    tai_js_destroy(js);
+    tai_document_destroy(doc);
+}
+
 /* Slice 5 host callbacks: document.cookie and XMLHttpRequest reach the host;
  * its status codes become JS errors, blocking time extends the deadline up
  * to 30 s, and cancelled() stops even a script that catches every error. */
@@ -686,6 +735,8 @@ int main(void) {
     test_nested_deadline();
     test_append_cost();
     test_node_limit();
+    test_depth_limit();
+    test_many_ids();
     test_listener_errors();
     test_animation_frames();
     test_other_thread_stack();

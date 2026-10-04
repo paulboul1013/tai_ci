@@ -24,6 +24,16 @@ def page(port):
             "<script src='http://localhost:{}/d.js'></script>".format(port))
 
 
+# Python JSContext.run prints "Script <src> crashed <error>" and the load goes
+# on; native writes it to stderr (D1). The inline script is native only (D6).
+CRASH_PAGE = ("<p id=t data-log=''>x</p>"
+              "<script src='/boom.js'></script>"
+              "<script>throw Error('inline');</script>"
+              "<script src='/b.js'></script>")
+CRASH_REPORTS = ["Script /boom.js crashed Error: boom",
+                 "Script <inline-script> crashed Error: inline"]
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -41,7 +51,11 @@ class Handler(BaseHTTPRequestHandler):
             "/csp-other": "script-src 'self'",
         }
         headers = {}
-        if self.path == "/b.js":
+        if self.path == "/crash":
+            body, kind = CRASH_PAGE, "text/html"
+        elif self.path == "/boom.js":
+            body, kind = "throw Error('boom');", "text/javascript"
+        elif self.path == "/b.js":
             body, kind = APPEND.format("b"), "text/javascript"
         elif self.path == "/d.js":
             body, kind = APPEND.format("d"), "text/javascript"
@@ -95,10 +109,18 @@ def main():
             paragraph = find(json.loads(output)["dom"], "p")
             actual = paragraph["attributes"]["data-log"]
             assert actual == log, (path, log, actual)
+        url = "http://127.0.0.1:{}/crash".format(server.server_port)
+        result = subprocess.run([browser, "--headless", url], check=True,
+                                capture_output=True, text=True, timeout=30)
+        paragraph = find(json.loads(result.stdout)["dom"], "p")
+        assert paragraph["attributes"]["data-log"] == "b", paragraph
+        reports = [line for line in result.stderr.splitlines()
+                   if " crashed " in line]
+        assert reports == CRASH_REPORTS, reports
     finally:
         server.shutdown()
         server.server_close()
-    print("Inline script integration: {} pages passed".format(len(expected)))
+    print("Inline script integration: {} pages passed".format(len(expected) + 1))
 
 
 if __name__ == "__main__":

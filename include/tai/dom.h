@@ -5,7 +5,8 @@ typedef struct TaiDocument TaiDocument;
 typedef struct TaiNode TaiNode;
 typedef enum { TAI_ELEMENT, TAI_TEXT } TaiNodeKind;
 /* Document owns nodes, strings, maps and child arrays. All node links are borrowed.
- * Detached nodes remain alive until document destruction, keeping JS handles valid.
+ * Detached nodes remain alive until document destruction, so any TaiNode pointer
+ * obtained from a document stays valid while the document lives.
  * Nodes may be mutated only on the owning Tab thread. */
 struct TaiNode {
     TaiNodeKind kind;
@@ -23,6 +24,12 @@ struct TaiNode {
     double scroll_y;
 };
 /* On error NULL with owned diagnostic in *error when non-NULL. */
+/* D13: no node has more than TAI_DOM_MAX_DEPTH ancestors, so the recursive
+ * style, layout and paint walks stay within a thread stack. Like Blink's
+ * parser cap, an element that would open below the limit is placed as a later
+ * sibling of the deepest open element instead; script mutations that would
+ * exceed it fail with TAI_DOM_DEPTH_LIMIT. */
+#define TAI_DOM_MAX_DEPTH 512u
 TaiDocument *tai_html_parse(const char *html, char **error);
 TaiNode *tai_document_root(const TaiDocument *doc);
 void tai_document_destroy(TaiDocument *doc);
@@ -40,7 +47,8 @@ typedef enum {
     TAI_DOM_CYCLE,            /* child is the parent or one of its ancestors */
     TAI_DOM_NOT_CHILD,        /* removal target is not a child of parent */
     TAI_DOM_REFERENCE_NOT_CHILD,
-    TAI_DOM_PARSE_ERROR       /* markup where Python's HTMLParser raises */
+    TAI_DOM_PARSE_ERROR,      /* markup where Python's HTMLParser raises */
+    TAI_DOM_DEPTH_LIMIT       /* the result would exceed TAI_DOM_MAX_DEPTH */
 } TaiDomStatus;
 /* The tag is stored as given; callers fold case when their API requires it. */
 TaiNode *tai_document_create_element(TaiDocument *doc, const char *tag,
@@ -49,11 +57,14 @@ TaiNode *tai_document_create_element(TaiDocument *doc, const char *tag,
  * end when reference is NULL. Python order: reference check, reference ==
  * child is a successful no-op (*changed false), then the cycle check. Nothing
  * changes unless TAI_DOM_OK is returned. */
+/* D13 is checked after the cycle check. */
 TaiDomStatus tai_node_insert_before(TaiNode *parent, TaiNode *child,
     TaiNode *reference, bool *changed);
 TaiDomStatus tai_node_remove_child(TaiNode *parent, TaiNode *child);
 /* Python innerHTML_set: parses html into the same document (every parsed node
- * counts toward the limit) and replaces node's children with those of the
+ * counts toward the limit; deep markup is placed under the D13 cap relative to
+ * node, and TAI_DOM_DEPTH_LIMIT is returned when even that cannot fit) and
+ * replaces node's children with those of the
  * last <body> of the fragment; the old children stay alive, detached. On
  * TAI_DOM_OK with removed non-NULL, *removed receives an owned array (free it)
  * of the former children, or NULL when there were none. Nothing changes

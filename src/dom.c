@@ -135,6 +135,42 @@ static void detach(TaiNode *c) {
     }
   c->parent = NULL;
 }
+/* D13: TAI_DOM_OK when no node is more than budget levels below n,
+ * TAI_DOM_DEPTH_LIMIT otherwise. Walks iteratively, stopping at the first node
+ * past the budget, so it is safe on any tree. */
+static TaiDomStatus fits_below(const TaiNode *n, size_t budget) {
+  typedef struct {
+    const TaiNode *node;
+    size_t depth;
+  } Item;
+  Item *stack = NULL;
+  size_t count = 0, cap = 0;
+  TaiDomStatus status = TAI_DOM_OK;
+  if (!grow((void **)&stack, &cap, 1, sizeof(*stack)))
+    return TAI_DOM_NO_MEMORY;
+  stack[count++] = (Item){n, 0};
+  while (count && status == TAI_DOM_OK) {
+    Item item = stack[--count];
+    if (!item.node->child_count)
+      continue;
+    if (item.depth >= budget)
+      status = TAI_DOM_DEPTH_LIMIT;
+    else if (!grow((void **)&stack, &cap, count + item.node->child_count,
+                   sizeof(*stack)))
+      status = TAI_DOM_NO_MEMORY;
+    else
+      for (size_t i = 0; i < item.node->child_count; i++)
+        stack[count++] = (Item){item.node->children[i], item.depth + 1};
+  }
+  free(stack);
+  return status;
+}
+static size_t ancestors(const TaiNode *n) {
+  size_t depth = 0;
+  for (n = n->parent; n; n = n->parent)
+    depth++;
+  return depth;
+}
 TaiDomStatus tai_node_insert_before(TaiNode *p, TaiNode *c, TaiNode *ref,
                                     bool *changed) {
   if (changed)
@@ -149,6 +185,12 @@ TaiDomStatus tai_node_insert_before(TaiNode *p, TaiNode *c, TaiNode *ref,
   for (TaiNode *n = p; n; n = n->parent)
     if (n == c)
       return TAI_DOM_CYCLE;
+  size_t depth = ancestors(p) + 1;
+  if (depth > TAI_DOM_MAX_DEPTH)
+    return TAI_DOM_DEPTH_LIMIT;
+  TaiDomStatus fits = fits_below(c, TAI_DOM_MAX_DEPTH - depth);
+  if (fits != TAI_DOM_OK)
+    return fits;
   /* Reserve before detaching so a failure leaves the tree untouched. */
   if (!grow((void **)&p->children, &p->child_capacity, p->child_count + 1,
             sizeof(*p->children)))
@@ -295,10 +337,57 @@ bad:
   free(b.s);
   return NULL;
 }
+/* Open-addressing set of node pointers (capacity a power of two). */
+typedef struct {
+  TaiNode **slots;
+  size_t capacity, count;
+} NodeSet;
+static size_t node_slot(const NodeSet *set, const TaiNode *n) {
+  return (size_t)(((uintptr_t)n >> 4) * 11400714819323198485u) &
+         (set->capacity - 1);
+}
+static bool node_set_has(const NodeSet *set, const TaiNode *n) {
+  if (!set->capacity)
+    return false;
+  for (size_t i = node_slot(set, n); set->slots[i];
+       i = (i + 1) & (set->capacity - 1))
+    if (set->slots[i] == n)
+      return true;
+  return false;
+}
+static bool node_set_add(NodeSet *set, TaiNode *n) {
+  if (set->count >= set->capacity / 2) {
+    NodeSet grown = {.capacity = set->capacity ? set->capacity * 2 : 16};
+    if (grown.capacity < set->capacity ||
+        !(grown.slots = calloc(grown.capacity, sizeof(*grown.slots))))
+      return false;
+    for (size_t i = 0; i < set->capacity; i++)
+      if (set->slots[i]) {
+        size_t j = node_slot(&grown, set->slots[i]);
+        while (grown.slots[j])
+          j = (j + 1) & (grown.capacity - 1);
+        grown.slots[j] = set->slots[i];
+      }
+    grown.count = set->count;
+    free(set->slots);
+    *set = grown;
+  }
+  size_t i = node_slot(set, n);
+  while (set->slots[i])
+    i = (i + 1) & (set->capacity - 1);
+  set->slots[i] = n;
+  set->count++;
+  return true;
+}
 typedef struct {
   TaiDocument *d;
   TaiNode **stack, **format;
   size_t n, cap, nf, cf;
+  size_t limit;  /* D13: most elements open at once (html at index 0) */
+  size_t excess; /* elements opened past limit whose end tag is still due */
+  NodeSet closed_early; /* formatting elements open_element closed */
+  size_t max_nodes;  /* 0, or fail once the document would hold more */
+  bool over_budget;  /* stopped by max_nodes */
   Buffer *view;
   bool invalid; /* failed on an empty open-element stack, not on memory */
 } Parser;
@@ -307,6 +396,13 @@ static bool empty_stack(Parser *p) {
   if (!p->n)
     p->invalid = true;
   return !p->n;
+}
+static TaiNode *parser_node(Parser *p, TaiNodeKind kind, const char *value) {
+  if (p->max_nodes && p->d->count >= p->max_nodes) {
+    p->over_budget = true;
+    return NULL;
+  }
+  return node_new(p->d, kind, value);
 }
 static bool has(const char *t, const char *list) {
   const char *p = list;
@@ -370,7 +466,7 @@ static bool text_add(Parser *p, const char *s) {
   char *v = unescape(s);
   if (!v)
     return false;
-  TaiNode *n = node_new(p->d, TAI_TEXT, v);
+  TaiNode *n = parser_node(p, TAI_TEXT, v);
   free(v);
   return n && !empty_stack(p) && tai_node_append(p->stack[p->n - 1], n);
 }
@@ -426,6 +522,21 @@ static bool pop_attach(Parser *p) {
   TaiNode *n = p->stack[--p->n];
   return tai_node_append(p->stack[p->n - 1], n);
 }
+/* D13: with limit elements open, the deepest is closed first so n opens as
+ * its later sibling; the closed element's end tag is absorbed by excess. */
+static bool open_element(Parser *p, TaiNode *n) {
+  if (p->n >= p->limit) {
+    TaiNode *top = p->stack[p->n - 1];
+    if (has(top->tag, "b i u small big") &&
+        !node_set_add(&p->closed_early, top))
+      return false;
+    if (!pop_attach(p))
+      return false;
+    p->excess++;
+  }
+  n->parent = p->n ? p->stack[p->n - 1] : NULL;
+  return push(&p->stack, &p->n, &p->cap, n);
+}
 static bool tag(Parser *p, const char *s) {
   if (p->view)
     return str(p->view, "&lt;") && escaped(p->view, s) && str(p->view, "&gt;");
@@ -472,10 +583,27 @@ static bool tag(Parser *p, const char *s) {
         ok = true;
         goto done;
       }
+      /* D13: a formatting element closed early by open_element is no longer
+       * on the stack; its end tag only retires it, so it cannot pop the
+       * genuine elements below the cap. */
+      if (node_set_has(&p->closed_early, p->format[found])) {
+        memmove(p->format + found, p->format + found + 1,
+                (p->nf - found - 1) * sizeof(*p->format));
+        p->nf--;
+        if (p->excess)
+          p->excess--;
+        ok = true;
+        goto done;
+      }
       size_t old = p->nf;
       p->nf = found;
       while (p->n) {
         TaiNode *n = p->stack[--p->n];
+        /* D13: every element open_element closed early sits, in Python's
+         * terms, between the last two stack slots; popping below them closes
+         * those too. */
+        if (p->n + 1 < p->limit)
+          p->excess = 0;
         if (p->n && !tai_node_append(p->stack[p->n - 1], n))
           goto done;
         if (!strcmp(n->tag, t + 1))
@@ -484,20 +612,21 @@ static bool tag(Parser *p, const char *s) {
       for (size_t i = found + 1; i < old; i++) {
         if (empty_stack(p))
           goto done;
-        TaiNode *f = p->format[i], *n = node_new(p->d, TAI_ELEMENT, f->tag);
+        TaiNode *f = p->format[i], *n = parser_node(p, TAI_ELEMENT, f->tag);
         if (!n || !tai_map_copy(&n->attributes, &f->attributes))
           goto done;
         n->checked = tai_map_get(&n->attributes, "checked") != NULL;
-        n->parent = p->stack[p->n - 1];
-        if (!push(&p->stack, &p->n, &p->cap, n) ||
-            !push(&p->format, &p->nf, &p->cf, n))
+        if (!open_element(p, n) || !push(&p->format, &p->nf, &p->cf, n))
           goto done;
       }
+      ok = true;
+    } else if (p->excess && p->n < p->limit) {
+      p->excess--;
       ok = true;
     } else
       ok = p->n == 1 || pop_attach(p);
   } else {
-    TaiNode *n = node_new(p->d, TAI_ELEMENT, t);
+    TaiNode *n = parser_node(p, TAI_ELEMENT, t);
     if (!n)
       goto done;
     n->attributes = m;
@@ -507,8 +636,7 @@ static bool tag(Parser *p, const char *s) {
                "track wbr")) {
       ok = !empty_stack(p) && tai_node_append(p->stack[p->n - 1], n);
     } else {
-      n->parent = p->n ? p->stack[p->n - 1] : NULL;
-      ok = push(&p->stack, &p->n, &p->cap, n);
+      ok = open_element(p, n);
       if (ok && has(t, "b i u small big"))
         ok = push(&p->format, &p->nf, &p->cf, n);
     }
@@ -616,16 +744,23 @@ done:
   free(b.s);
   free(p->stack);
   free(p->format);
+  free(p->closed_early.slots);
   return ok;
 }
-static TaiDocument *parse_document(const char *html, bool *invalid) {
-  *invalid = false;
+/* *status is TAI_DOM_PARSE_ERROR, TAI_DOM_NODE_LIMIT (more than max_nodes, when
+ * non-zero) or TAI_DOM_NO_MEMORY when NULL is returned. */
+static TaiDocument *parse_document(const char *html, size_t limit,
+                                   size_t max_nodes, TaiDomStatus *status) {
+  *status = TAI_DOM_NO_MEMORY;
   TaiDocument *d = calloc(1, sizeof(*d));
   if (!d)
     return NULL;
-  Parser p = {.d = d};
+  Parser p = {.d = d, .limit = limit, .max_nodes = max_nodes};
   if (!html || !parse(&p, html)) {
-    *invalid = p.invalid;
+    if (p.invalid)
+      *status = TAI_DOM_PARSE_ERROR;
+    else if (p.over_budget)
+      *status = TAI_DOM_NODE_LIMIT;
     tai_document_destroy(d);
     return NULL;
   }
@@ -634,8 +769,8 @@ static TaiDocument *parse_document(const char *html, bool *invalid) {
 TaiDocument *tai_html_parse(const char *html, char **error) {
   if (error)
     *error = NULL;
-  bool invalid;
-  TaiDocument *d = parse_document(html, &invalid);
+  TaiDomStatus status;
+  TaiDocument *d = parse_document(html, TAI_DOM_MAX_DEPTH, 0, &status);
   if (!d)
     fail(error);
   return d;
@@ -671,12 +806,23 @@ TaiDomStatus tai_node_set_inner_html(TaiNode *node, const char *html,
     free(b.s);
     return TAI_DOM_NO_MEMORY;
   }
-  bool invalid;
-  TaiDocument *fragment = parse_document(b.s, &invalid);
+  /* D13: fragment index i (html 0, body 1) lands at depth(node) + i - 1, so
+   * elements stay above the cap; the check below covers a node too deep for
+   * even one element level. */
+  size_t depth = ancestors(node);
+  size_t limit = depth + 3 > TAI_DOM_MAX_DEPTH + 1 ? 3
+                                                   : TAI_DOM_MAX_DEPTH + 1 - depth;
+  /* Stop parsing once the fragment alone cannot fit, so an oversized string
+   * is not turned into nodes first; the exact check follows. */
+  TaiDomStatus status;
+  size_t room = node->document->count < TAI_DOCUMENT_SCRIPT_NODE_LIMIT
+                    ? TAI_DOCUMENT_SCRIPT_NODE_LIMIT - node->document->count
+                    : 0;
+  TaiDocument *fragment = parse_document(b.s, limit, room + 1, &status);
   free(b.s);
   if (!fragment)
-    return invalid ? TAI_DOM_PARSE_ERROR : TAI_DOM_NO_MEMORY;
-  TaiDomStatus status = TAI_DOM_NO_MEMORY;
+    return status;
+  status = TAI_DOM_NO_MEMORY;
   TaiNode *body = NULL;
   TaiNode **stack = NULL;
   size_t n = 0, cap = 0;
@@ -692,6 +838,14 @@ TaiDomStatus tai_node_set_inner_html(TaiNode *node, const char *html,
   }
   free(stack);
   stack = NULL;
+  if (body) {
+    status = depth >= TAI_DOM_MAX_DEPTH
+                 ? (body->child_count ? TAI_DOM_DEPTH_LIMIT : TAI_DOM_OK)
+                 : fits_below(body, TAI_DOM_MAX_DEPTH - depth);
+    if (status != TAI_DOM_OK)
+      goto bad;
+    status = TAI_DOM_NO_MEMORY;
+  }
   TaiDocument *d = node->document;
   if (fragment->count > TAI_DOCUMENT_SCRIPT_NODE_LIMIT ||
       d->count > TAI_DOCUMENT_SCRIPT_NODE_LIMIT - fragment->count) {

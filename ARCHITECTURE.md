@@ -59,7 +59,7 @@ Public interfaces generally share a name with their implementation; internal fil
 | Interface / implementation | Boundary |
 |---|---|
 | `core.h` / `core.c` | strings、map、file、JSON primitives |
-| `dom.h` / `dom.c` | HTML parsing、document、DOM nodes、script mutation（`TaiDomStatus`）、HTML 序列化（`tai_node_serialize`，Python `serialize_node`）、view-source |
+| `dom.h` / `dom.c` | HTML parsing、document、DOM nodes、script mutation（`TaiDomStatus`）、深度上限（`TAI_DOM_MAX_DEPTH`，D13）、HTML 序列化（`tai_node_serialize`，Python `serialize_node`）、view-source |
 | `css.h` / `css.c` | CSS parsing、selectors、cascade、computed style |
 | `url.h` / `url.c` | URL parsing、resolution、origin and identity |
 | `network.h` / `network.c` | libcurl multi requests、responses、cache/cookies |
@@ -163,6 +163,11 @@ single-page presentation APIs remain available to callers.
   and `fixtures/js_page_oracle.json` freeze the Python Tab's DOM, title,
   scroll, URL and focus; `js_dom_integration.py` compares them with
   `js_page_probe.c`, which replays the actions through the `TaiPage` input seam.
+- `js_dom_cases.py` holds the JS/DOM scenarios; `js_dom_oracle_probe.py` and
+  `fixtures/js_dom_oracle.json` freeze the Python `JSContext` answers (the
+  scheduling cases through `fixtures/scheduling_runtime_7d536e0.js`, D5);
+  `js_dom_differential.py` compares them with `js_probe.c`. `test_js_oom.c`
+  sweeps allocation and JS-heap failures across the bridge operations.
 - `tab_strip_differential.py` measures the live Python chrome for one and two
   tabs across widths and compares `tab_strip_probe.c`'s toolbar row positions,
   which move only when the tab strip actually wraps.

@@ -8,7 +8,7 @@
 - [ ] 同輸入 DOM、CSS、computed style、URL differential 覆蓋正常、空白、Unicode、malformed、priority、inheritance 與已知非標準行為。
 - [ ] Layout geometry、text measurements、display ordering、scroll/clip/hit testing 與 reference 可比較；raster 差異有量測與界限。
 - [ ] 本機 HTTP fixtures 驗證 GET/POST、redirect、gzip/chunked、cache、cookies、referrer、CSP/CORS 與失敗路徑。
-- [ ] JS-visible DOM mutation、query、event propagation/default prevention、XHR 與實際可用 scheduling APIs 通過 reference validation。
+- [x] JS-visible DOM mutation、query、event propagation/default prevention、XHR 與實際可用 scheduling APIs 通過 reference validation。
 - [ ] Navigation→resource loading→script/style→layout→raster→presentation 的 native E2E 通過。
 - [ ] Link navigation、form input/checkbox/password/submit、history、fragment、scroll、tabs、windows、bookmarks、view-source 與 resize 有代表性 E2E。
 - [ ] Slow network、navigation replacement、tab/window close 不接受 stale callbacks 或 snapshots；priority/frame scheduling 可重現驗證。
@@ -28,6 +28,7 @@ Pixel-perfect 只在字型、版本、backend 與環境固定時使用；優先�
 
 | Slice | Date | State | Summary (proven / main gap) | Detail |
 | --- | --- | --- | --- | --- |
+| JS DOM 補齊（切片 0–7 收尾） | 2026-10-04 | VALIDATING | 27＋11 個 oracle 情境 differential 全部相符，差異規則只套用在記錄的欄位；`js_dom_oom` 配置故障與 JS heap 掃描；收尾修正 50,000 層 DOM segfault（D13 深度上限 512）、大量 id 載入失敗、格式元素深度問題、載入期腳本 crash 回報；Xvfb 12 個真實視窗情境；三輪獨立審查；Debug CTest 54/54、ASan-UBSan-LSan 53/54（`presentation_dummy` 書籤斷言在平行執行時失敗、無 sanitizer 錯誤，單獨重跑 3/3 通過；既有的共用書籤檔問題）／detached 節點不回收（D2）、wrapper 不唯一、事件期 XHR 30 秒逾時未測 | [detail](docs/acceptance/2026-10-04-js-dom.md) |
 | JS DOM 切片 5：document.cookie 與同步 XHR | 2026-09-29 | VALIDATING | 5 個 XHR／cookie oracle 情境在 headless 與 tabset 兩路徑 32 檢查點相符；取消、關閉、事件期 XHR 在載入期 XHR 期間完成已驗證；CTest 與 ASan-UBSan-LSan 51/51，獨立審查無確認缺陷／缺 30 秒逾時與配置故障、Xvfb 驗證 | [detail](docs/acceptance/2026-09-29-js-cookie-xhr.md) |
 | 視窗標題跟隨頁面、改名 Tai Ci | 2026-09-29 | VALIDATING | `tai_page_title()` 依 Python `Tab.get_title` 規則，每個視窗顯示 active 分頁已提交頁面的標題，後備名稱 `Tai Ci`、User-Agent `Tai_Ci/1.0`（決定差異）；title oracle 8 情境、18 種 markup 與 32 個視窗檢查點相符；CTest 45/45、整套 ASan-UBSan-LSan 45/45、隔離網路 Xvfb 真實視窗（導覽／無標題／錯誤頁／分頁／Ctrl+N）、獨立審查通過；JS 改寫標題因 native 沒有 `innerHTML` 未比對 | [detail](docs/acceptance/2026-09-29-window-title.md) |
 | 新視窗（Ctrl+N） | 2026-09-29 | VALIDATING | 共用 loader／cookie／書籤的 `TaiBrowserApp` 與單一 SDL 多視窗迴圈；new-window oracle 9 情境、native 23 個檢查點相符（key repeat／上限／建立失敗為決定差異）；CTest 43/43、整套 ASan-UBSan-LSan 43/43、隔離網路 Xvfb 真實視窗 Ctrl+N／路由／共用書籤／逐一關閉、獨立審查與使用者 WSLg 手動操作（10 視窗）通過；建立失敗注入未驗證 | [detail](docs/acceptance/2026-09-29-new-window.md) |

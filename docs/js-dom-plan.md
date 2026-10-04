@@ -1,6 +1,7 @@
 # JS DOM 補齊：整體計畫與交接
 
-**狀態：實作中（2026-09-30）。** 九項決定皆已確認；切片 0–6、6b 完成，切片 7 尚未開始。
+**狀態：已實作，`VALIDATING`（2026-10-04）。** 九項決定與切片 7 的深度上限決定（D13）皆已確認；
+切片 0–7 完成，驗收見 [ACCEPTANCE 證據](acceptance/2026-10-04-js-dom.md)。
 計畫已經四路獨立驗證（oracle 實跑、native 程式碼、所有權設計、文件一致性），結果已併入本文。
 本工作處理 [ACCEPTANCE.md](../ACCEPTANCE.md) 的「JS-visible DOM mutation、query、event
 propagation/default prevention、XHR 與實際可用 scheduling APIs」，並滿足同檔「ASan 重複
@@ -481,6 +482,17 @@ Native 規格：
 
 ### 切片 7：收尾
 
+**狀態：完成（2026-10-04）。** 證據與修正的缺陷見 [驗收紀錄](acceptance/2026-10-04-js-dom.md)。
+- **深樹決定（切片 2 的後續風險）：** 實測純 HTML 或腳本建出約 50,000 層時，遞迴的 `tai_css_style`
+  堆疊溢位 segfault；Python 約 1000 層就 `RecursionError`。使用者 2026-10-04 選擇比照 Blink 加上深度
+  上限 512（D13），不改寫所有遞迴走訪。
+- **平行驗證：** oracle-checker（oracle 穩定性、差異規則範圍、竄改測試）、兩個 Xvfb 真實視窗 agent、
+  三輪 `ownership-reviewer`。第 1 輪找到 ID 收集平方時間與 innerHTML 先解析後檢查；第 2 輪找到深度
+  上限下格式元素結束標籤清空文件；第 3 輪找到 `</b>` 越過上限後 `excess` 未歸零；皆已修正並加測試。
+- **新增：** `js_dom_oom`（配置故障與 JS heap 掃描）、`tai_js_set_memory_limit_for_test`、
+  `script_dispatch_event` oracle 情境、載入期腳本 `Script <src> crashed` 回報（D1）。
+
+原計畫：
 - 完整 CTest；`build-asan/` 全套 ASan/UBSan＋LSan，含反覆 load → mutate → render → close；
   配置故障掃描涵蓋 createElement、insertBefore、innerHTML、ID 同步刪除路徑。
 - Xvfb 真實視窗（`native-window-verification` skill）：點擊觸發 mutation、標題改變、丟錯 listener、截圖。
@@ -525,6 +537,7 @@ Native 規格：
 | D9 | 事件期同步 XHR 等待期間所有視窗無回應（不重繪、不處理輸入、無法關閉），最長約 30 秒傳輸總時限（跨重新導向）加上 loader 正在執行的單一載入期 script 時間（Python 只卡該 Tab，視窗照常）；設計見 [cookie／XHR 設計](js-cookie-xhr-design.md) 10.5 | native JS 在 SDL 執行緒執行；使用者 2026-09-29 選擇接受（決定 2） |
 | D10 | RAF callback 丟錯只影響該 callback，同批其餘照常執行（Python 丟棄同批剩餘 callback） | 真實瀏覽器語意，與 D7 一致；使用者 2026-09-30 決定（決定 8）。oracle 比對只對 `raf_throws` 套用此規則 |
 | D11 | Headless CLI 在輸出前執行一輪 RAF（Python 無 headless） | 讓第一個 frame 的效果進入輸出且結果確定；使用者 2026-09-30 決定（決定 9） |
+| D13 | DOM 深度上限 512（`TAI_DOM_MAX_DEPTH`）：parser 把過深的元素攤平成兄弟；`appendChild`／`insertBefore`／`innerHTML` 超過上限時丟 `Error('Document depth limit reached')` | Python 約 1000 層 `RecursionError`，native 遞迴走訪在 50,000 層 segfault；使用者 2026-10-04 決定比照 Blink（切片 7） |
 
 ## 不在本工作範圍
 

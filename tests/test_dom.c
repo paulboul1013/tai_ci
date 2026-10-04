@@ -164,6 +164,164 @@ static void serialization(void) {
     assert(!tai_node_serialize(NULL, true));
     assert(tai_node_set_inner_html(NULL, "", NULL, NULL) == TAI_DOM_WRONG_DOCUMENT);
 }
+static size_t max_depth(const TaiNode *node) {
+    size_t best = 0;
+    for (size_t i = 0; i < node->child_count; i++) {
+        size_t depth = 1 + max_depth(node->children[i]);
+        if (depth > best) best = depth;
+    }
+    return best;
+}
+static char *repeat(const char *head, const char *unit, size_t count,
+                    const char *tail) {
+    size_t unit_length = strlen(unit), head_length = strlen(head);
+    char *out = malloc(head_length + unit_length * count + strlen(tail) + 1);
+    assert(out);
+    memcpy(out, head, head_length);
+    for (size_t i = 0; i < count; i++)
+        memcpy(out + head_length + i * unit_length, unit, unit_length);
+    strcpy(out + head_length + unit_length * count, tail);
+    return out;
+}
+/* D13: no node gets more than TAI_DOM_MAX_DEPTH ancestors. */
+static void depth_limit(void) {
+    char *error = NULL;
+    /* The parser places elements past the cap as later siblings at the
+     * deepest open level, and their end tags close nothing above it. */
+    char *html = repeat("<body>", "<div>", 600, "");
+    char *full = repeat(html, "</div>", 600, "<p>after</p>");
+    free(html);
+    TaiDocument *doc = tai_html_parse(full, &error);
+    free(full);
+    assert(doc && !error);
+    TaiNode *root = tai_document_root(doc), *body = root->children[0];
+    assert(max_depth(root) == TAI_DOM_MAX_DEPTH - 1);
+    assert(body->child_count == 2 && !strcmp(body->children[1]->tag, "p"));
+    TaiNode *deepest = body;
+    while (deepest->child_count) deepest = deepest->children[0];
+    /* html, body and 510 nested divs reach depth 511; the other 90 divs are
+     * their siblings there. */
+    assert(deepest->parent->child_count == 91);
+    TaiNode *leaf = deepest;
+    /* A text node may sit one level below the deepest element. */
+    TaiDomStatus status;
+    TaiNode *child = tai_document_create_element(doc, "i", &status);
+    assert(child && tai_node_insert_before(leaf, child, NULL, NULL) == TAI_DOM_OK);
+    assert(max_depth(root) == TAI_DOM_MAX_DEPTH);
+    TaiNode *extra = tai_document_create_element(doc, "u", &status);
+    assert(tai_node_insert_before(child, extra, NULL, NULL) == TAI_DOM_DEPTH_LIMIT);
+    assert(!extra->parent && !child->child_count);
+    /* A detached subtree counts its own height, and detached trees are capped
+     * too, so every tree stays walkable. */
+    TaiNode *top = tai_document_create_element(doc, "s", &status), *tip = top;
+    for (size_t i = 0; i < TAI_DOM_MAX_DEPTH; i++) {
+        TaiNode *next = tai_document_create_element(doc, "s", &status);
+        assert(tai_node_insert_before(tip, next, NULL, NULL) == TAI_DOM_OK);
+        tip = next;
+    }
+    TaiNode *next = tai_document_create_element(doc, "s", &status);
+    assert(tai_node_insert_before(tip, next, NULL, NULL) == TAI_DOM_DEPTH_LIMIT);
+    assert(tai_node_insert_before(body, top, NULL, NULL) == TAI_DOM_DEPTH_LIMIT);
+    assert(!top->parent && body->child_count == 2);
+    assert(tai_node_insert_before(top->children[0], next, NULL, NULL) == TAI_DOM_OK);
+    assert(tai_node_remove_child(top->children[0], next) == TAI_DOM_OK);
+    /* An element already at the cap cannot take an element child. */
+    assert(tai_node_set_inner_html(child, "<b>no</b>", NULL, NULL) ==
+           TAI_DOM_DEPTH_LIMIT);
+    assert(tai_node_set_inner_html(child, "", NULL, NULL) == TAI_DOM_OK);
+    assert(tai_node_set_inner_html(leaf, "<b>x</b>", NULL, NULL) ==
+           TAI_DOM_DEPTH_LIMIT);
+    assert(tai_node_set_inner_html(leaf, "<b></b>", NULL, NULL) == TAI_DOM_OK);
+    /* innerHTML (detaching the nodes above) flattens deep markup relative to the target element. */
+    TaiNode *mid = body->children[0];
+    for (int i = 0; i < 300; i++) mid = mid->children[0];
+    html = repeat("", "<em>", 400, "x");
+    assert(tai_node_set_inner_html(mid, html, NULL, NULL) == TAI_DOM_OK);
+    free(html);
+    assert(max_depth(root) <= TAI_DOM_MAX_DEPTH);
+    tai_document_destroy(doc);
+
+    /* Formatting elements closed early by the cap are retired by their end
+     * tags without popping the genuine ones (review finding: 600 <b> used to
+     * drain the stack and replace the whole document). */
+    const char *const units[][2] = {{"<b>", "</b>"}, {"<div><i>", "</i></div>"}};
+    for (size_t u = 0; u < 2; u++) {
+        html = repeat("<body>", units[u][0], 600, "x");
+        full = repeat(html, units[u][1], 600, "<p>after</p>");
+        free(html);
+        doc = tai_html_parse(full, &error);
+        free(full);
+        assert(doc && !error);
+        root = tai_document_root(doc);
+        body = root->children[0];
+        assert(root->child_count == 1 && max_depth(root) <= TAI_DOM_MAX_DEPTH);
+        assert(!strcmp(body->children[body->child_count - 1]->tag, "p"));
+        assert(node_count(doc) > 600 * (u + 1));
+        tai_document_destroy(doc);
+    }
+
+    /* A genuine </b> below elements closed early closes them too, so later
+     * plain end tags still close the elements below the cap. */
+    html = repeat("<body>", "<div>", 508, "<b><span><i><u>x</b>y</u></i>");
+    full = repeat(html, "</div>", 508, "<p>after</p>");
+    free(html);
+    doc = tai_html_parse(full, &error);
+    free(full);
+    assert(doc && !error);
+    body = tai_document_root(doc)->children[0];
+    assert(!strcmp(body->children[body->child_count - 1]->tag, "p"));
+    assert(max_depth(tai_document_root(doc)) <= TAI_DOM_MAX_DEPTH);
+    tai_document_destroy(doc);
+
+    /* innerHTML near the cap with formatting tags, and moving an existing
+     * deep subtree under a deep parent. */
+    html = repeat("<body>", "<div>", 495, "");
+    doc = tai_html_parse(html, &error);
+    free(html);
+    assert(doc && !error);
+    root = tai_document_root(doc);
+    TaiNode *near = root;
+    while (near->child_count) near = near->children[0];
+    html = repeat("", "<b><i>", 40, "deep");
+    full = repeat(html, "</i></b>", 40, "<u>tail</u>");
+    free(html);
+    assert(tai_node_set_inner_html(near, full, NULL, NULL) == TAI_DOM_OK);
+    free(full);
+    assert(max_depth(root) <= TAI_DOM_MAX_DEPTH);
+    assert(!strcmp(near->children[near->child_count - 1]->tag, "u"));
+    TaiNode *subtree = near->children[0];
+    size_t height = max_depth(subtree);
+    assert(height > 1);
+    TaiNode *host = root->children[0];
+    for (size_t i = 0; i + 2 + height < TAI_DOM_MAX_DEPTH; i++)
+        host = host->children[0];
+    /* host sits where subtree just fits; one level deeper it does not. */
+    TaiNode *below = tai_document_create_element(doc, "s", &status);
+    assert(tai_node_insert_before(host, below, NULL, NULL) == TAI_DOM_OK);
+    assert(tai_node_insert_before(below, subtree, NULL, NULL) ==
+           TAI_DOM_DEPTH_LIMIT);
+    assert(subtree->parent == near);
+    assert(tai_node_remove_child(host, below) == TAI_DOM_OK);
+    if (host != near && host->parent != near) {
+        assert(tai_node_insert_before(host, subtree, NULL, NULL) == TAI_DOM_OK);
+        assert(max_depth(root) <= TAI_DOM_MAX_DEPTH);
+    }
+    tai_document_destroy(doc);
+
+    /* D2: an oversized fragment stops parsing at the remaining room instead
+     * of building every node first. */
+    doc = tai_html_parse("", &error);
+    assert(doc);
+    body = tai_document_root(doc)->children[0];
+    for (size_t count = node_count(doc);
+         count < TAI_DOCUMENT_SCRIPT_NODE_LIMIT - 10; count++)
+        assert(tai_document_create_element(doc, "b", &status));
+    html = repeat("", "<a></a>", 100000, "");
+    assert(tai_node_set_inner_html(body, html, NULL, NULL) == TAI_DOM_NODE_LIMIT);
+    free(html);
+    assert(node_count(doc) == TAI_DOCUMENT_SCRIPT_NODE_LIMIT - 10);
+    tai_document_destroy(doc);
+}
 int main(int argc, char **argv) {
     char *error = NULL;
     if (argc == 3 && !strcmp(argv[1], "--source")) {
@@ -269,6 +427,7 @@ int main(int argc, char **argv) {
     assert(created > 0);
     tai_document_destroy(doc);
 
+    depth_limit();
     serialization();
 
     char *source = tai_view_source("<p>&amp;</p><!--ignored-->", &error);

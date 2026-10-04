@@ -136,15 +136,19 @@ and committed `CommitData.scroll` remained 50.0 (the document extent including
 vertical margins was 436.0000119 pixels in that run). The ordinary explicit
 `scroll_by` path clamps scroll to the current document/viewport range
 ([`Tab.render`/`relayout`, lines 6306–6332](../../tests/reference/browser.py#L6306),
-[`run_animation_frame`, lines 6234–6264](../../tests/reference/browser.py#L6234),
-[`scroll_by`, lines 6436–6449](../../tests/reference/browser.py#L6436)).
+[`run_animation_frame`, lines 6219–6303](../../tests/reference/browser.py#L6219),
+[`scroll_by`, lines 6436–6455](../../tests/reference/browser.py#L6436)).
 
 Navigation increments the generation before work begins. Network results return
 through the tab task queue; stale generations cannot mutate page state.
-Resources are discovered in DOM order. Fetching may overlap, but external and
-inline scripts/styles are processed in source order, with scripts sharing one
-JavaScript context. The native bridge must validate timer hooks individually
-because `runtime.js` does not expose every Python hook yet.
+Resources are discovered in DOM order ([`Tab._collect_page_resources`, lines
+5820–5877](../../tests/reference/browser.py#L5820)). Fetching may overlap, but
+external scripts, external stylesheets and inline `<style>` are processed in
+source order, with scripts sharing one JavaScript context. Python never runs an
+inline `<script>` (only `src` scripts); native runs them too (D6 in
+[`PORTING_PLAN.md`](../../PORTING_PLAN.md)). The frozen `runtime.js` lacks the
+JS wrappers for `setTimeout`, `setInterval`/`clearInterval` and asynchronous
+XHR that `JSContext` still implements; native restores them (D5).
 
 The visual path is style → layout → paint tree → immutable commit → raster →
 window presentation. Hit testing follows paint order and clip/scroll
