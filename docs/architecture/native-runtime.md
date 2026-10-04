@@ -23,7 +23,13 @@ private, incompatible node layouts.
 - `TaiResponse` owns headers and body. Queue handoff transfers response
   ownership, and cancellation still destroys payloads.
 - `TaiLayout` borrows the styled DOM and owns layout nodes, words, font
-  state, and successfully decoded OpenMoji cache entries. PNG decoding uses
+  state, and successfully decoded OpenMoji cache entries. Font state is a
+  per-layout cache keyed by (normalized family, bold, italic, size), like the
+  reference `TYPEFACES`: each entry owns one sized `FT_Face` (released before
+  the layout's `FT_Library`) and memoized per-codepoint advances. Entries are
+  borrowed only during layout and `tai_layout_control_caret_index`, which may
+  fill the cache through its `const` layout and so needs the owning thread's
+  exclusive access; failures are never cached. PNG decoding uses
   the existing Cairo dependency; missing/corrupt assets are not cached.
   Construction reads styles and only mutates a fixed `overflow: scroll`
   node to persist its clamped `scroll_y`, matching the reference owner-thread

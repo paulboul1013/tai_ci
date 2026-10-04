@@ -640,6 +640,38 @@ int main(void) {
     tai_page_destroy(text_input_page);
     tai_url_destroy(text_input_url);
 
+    /* Caret hits on a non-ASCII value go through the layout's memoized
+     * advances: every position 0..4 is reached in order as the click moves
+     * right, and repeating a click at the same x gives the same caret. */
+    TaiUrl *caret_url = tai_url_parse(
+        "data:text/html,%3Cinput%20value%3D%22%C3%A9%E4%B8%ADab%22%3E");
+    TaiPage *caret_page = tai_page_load(network, caret_url,
+        "html {display:block} body {display:block}",
+        300.0, 100.0, false, &error);
+    assert(caret_page && !error);
+    TaiNode *caret_input = find(tai_page_root(caret_page), "input");
+    assert(caret_input);
+    size_t previous_caret = 0;
+    unsigned seen = 0;
+    for (double x = 14.0; x <= 200.0; x += 2.0) {
+        size_t carets[2];
+        for (int repeat = 0; repeat < 2; repeat++) {
+            changed = false;
+            assert(tai_page_activate_viewport(caret_page, x, 22.0, &changed,
+                                              &error));
+            assert(!error && caret_input->focused);
+            carets[repeat] = caret_input->cursor_index;
+        }
+        assert(carets[0] == carets[1] && carets[0] >= previous_caret &&
+               carets[0] <= 4);
+        if (x == 14.0) assert(carets[0] == 0);
+        seen |= 1u << carets[0];
+        previous_caret = carets[0];
+    }
+    assert(previous_caret == 4 && seen == 0x1f);
+    tai_page_destroy(caret_page);
+    tai_url_destroy(caret_url);
+
     /* RED: focused controls edit at Unicode code-point cursor positions; the
      * public page seam owns text validation, insertion and special-key redraw. */
     TaiUrl *edit_url = tai_url_parse(

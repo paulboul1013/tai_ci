@@ -7,6 +7,7 @@
 #include FT_FREETYPE_H
 #include <limits.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -31,11 +32,34 @@ struct Box {
   char *word;
   Image *image;
 };
+/* One resolved family/weight/slant/size, memoized per layout like the
+ * reference's TYPEFACES cache. The FcFontMatch and FT_New_Face cost is paid
+ * once per key instead of once per word. Advances are memoized per codepoint
+ * with the same FT_Load_Char(FT_LOAD_DEFAULT) result the uncached path used;
+ * a failed load is not memoized, so it is retried like before. */
+typedef struct {
+  utf8proc_int32_t codepoint; /* -1 marks an empty slot */
+  double advance;
+} Advance;
+typedef struct {
+  char *family;
+  bool bold, italic;
+  double size;
+  FT_Face face;
+  bool ascii_known[128];
+  double ascii_advance[128];
+  Advance *table; /* open addressing, capacity is a power of two */
+  size_t table_count, table_capacity;
+} Font;
 struct TaiLayout {
   Box *root;
   FT_Library ft;
   FcConfig *fc;
   bool rtl, failed;
+  /* Owned; each Font is separately allocated so borrowed pointers survive
+   * growth. Faces belong to ft and are released before it. */
+  Font **fonts;
+  size_t font_count, font_capacity;
   Image **images;
   size_t image_count, image_capacity;
 };
@@ -119,7 +143,57 @@ static bool fixed_px(const char *s, double *value) {
   *value = parsed;
   return true;
 }
-static FT_Face face(TaiLayout *l, TaiNode *node, bool pre, double *size) {
+static void font_destroy(Font *font) {
+  if (!font)
+    return;
+  if (font->face)
+    FT_Done_Face(font->face);
+  free(font->table);
+  free(font->family);
+  free(font);
+}
+/* Opens one sized face for a resolved key; NULL means the uncached path
+ * would also have failed, so the caller marks the layout failed. */
+static Font *font_open(TaiLayout *l, const char *family, bool bold,
+                       bool italic, double size) {
+  Font *font = calloc(1, sizeof(*font));
+  if (!font)
+    return NULL;
+  font->family = tai_strdup(family);
+  font->bold = bold;
+  font->italic = italic;
+  font->size = size;
+  FcPattern *p = font->family ? FcPatternCreate() : NULL;
+  if (!p) {
+    font_destroy(font);
+    return NULL;
+  }
+  FcPatternAddString(p, FC_FAMILY, (const FcChar8 *)family);
+  FcPatternAddInteger(p, FC_WEIGHT, bold ? FC_WEIGHT_BOLD : FC_WEIGHT_REGULAR);
+  FcPatternAddInteger(p, FC_SLANT, italic ? FC_SLANT_ITALIC : FC_SLANT_ROMAN);
+  FcConfigSubstitute(l->fc, p, FcMatchPattern);
+  FcDefaultSubstitute(p);
+  FcResult result;
+  FcPattern *m = FcFontMatch(l->fc, p, &result);
+  FcPatternDestroy(p);
+  FcChar8 *file;
+  int index = 0;
+  if (m && FcPatternGetString(m, FC_FILE, 0, &file) == FcResultMatch) {
+    FcPatternGetInteger(m, FC_INDEX, 0, &index);
+    if (FT_New_Face(l->ft, (const char *)file, index, &font->face))
+      font->face = NULL;
+  }
+  if (m)
+    FcPatternDestroy(m);
+  if (!font->face ||
+      FT_Set_Char_Size(font->face, 0, (FT_F26Dot6)(size * 64), 72, 72)) {
+    font_destroy(font);
+    return NULL;
+  }
+  return font;
+}
+/* Returns a font borrowed from l, valid until tai_layout_destroy. */
+static Font *face(TaiLayout *l, TaiNode *node, bool pre, double *size) {
   *size = fmax(1, nearbyint(strtod(property(node, "font-size", "16px"), NULL)));
   if (!isfinite(*size) || *size > 1000000) {
     l->failed = true;
@@ -148,51 +222,98 @@ static FT_Face face(TaiLayout *l, TaiNode *node, bool pre, double *size) {
     start = "Arial";
   else if (!strcmp(start, "monospace"))
     start = "Courier New";
-  FcPattern *p = FcPatternCreate();
-  if (!p) {
-    free(name);
-    l->failed = true;
-    return NULL;
-  }
-  FcPatternAddString(p, FC_FAMILY, (const FcChar8 *)start);
   const char *weight = property(node, "font-weight", "normal"),
              *slant = property(node, "font-style", "normal");
-  FcPatternAddInteger(p, FC_WEIGHT,
-                      !strcmp(weight, "bold") || atoi(weight) >= 600
-                          ? FC_WEIGHT_BOLD
-                          : FC_WEIGHT_REGULAR);
-  FcPatternAddInteger(p, FC_SLANT,
-                      !strcmp(slant, "italic") || !strcmp(slant, "oblique")
-                          ? FC_SLANT_ITALIC
-                          : FC_SLANT_ROMAN);
-  FcConfigSubstitute(l->fc, p, FcMatchPattern);
-  FcDefaultSubstitute(p);
-  FcResult result;
-  FcPattern *m = FcFontMatch(l->fc, p, &result);
-  FcPatternDestroy(p);
+  bool bold = !strcmp(weight, "bold") || atoi(weight) >= 600;
+  bool italic = !strcmp(slant, "italic") || !strcmp(slant, "oblique");
+  Font *font = NULL;
+  for (size_t i = 0; i < l->font_count && !font; i++) {
+    Font *candidate = l->fonts[i];
+    if (candidate->bold == bold && candidate->italic == italic &&
+        candidate->size == *size && !strcmp(candidate->family, start))
+      font = candidate;
+  }
+  if (!font && l->font_count == l->font_capacity) {
+    size_t capacity = l->font_capacity ? l->font_capacity * 2 : 8;
+    Font **fonts = capacity <= SIZE_MAX / sizeof(*fonts)
+                       ? realloc(l->fonts, capacity * sizeof(*fonts))
+                       : NULL;
+    if (!fonts) {
+      free(name);
+      l->failed = true;
+      return NULL;
+    }
+    l->fonts = fonts;
+    l->font_capacity = capacity;
+  }
+  if (!font) {
+    font = font_open(l, start, bold, italic, *size);
+    if (font)
+      l->fonts[l->font_count++] = font;
+  }
   free(name);
-  FT_Face f = NULL;
-  FcChar8 *file;
-  int index = 0;
-  if (m && FcPatternGetString(m, FC_FILE, 0, &file) == FcResultMatch) {
-    FcPatternGetInteger(m, FC_INDEX, 0, &index);
-    if (FT_New_Face(l->ft, (const char *)file, index, &f))
-      f = NULL;
-  }
-  if (m)
-    FcPatternDestroy(m);
-  if (!f) {
+  if (!font)
     l->failed = true;
-    return NULL;
-  }
-  if (FT_Set_Char_Size(f, 0, (FT_F26Dot6)(*size * 64), 72, 72)) {
-    FT_Done_Face(f);
-    l->failed = true;
-    return NULL;
-  }
-  return f;
+  return font;
 }
-static double measure_n(FT_Face f, const char *text, size_t length) {
+static Advance *advance_slot(Advance *table, size_t capacity,
+                             utf8proc_int32_t c) {
+  size_t i = ((size_t)(uint32_t)c * 2654435761u) & (capacity - 1);
+  while (table[i].codepoint != -1 && table[i].codepoint != c)
+    i = (i + 1) & (capacity - 1);
+  return &table[i];
+}
+/* Grows the table so one more entry keeps the load factor at most 1/2.
+ * Failure only disables memoization of that codepoint. */
+static bool advance_reserve(Font *font) {
+  if ((font->table_count + 1) * 2 <= font->table_capacity)
+    return true;
+  size_t capacity = font->table_capacity ? font->table_capacity * 2 : 64;
+  if (capacity > SIZE_MAX / sizeof(Advance))
+    return false;
+  Advance *table = malloc(capacity * sizeof(*table));
+  if (!table)
+    return false;
+  for (size_t i = 0; i < capacity; i++)
+    table[i].codepoint = -1;
+  for (size_t i = 0; i < font->table_capacity; i++)
+    if (font->table[i].codepoint != -1)
+      *advance_slot(table, capacity, font->table[i].codepoint) =
+          font->table[i];
+  free(font->table);
+  font->table = table;
+  font->table_capacity = capacity;
+  return true;
+}
+/* Python's measureText sums per-glyph advances; a glyph FreeType cannot load
+ * contributes nothing, exactly as the uncached loop skipped it. */
+static bool advance(Font *font, utf8proc_int32_t c, double *out) {
+  if (c >= 0 && c < 128 && font->ascii_known[c]) {
+    *out = font->ascii_advance[c];
+    return true;
+  }
+  Advance *slot = c >= 128 && font->table_capacity
+                      ? advance_slot(font->table, font->table_capacity, c)
+                      : NULL;
+  if (slot && slot->codepoint == c) {
+    *out = slot->advance;
+    return true;
+  }
+  if (FT_Load_Char(font->face, (FT_ULong)c, FT_LOAD_DEFAULT))
+    return false;
+  double value = (double)font->face->glyph->advance.x / 64;
+  if (c >= 0 && c < 128) {
+    font->ascii_advance[c] = value;
+    font->ascii_known[c] = true;
+  } else if (c >= 128 && advance_reserve(font)) {
+    slot = advance_slot(font->table, font->table_capacity, c);
+    *slot = (Advance){.codepoint = c, .advance = value};
+    font->table_count++;
+  }
+  *out = value;
+  return true;
+}
+static double measure_n(Font *font, const char *text, size_t length) {
   double w = 0;
   const unsigned char *p = (const unsigned char *)text;
   const unsigned char *end = p + length;
@@ -203,14 +324,15 @@ static double measure_n(FT_Face f, const char *text, size_t length) {
       p++;
       continue;
     }
-    if (!FT_Load_Char(f, (FT_ULong)c, FT_LOAD_DEFAULT))
-      w += (double)f->glyph->advance.x / 64;
+    double a;
+    if (advance(font, c, &a))
+      w += a;
     p += (size_t)n;
   }
   return w;
 }
-static double measure(FT_Face f, const char *text) {
-  return measure_n(f, text, strlen(text));
+static double measure(Font *font, const char *text) {
+  return measure_n(font, text, strlen(text));
 }
 static bool whitespace(utf8proc_int32_t c) {
   utf8proc_category_t t = utf8proc_category(c);
@@ -398,7 +520,7 @@ static void word(Inline *in, TaiNode *node, const char *s, size_t n) {
     *w = 0;
   }
   double size;
-  FT_Face f = face(l, node, in->pre, &size);
+  Font *f = face(l, node, in->pre, &size);
   if (!f) {
     release(b);
     return;
@@ -413,12 +535,11 @@ static void word(Inline *in, TaiNode *node, const char *s, size_t n) {
   double image_height = image ? fmax(1.0, round_ties_even(
       (double)image->height * 22.0 / (double)image->width)) : 0.0;
   b->ascent = image ? image_height :
-      (double)f->ascender * size / f->units_per_EM;
+      (double)f->face->ascender * size / f->face->units_per_EM;
   b->descent = image ? 0.0 :
-      -(double)f->descender * size / f->units_per_EM;
+      -(double)f->face->descender * size / f->face->units_per_EM;
   b->height = b->ascent + b->descent;
   b->space = in->pre ? 0 : measure(f, " ");
-  FT_Done_Face(f);
   if (!in->pre && in->cursor + b->width > in->block->width && in->line->count &&
       !newline(in)) {
     release(b);
@@ -477,7 +598,7 @@ static void inline_control(Inline *in, TaiNode *node) {
       TAI_CONTROL_TEXT;
 
   double size;
-  FT_Face f = face(layout, node, false, &size);
+  Font *f = face(layout, node, false, &size);
   if (!f) { release(box_control); return; }
   box_control->font_size = size;
   box_control->bold = !strcmp(property(node, "font-weight", "normal"), "bold") ||
@@ -495,15 +616,16 @@ static void inline_control(Inline *in, TaiNode *node) {
     box_control->width = fixed_px(property(node, "width", "auto"),
                                    &css_width) && css_width > 0.0
                              ? css_width : 200.0;
-    box_control->ascent = (double)f->ascender * size / f->units_per_EM;
-    box_control->descent = -(double)f->descender * size / f->units_per_EM;
+    box_control->ascent =
+        (double)f->face->ascender * size / f->face->units_per_EM;
+    box_control->descent =
+        -(double)f->face->descender * size / f->face->units_per_EM;
     box_control->height = box_control->ascent + box_control->descent;
     if (button) {
       char *contents = NULL;
       size_t length = 0;
       if (!node_text(node, &contents, &length)) {
         free(contents);
-        FT_Done_Face(f);
         release(box_control);
         layout->failed = true;
         return;
@@ -534,7 +656,6 @@ static void inline_control(Inline *in, TaiNode *node) {
       }
     }
   }
-  FT_Done_Face(f);
   if (layout->failed) { release(box_control); return; }
   if (in->cursor + box_control->width > in->block->width &&
       in->line->count && !newline(in)) {
@@ -778,6 +899,9 @@ void tai_layout_destroy(TaiLayout *l) {
   if (!l)
     return;
   release(l->root);
+  for (size_t i = 0; i < l->font_count; i++)
+    font_destroy(l->fonts[i]);
+  free(l->fonts);
   if (l->ft)
     FT_Done_FreeType(l->ft);
   if (l->fc)
@@ -903,7 +1027,9 @@ bool tai_layout_control_caret_index(const TaiLayout *layout, size_t node_id,
   if (!box_control || !box_control->word || document_x <= box_control->x)
     return box_control != NULL;
   double size;
-  FT_Face f = face((TaiLayout *)layout, box_control->node, false, &size);
+  /* The font cache is memoization, not observable layout state; the owning
+   * thread has exclusive access to the layout (see layout.h). */
+  Font *f = face((TaiLayout *)layout, box_control->node, false, &size);
   if (!f) return false;
   size_t offset = 0, codepoints = 0, length = strlen(box_control->word);
   double local_x = document_x - box_control->x;
@@ -914,16 +1040,14 @@ bool tai_layout_control_caret_index(const TaiLayout *layout, size_t node_id,
         (const utf8proc_uint8_t *)box_control->word + offset,
         (utf8proc_ssize_t)(length - offset), &codepoint);
     size_t next = offset + (used > 0 ? (size_t)used : 1);
-    double right = left;
-    if (used > 0 &&
-        !FT_Load_Char(f, (FT_ULong)codepoint, FT_LOAD_DEFAULT))
-      right += (double)f->glyph->advance.x / 64;
+    double right = left, width;
+    if (used > 0 && advance(f, codepoint, &width))
+      right += width;
     if (local_x < (left + right) / 2.0) break;
     offset = next;
     codepoints++;
     left = right;
   }
-  FT_Done_Face(f);
   if (index) *index = codepoints;
   return true;
 }

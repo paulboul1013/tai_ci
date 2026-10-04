@@ -4,6 +4,20 @@ import json, pathlib, subprocess, sys, tempfile, math
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 CASES=[('<p>Hello world</p>', 800), ('<div>first</div><div>second</div>', 800), ('<p>first<br>second</p>', 800), ('<pre>one\n\n  two\tthree</pre>', 800), ('<div style="width:80px">one two three four five</div>', 800), ('<p style="text-align:center">hello world</p>', 800), ('<p style="text-align:right">hello</p>', 800), ('<div style="height:0px">a</div><p>b</p>', 800), ('<div><i>A</i><b>B</b><p>C</p><i>D</i></div>', 800)]
 CASES += [('', 800), ('<p></p>', 800), ('<p>\u2003Hello\u00a0world</p>', 800), ('<p>soft\u00adhyphen</p>', 800), ('<p><b>Bold</b> <i>Italic</i> normal</p>', 800), ('<pre>long line never wraps despite width</pre>', 800), ('<div style="width:0px">zero width fallback</div>', 800), ('<div style="width:20px">overflowingword next</div>', 800), ('<p style="font-size:16.5px">ties even</p>', 800), ('<p style="font-size:17.5px">ties up</p>', 800), ('<p style="font-family:monospace">mono</p>', 800), ('<p>one two three four five six</p>', 80)]
+# Font cache keys: the same words alternate family, weight, slant and size,
+# and non-ASCII codepoints use the hashed advance table, so a key collision
+# or stale advance shows up as a width mismatch against the oracle.
+CASES += [('<p>office AV <b>office AV</b> <i>office AV</i> <b><i>office AV</i></b> office AV</p>'
+           '<p style="font-size:24px">office <b>office</b></p><p style="font-size:12px">office <i>office</i></p>'
+           '<p style="font-family:sans-serif">office caf\u00e9 na\u00efve \u4e2d\u6587 <b>caf\u00e9</b></p>'
+           '<pre>office caf\u00e9</pre><p>office caf\u00e9 \u4e2d\u6587</p>', 800)]
+# More than eight keys grow the font list; more than 32 distinct non-ASCII
+# codepoints rehash one font's advance table, and the last words reuse early
+# codepoints after the rehash; U+E000.. are unmapped (.notdef) codepoints.
+CASES += [(''.join(f'<p style="font-size:{n}px">size {n} <b>bold</b></p>' for n in range(10, 21))
+           + '<p>' + ' '.join(chr(c) * 2 for c in range(0xc0, 0x100))
+           + ' ' + chr(0xc0) * 3 + chr(0xc5) * 2 + ' ' + chr(0xd0) + chr(0xe7) + '</p>'
+           + '<p>a\ue000b \ue001\ue002</p>', 800)]
 def normalize(node):
     keys=('kind','x','y','width','height','word')
     return {**{k:node[k] for k in keys if k in node},'children':[normalize(n) for n in node['children']]}

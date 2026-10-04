@@ -54,7 +54,9 @@ bool tai_layout_visit(const TaiLayout *layout, TaiLayoutVisitor visitor,
 bool tai_layout_walk(const TaiLayout *layout, TaiLayoutTreeVisitor visitor,
                      void *opaque, char **error);
 /* Resolves the Python strict-midpoint caret rule for a current text/password
- * control. node_id is stable while its owning document lives. */
+ * control. node_id is stable while its owning document lives. It may fill the
+ * layout's private font cache, so the caller needs exclusive access to the
+ * layout even though it is passed as const. */
 bool tai_layout_control_caret_index(const TaiLayout *layout, size_t node_id,
                                     double document_x, size_t *index);
 #endif
