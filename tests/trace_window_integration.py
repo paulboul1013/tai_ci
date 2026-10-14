@@ -11,6 +11,13 @@ that the frozen oracle trace (tests/fixtures/trace_oracle.json) emits, and
 nest JavaScript inside the tasks that run it. Without BROWSER_TRACE_FILE, or
 with it empty, no file appears; an unwritable path exits 1.
 
+Cancelled requests must still close their async slices. A local server
+leaves /hang* requests unanswered until the browser has exited, so their `e`
+events can only come from the cancel and close paths: navigating away from a
+pending document, from a pending stylesheet and from a page with a pending
+asynchronous XHR, then closing the window during a load and with an XHR
+pending.
+
 A sanitizer build of tai-browser leaks only through the known fontconfig and
 cairo global caches and SDL's Xvfb XRandR probe, which are suppressed for
 LeakSanitizer.
@@ -18,6 +25,7 @@ LeakSanitizer.
     python3 tests/trace_window_integration.py TAI_BROWSER TEST_TRACE
 """
 
+import http.server
 import json
 import os
 import pathlib
@@ -25,6 +33,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 
@@ -34,6 +43,7 @@ PAGE = ROOT / "tests" / "fixtures" / "trace_window"
 ORACLE = ROOT / "tests" / "fixtures" / "trace_oracle.json"
 # Window coordinates of the heading's text in the 800x600 window.
 HEADING = (100, 101)
+ADDRESS = (400, 63)
 
 sys.path.insert(0, str(ROOT / "tests"))
 import trace_check  # noqa: E402
@@ -90,14 +100,24 @@ class Session:
         if check and result.returncode != 0:
             raise AssertionError("window_session {} failed:\n{}{}".format(
                 " ".join(args), result.stdout, result.stderr))
-        return result.stdout
+        return result.stdout if check else result
 
-    def start(self):
-        port = free_port()
+    def start(self, url=None):
+        """Serve PAGE and open its index.html, or open url from another server."""
         self.started = True
+        if url:
+            self.run("start", "--xvfb", "--bin", str(self.browser), "--url", url)
+            return
+        port = free_port()
         self.run("start", "--xvfb", "--port", str(port), "--fixture", str(PAGE),
                  "--bin", str(self.browser),
                  "--url", "http://127.0.0.1:{}/index.html".format(port))
+
+    def navigate(self, url):
+        self.run("click", *map(str, ADDRESS))
+        self.run("key", "End", "BackSpace*80")
+        self.run("type", url)
+        self.run("key", "Return")
 
     def wait_request(self, path, timeout=60):
         deadline = time.monotonic() + timeout
@@ -110,16 +130,79 @@ class Session:
     def stop(self):
         """Close the only window, then collect the exit status."""
         self.run("close")
-        output = self.run("stop", check=False)
-        self.started = False
-        if "browser exit=0" not in output:
+        result = self.run("stop", check=False)
+        if "browser exit=0" not in result.stdout:
             log = (self.directory / "browser.log").read_text(errors="replace")
-            raise AssertionError("browser did not exit cleanly:\n{}\n{}".format(
-                output, log[-4000:]))
+            raise AssertionError("browser did not exit cleanly (stop rc {}):\n{}{}\n{}".format(
+                result.returncode, result.stdout, result.stderr, log[-4000:]))
+        self.started = False
 
     def abandon(self):
         if self.started:
             self.run("stop", check=False)
+
+
+HANG_PAGES = {
+    "/hang.html": None,
+    "/hang.css": None,
+    "/hang.txt": None,
+    "/stall.html": '<link rel="stylesheet" href="/hang.css"><p>stall</p>',
+    "/xhr.html": "<p>xhr</p><script>var x = new XMLHttpRequest();"
+                 "x.open('GET', '/hang.txt', true); x.send();</script>",
+    "/done.html": "<p>done</p>",
+}
+
+
+class HangServer:
+    """127.0.0.1 server whose None pages stay unanswered until release()."""
+
+    def __init__(self):
+        self.seen = []
+        self.lock = threading.Lock()
+        self.released = threading.Event()
+        server = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                with server.lock:
+                    server.seen.append(self.path)
+                body = HANG_PAGES.get(self.path, "")
+                if body is None:
+                    server.released.wait(120)
+                    body = ""
+                data = body.encode()
+                try:
+                    self.send_response(200 if self.path in HANG_PAGES else 404)
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                except OSError:
+                    pass
+
+            def log_message(self, *args):
+                pass
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.httpd.daemon_threads = True
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+
+    def url(self, path):
+        return "http://127.0.0.1:{}{}".format(self.httpd.server_address[1], path)
+
+    def wait(self, path, timeout=60):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self.lock:
+                if path in self.seen:
+                    return
+            time.sleep(0.1)
+        raise AssertionError("browser never requested " + path)
+
+    def release(self):
+        self.released.set()
+        self.httpd.shutdown()
+        self.httpd.server_close()
 
 
 def sanitizer_env(directory):
@@ -191,6 +274,56 @@ def traced_run(browser, test_trace, root, env):
     return check_trace(trace, test_trace)
 
 
+def async_pairs(path):
+    """Validate the trace; return {async name: number of b/e pairs}."""
+    events = trace_check.load(path)
+    trace_check.check(events)
+    pairs = {}
+    for event in events[1:]:
+        if event["ph"] == "e":
+            pairs[event["name"]] = pairs.get(event["name"], 0) + 1
+    return pairs
+
+
+def cancel_run(browser, root, env, label, steps, expected):
+    """Run steps against a HangServer, stop the browser before any /hang*
+    request is answered, and compare the closed async slices."""
+    directory = root / label
+    directory.mkdir()
+    trace = directory / "t.json"
+    server = HangServer()
+    session = Session(browser, directory, root, dict(env, BROWSER_TRACE_FILE=str(trace)))
+    try:
+        session.start(server.url(steps[0][0]))
+        for page, waits in steps:
+            if page != steps[0][0]:
+                session.navigate(server.url(page))
+            for path in waits:
+                server.wait(path)
+        session.stop()
+    finally:
+        session.abandon()
+        server.release()
+    pairs = async_pairs(trace)
+    assert pairs == expected, "{}: closed async slices {} != {}".format(label, pairs, expected)
+
+
+def cancel_runs(browser, root, env):
+    cancel_run(browser, root, env, "navigate", [
+        ("/hang.html", ["/hang.html"]),
+        ("/xhr.html", ["/hang.txt"]),
+        ("/stall.html", ["/hang.css"]),
+        ("/done.html", ["/done.html"]),
+    ], {"Network I/O: document": 4, "Network I/O: asynchronous XHR": 1,
+        "resource_fetch[0]: style": 1})
+    cancel_run(browser, root, env, "close-loading", [
+        ("/stall.html", ["/hang.css"]),
+    ], {"Network I/O: document": 1, "resource_fetch[0]: style": 1})
+    cancel_run(browser, root, env, "close-xhr", [
+        ("/xhr.html", ["/hang.txt"]),
+    ], {"Network I/O: document": 1, "Network I/O: asynchronous XHR": 1})
+
+
 def untraced_run(browser, root, env, label, value):
     """The browser runs in an empty directory and must leave it empty."""
     directory = root / label
@@ -225,6 +358,7 @@ def main(argv):
         root = pathlib.Path(name)
         env = sanitizer_env(root)
         count = traced_run(browser, test_trace, root, env)
+        cancel_runs(browser, root, env)
         untraced_run(browser, root, env, "unset", None)
         untraced_run(browser, root, env, "empty", "")
         unwritable_run(browser, env)

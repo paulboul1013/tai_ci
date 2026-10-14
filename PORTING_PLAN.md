@@ -94,7 +94,7 @@
 | Paint / raster | display/raster → `src/render.c` | Cairo, layout | VALIDATING | render differential、PNG/key-region tests | remote/general images、WebP；見 [raster 契約](docs/reference-display-raster.md) |
 | JavaScript / events | JS runtime → `src/js.c` | QuickJS-NG, DOM, network | VALIDATING | 凍結 `runtime.js` 原文嵌入；JS DOM oracle differential／integration、bridge 配置故障與 JS heap 掃描（`js_dom_oom`）、cancellation、Xvfb 真實視窗 | `fetch`、capture phase、`parentNode` 等 runtime.js 沒有的 API；wrapper 不唯一（見 [綁定升級路線](docs/js-dom-plan.md)）；QuickJS OOM 修補待上游整合 |
 | Scheduling | tasks/clocks → `src/scheduler.c` | threads, network | VALIDATING | priority/FIFO/aging/generation tests | browser/network/frame integration |
-| Profiling / trace | `MeasureTime` → `src/trace.c`（`include/tai/trace.h`） | threads, core | VALIDATING | `trace`、`trace_format`（含多執行緒壓力）、`trace_oracle_probe`、Xvfb `trace_window_integration`（[2026-10-14 驗收](docs/acceptance/2026-10-14-trace.md)） | 導覽取消與關閉時仍有進行中請求的 `b`/`e` 配對只經閱讀確認、未有測試；多視窗與 `about:` 頁未追蹤驗證 |
+| Profiling / trace | `MeasureTime` → `src/trace.c`（`include/tai/trace.h`） | threads, core | VALIDATING | `trace`、`trace_format`（含多執行緒壓力）、`trace_oracle_probe`、Xvfb `trace_window_integration`（[2026-10-14 驗收](docs/acceptance/2026-10-14-trace.md)） | 多視窗與 `about:` 頁未追蹤驗證；導覽取消與關閉時進行中請求的 `b`/`e` 配對已有 Xvfb 測試 |
 | Browser / window | app/tab/chrome → `src/browser.c`, `src/session.c`, `src/tabset.c`, `src/presentation*.c`, `src/main.c` | page, threads, network, Cairo, SDL3 | VALIDATING | [acceptance](ACCEPTANCE.md)、[tabs oracle](tests/tabs_oracle_probe.py)、[new-window oracle](tests/new_window_oracle_probe.py)、[title oracle](tests/title_oracle_probe.py)、[mailto oracle](tests/mailto_oracle_probe.py)、native tab/window tests | 中鍵開新分頁（含中鍵 mailto）；整體 browser 驗收 |
 
 ## 依工作分支讀取
