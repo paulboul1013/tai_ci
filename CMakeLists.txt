@@ -69,7 +69,7 @@ add_custom_command(OUTPUT "${TAI_JS_SOURCES_HEADER}"
 add_library(tai_core src/core.c src/url.c src/dom.c src/css.c src/scheduler.c
   src/bookmarks.c
   src/js.c src/layout.c src/render.c src/network.c src/browser.c src/session.c
-  src/tabset.c "${TAI_JS_SOURCES_HEADER}")
+  src/tabset.c src/trace.c "${TAI_JS_SOURCES_HEADER}")
 target_include_directories(tai_core PUBLIC include)
 target_include_directories(tai_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_include_directories(tai_core PRIVATE "${UTF8PROC_INCLUDE_DIR}")
@@ -137,6 +137,12 @@ if(BUILD_TESTING)
   target_link_libraries(test_scheduler PRIVATE tai_core "${CMOCKA_LIBRARY}")
   target_compile_options(test_scheduler PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME scheduler COMMAND test_scheduler)
+  add_executable(test_trace tests/test_trace.c)
+  target_link_libraries(test_trace PRIVATE tai_core)
+  target_compile_options(test_trace PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME trace COMMAND test_trace)
+  add_test(NAME trace_format COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/trace_check.py" --format $<TARGET_FILE:test_trace>)
   add_executable(test_js tests/test_js.c)
   target_link_libraries(test_js PRIVATE tai_core)
   target_compile_options(test_js PRIVATE -Wall -Wextra -Wpedantic -Werror)
