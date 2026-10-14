@@ -1,0 +1,32 @@
+{
+  "threads": {
+    "Browser thread": [
+      "sdl_present"
+    ],
+    "Main thread": [
+      "Task: JSContext.dispatch_setinterval",
+      "Task: JSContext.dispatch_settimeout",
+      "Task: JSContext.dispatch_xhr_onload",
+      "Task: JSContext.run",
+      "Task: Tab._finish_document_load",
+      "Task: Tab._finish_page_resources",
+      "Task: Tab.click",
+      "Task: Tab.load",
+      "Task: Tab.run_animation_frame",
+      "commit",
+      "javascript",
+      "render"
+    ],
+    "Network I/O worker": [
+      "Network I/O: asynchronous XHR",
+      "Network I/O: document",
+      "Network I/O: synchronous XHR",
+      "resource_fetch[1]: style",
+      "resource_fetch[2]: script"
+    ],
+    "Networking thread": [],
+    "Raster-and-draw thread": [
+      "raster_and_draw"
+    ]
+  }
+}

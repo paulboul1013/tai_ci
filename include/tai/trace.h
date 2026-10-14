@@ -25,16 +25,20 @@ void tai_trace_close(void);
 void tai_trace_thread_name(const char *name);
 
 /* Closed vocabulary: one name table in trace.c, each name meaning the same
- * work as the Python event of that name. */
+ * work as the Python event of that name. tests/trace_oracle_probe.py checks
+ * every name against a frozen oracle trace (tests/fixtures/trace_oracle.json). */
 typedef enum {
     TAI_SPAN_JAVASCRIPT,
     TAI_SPAN_RENDER,
+    TAI_SPAN_TASK_LOAD,
+    TAI_SPAN_TASK_FINISH_DOCUMENT,
+    TAI_SPAN_TASK_FINISH_RESOURCES,
+    TAI_SPAN_TASK_SCRIPT,
     TAI_SPAN_TASK_ANIMATION_FRAME,
+    TAI_SPAN_TASK_CLICK,
     TAI_SPAN_TASK_SET_TIMEOUT,
     TAI_SPAN_TASK_SET_INTERVAL,
     TAI_SPAN_TASK_XHR_ONLOAD,
-    TAI_SPAN_TASK_FINISH_DOCUMENT,
-    TAI_SPAN_TASK_FINISH_RESOURCES,
     TAI_SPAN_SYNC_XHR,
     TAI_SPAN_RASTER_AND_DRAW,
     TAI_SPAN_SDL_PRESENT,
