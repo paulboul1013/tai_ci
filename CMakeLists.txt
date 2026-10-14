@@ -146,6 +146,9 @@ if(BUILD_TESTING)
   add_test(NAME trace_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/trace_oracle_probe.py" --check
     $<TARGET_FILE:test_trace>)
+  add_test(NAME trace_window_integration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/trace_window_integration.py"
+    $<TARGET_FILE:tai-browser> $<TARGET_FILE:test_trace>)
   add_executable(test_js tests/test_js.c)
   target_link_libraries(test_js PRIVATE tai_core)
   target_compile_options(test_js PRIVATE -Wall -Wextra -Wpedantic -Werror)
