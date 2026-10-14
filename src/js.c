@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tai/js.h"
 #include "tai/css.h"
+#include "tai/trace.h"
 #include "tai_js_sources.h"
 
 #include <errno.h>
@@ -74,6 +75,7 @@ static int interrupt_handler(JSRuntime *runtime, void *opaque) {
  * deadline instead of replacing or clearing it. */
 static void enter_js(TaiJsContext *js) {
     if (js->depth++ == 0) {
+        tai_trace_begin(TAI_SPAN_JAVASCRIPT);
         JS_UpdateStackTop(js->runtime);
         js->deadline = seconds_now() + 2.0;
         js->extended = 0.0;
@@ -81,7 +83,10 @@ static void enter_js(TaiJsContext *js) {
 }
 
 static void leave_js(TaiJsContext *js) {
-    if (--js->depth == 0) js->deadline = 0.0;
+    if (--js->depth == 0) {
+        js->deadline = 0.0;
+        tai_trace_end(TAI_SPAN_JAVASCRIPT);
+    }
 }
 
 static bool set_error(char **error, const char *message) {
@@ -1283,12 +1288,16 @@ bool tai_js_run_timers(TaiJsContext *js, double now, size_t budget,
             *timer = js->timers[--js->timer_count];
         }
         JSValue argument = JS_NewInt64(js->context, handle);
+        TaiTraceSpan span = interval ? TAI_SPAN_TASK_SET_INTERVAL
+                                     : TAI_SPAN_TASK_SET_TIMEOUT;
+        tai_trace_begin(span);
         if (interval)
             run_task(js, "runSetInterval", "setInterval callback crashed", 1,
                      &argument);
         else
             run_task(js, "runSetTimeout", "setTimeout callback crashed", 1,
                      &argument);
+        tai_trace_end(span);
         if (ran) (*ran)++;
     }
     return true;
@@ -1310,7 +1319,9 @@ bool tai_js_finish_xhr(TaiJsContext *js, uint64_t handle, const char *body,
     }
     JSValue arguments[2] = {JS_NewString(context, body),
                             JS_NewInt64(context, (int64_t)handle)};
+    tai_trace_begin(TAI_SPAN_TASK_XHR_ONLOAD);
     run_task(js, "runXHROnload", "XMLHttpRequest onload crashed", 2, arguments);
+    tai_trace_end(TAI_SPAN_TASK_XHR_ONLOAD);
     return true;
 }
 

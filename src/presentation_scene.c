@@ -1,4 +1,5 @@
 #include "presentation_internal.h"
+#include "tai/trace.h"
 
 static bool present_tabs_scene(SDL_Renderer *renderer,
                                SDL_Texture *page_texture,
@@ -168,12 +169,18 @@ bool tai_pres_repaint_tabs_scene(SDL_Renderer *renderer,
                               int height, bool update_page,
                               bool update_chrome,
                               const AddressEditor *editor, char **error) {
-  if (update_page && !update_tabs_page_texture(renderer, page_texture,
-          view, width, height, error)) return false;
-  if (update_chrome && !tai_pres_render_tabs_chrome_texture(renderer,
-          chrome_texture, view, width, editor, error)) return false;
-  if (!present_tabs_scene(renderer, *page_texture, *chrome_texture, view,
-                          width, height)) {
+  tai_trace_begin(TAI_SPAN_RASTER_AND_DRAW);
+  bool drawn = (!update_page || update_tabs_page_texture(renderer,
+                    page_texture, view, width, height, error)) &&
+               (!update_chrome || tai_pres_render_tabs_chrome_texture(renderer,
+                    chrome_texture, view, width, editor, error));
+  tai_trace_end(TAI_SPAN_RASTER_AND_DRAW);
+  if (!drawn) return false;
+  tai_trace_begin(TAI_SPAN_SDL_PRESENT);
+  bool presented = present_tabs_scene(renderer, *page_texture,
+                                      *chrome_texture, view, width, height);
+  tai_trace_end(TAI_SPAN_SDL_PRESENT);
+  if (!presented) {
     set_error(error, SDL_GetError());
     return false;
   }

@@ -2,6 +2,7 @@
 #include "tai/tabset.h"
 #include "tai/bookmarks.h"
 #include "tai/external.h"
+#include "tai/trace.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -138,6 +139,7 @@ struct AsyncJob {
     TaiRequest *request;    /* loader-only */
     double deadline;
     Loader *loader;
+    TaiTraceFetch trace;    /* loader-only; ends in async_finish */
 };
 
 /* Loader-thread state, on the loader's stack. */
@@ -285,6 +287,7 @@ static void xhr_done(void *opaque, TaiResponse *response) {
 
 static void async_finish(AsyncJob *job, TaiResponse *response,
                          const char *failure) {
+    tai_trace_fetch_end(&job->trace);
     tai_page_fetch_finish(job->fetch, response, failure);
     free(job);
 }
@@ -311,6 +314,7 @@ static void async_submit(Loader *loader, AsyncJob *job) {
     }
     const TaiPageFetchRequest *request = tai_page_fetch_request(job->fetch);
     job->loader = loader;
+    job->trace = tai_trace_fetch_begin(TAI_FETCH_ASYNC_XHR, 0);
     job->request = tai_network_submit(loader->network, request->url,
         request->referrer, request->payload, request->origin,
         request->referrer_policy, async_done, job);
@@ -426,10 +430,12 @@ static TaiResponse *loader_request(void *opaque, const TaiUrl *url,
     const char *policy, char **message) {
     LoadTask *task = opaque;
     TaiWaitStatus status = TAI_WAIT_CANCELLED;
+    tai_trace_begin(TAI_SPAN_SYNC_XHR);
     TaiResponse *response = task_cancelled(task) ? NULL
         : tai_network_request_until(task->loader->network, url, referrer,
               payload, origin, policy, TAI_XHR_TIMEOUT_SECONDS,
               loader_request_service, task, &status);
+    tai_trace_end(TAI_SPAN_SYNC_XHR);
     if (!response) *message = tai_page_net_wait_message(status);
     return response;
 }
@@ -456,7 +462,7 @@ static bool loader_start(void *opaque, TaiPageFetch *fetch) {
 
 /* ---- event-time page net (SDL side) ------------------------------------ */
 
-static TaiResponse *app_xhr_request(void *opaque, const TaiUrl *url,
+static TaiResponse *app_xhr_request_body(void *opaque, const TaiUrl *url,
     const TaiUrl *referrer, const char *payload, const char *origin,
     const char *policy, char **message) {
     TaiBrowserApp *app = opaque;
@@ -479,6 +485,16 @@ static TaiResponse *app_xhr_request(void *opaque, const TaiUrl *url,
     pthread_mutex_unlock(&app->mutex);
     if (!job.response) *message = tai_strdup(job.failure);
     return job.response;
+}
+
+static TaiResponse *app_xhr_request(void *opaque, const TaiUrl *url,
+    const TaiUrl *referrer, const char *payload, const char *origin,
+    const char *policy, char **message) {
+    tai_trace_begin(TAI_SPAN_SYNC_XHR);
+    TaiResponse *response = app_xhr_request_body(opaque, url, referrer,
+        payload, origin, policy, message);
+    tai_trace_end(TAI_SPAN_SYNC_XHR);
+    return response;
 }
 
 /* An event-time asynchronous XHR: queue it for the loader and return. */
@@ -528,6 +544,7 @@ static void load_task_start(Loader *loader, LoadTask *task) {
                       .cancelled = task_cancelled,
                       .start = loader_start,
                       .cookies = app->cookies, .userdata = task};
+    tai_trace_begin(TAI_SPAN_TASK_LOAD);
     TaiPageLoad *load = task->internal_markup
         ? tai_page_load_async_markup(network, url, task->internal_markup,
             app->default_css, task->width, task->height, app->rtl, &net,
@@ -535,6 +552,7 @@ static void load_task_start(Loader *loader, LoadTask *task) {
         : tai_page_load_async(network, url, referrer, task->body,
             app->default_css, task->width, task->height, app->rtl, &net,
             page_load_done, task, &error);
+    tai_trace_end(TAI_SPAN_TASK_LOAD);
     tai_url_destroy(url);
     tai_url_destroy(referrer);
     if (task->completed) {
@@ -586,6 +604,7 @@ static void cancel_or_reap_loads(TaiBrowserApp *app, TaiNetwork *network,
 
 static void *loader_main(void *opaque) {
     TaiBrowserApp *app = opaque;
+    tai_trace_thread_name("Loader thread");
     TaiNetwork *network = tai_network_create_with_jar(app->cookies);
     if (network && app->ca_file &&
         !tai_network_set_ca_file(network, app->ca_file)) {

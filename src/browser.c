@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tai/browser.h"
 #include "tai/css.h"
+#include "tai/trace.h"
 
 #include <limits.h>
 #include <math.h>
@@ -603,10 +604,12 @@ static bool page_apply_resources(TaiPage *page, Resource *resources,
              * script stopped by a cancelled navigation is not reported; the
              * next checkpoint ends the load. */
             char *script_error = NULL;
-            if (!tai_js_eval(page->javascript, resource->source,
-                             content ? content : "", &script_error) &&
-                (!page->net.checkpoint ||
-                 page->net.checkpoint(page->net.userdata)))
+            tai_trace_begin(TAI_SPAN_TASK_SCRIPT);
+            bool ran = tai_js_eval(page->javascript, resource->source,
+                                   content ? content : "", &script_error);
+            tai_trace_end(TAI_SPAN_TASK_SCRIPT);
+            if (!ran && (!page->net.checkpoint ||
+                         page->net.checkpoint(page->net.userdata)))
                 fprintf(stderr, "Script %s crashed %s\n", resource->source,
                         script_error ? script_error : "(no message)");
             free(script_error);
@@ -615,10 +618,7 @@ static bool page_apply_resources(TaiPage *page, Resource *resources,
     return true;
 }
 
-static bool page_finish_visual(TaiPage *page, char **error) {
-    if (!page_checkpoint(page, error)) return false;
-    /* Load-time scripts have finished; the first frame below includes them. */
-    page->dirty = false;
+static bool page_first_frame(TaiPage *page, char **error) {
     if (!tai_css_style(tai_document_root(page->document), page->styles, error))
         return false;
     page->layout = tai_layout_create(tai_document_root(page->document),
@@ -628,6 +628,16 @@ static bool page_finish_visual(TaiPage *page, char **error) {
         return false;
     page->display = tai_display_list_create(page->layout, error);
     return page->display != NULL;
+}
+
+static bool page_finish_visual(TaiPage *page, char **error) {
+    if (!page_checkpoint(page, error)) return false;
+    /* Load-time scripts have finished; the first frame below includes them. */
+    page->dirty = false;
+    tai_trace_begin(TAI_SPAN_RENDER);
+    bool ok = page_first_frame(page, error);
+    tai_trace_end(TAI_SPAN_RENDER);
+    return ok;
 }
 
 TaiPage *tai_page_load_request(TaiNetwork *network, const TaiUrl *url,
@@ -683,6 +693,7 @@ struct TaiPageLoadRequest {
     TaiRequest *request;
     size_t resource_index;
     bool document;
+    TaiTraceFetch trace;
     TaiPageLoadRequest *next;
 };
 
@@ -776,16 +787,30 @@ static char *network_error_markup(const TaiUrl *url, const char *message,
 
 static void page_load_request_done(void *opaque, TaiResponse *response);
 
+/* Python's resource index counts inline styles but not inline scripts, which
+ * it never runs (D6). */
+static size_t python_resource_index(const TaiPageLoad *load, size_t index) {
+    size_t inline_scripts = 0;
+    for (size_t i = 0; i < index; i++)
+        if (load->resources[i].kind == RESOURCE_SCRIPT && !load->resources[i].url)
+            inline_scripts++;
+    return index - inline_scripts;
+}
+
 static bool page_load_submit_resource(TaiPageLoad *load, size_t index) {
     TaiPageLoadRequest *request = calloc(1, sizeof(*request));
     if (!request) return false;
     request->load = load;
     request->resource_index = index;
     Resource *resource = &load->resources[index];
+    request->trace = tai_trace_fetch_begin(
+        resource->kind == RESOURCE_SCRIPT ? TAI_FETCH_SCRIPT : TAI_FETCH_STYLE,
+        python_resource_index(load, index));
     request->request = tai_network_submit(
         load->network, resource->url, load->url, NULL, NULL, NULL,
         page_load_request_done, request);
     if (!request->request) {
+        tai_trace_fetch_end(&request->trace);
         free(request);
         return false;
     }
@@ -809,6 +834,55 @@ static void page_load_finish_resources(TaiPageLoad *load) {
     page_load_complete(load, NULL);
 }
 
+/* Parses the document and submits its subresources, like Python's
+ * Tab._finish_document_load. */
+static void page_load_finish_document(TaiPageLoad *load, TaiResponse *response) {
+    if (!response) {
+        page_load_fail(load, "network response allocation failed");
+        return;
+    }
+    char *transport_error = response->error
+        ? tai_strdup(response->error) : NULL;
+    load->network_failure = response->error != NULL;
+    if (response->error) {
+        char *markup = network_error_markup(load->url, response->error,
+                                             response->certificate_error);
+        if (!markup) {
+            tai_response_destroy(response);
+            free(transport_error);
+            page_load_fail(load, "network error page allocation failed");
+            return;
+        }
+        free(response->body);
+        response->body = markup;
+        response->length = strlen(markup);
+    }
+    char *setup_error = NULL;
+    bool prepared = page_prepare_document(
+        load->page, load->url, response, load->default_css,
+        &load->resources, &load->resource_count, &setup_error);
+    tai_response_destroy(response);
+    if (!prepared) {
+        free(transport_error);
+        tai_page_destroy(load->page);
+        load->page = NULL;
+        page_load_complete(load, setup_error);
+        return;
+    }
+    for (size_t index = 0; index < load->resource_count; index++) {
+        if (load->resources[index].url)
+            (void)page_load_submit_resource(load, index);
+    }
+    if (!load->pending_resources) {
+        free(transport_error);
+        page_load_finish_resources(load);
+        return;
+    }
+    /* The error detail is intentionally not exposed as a window-fatal
+     * condition; the first-load error page itself is the visible result. */
+    free(transport_error);
+}
+
 static void page_load_request_done(void *opaque, TaiResponse *response) {
     TaiPageLoadRequest *request = opaque;
     TaiPageLoad *load = request->load;
@@ -817,60 +891,24 @@ static void page_load_request_done(void *opaque, TaiResponse *response) {
     if (*slot) *slot = request->next;
     bool document = request->document;
     size_t resource_index = request->resource_index;
+    tai_trace_fetch_end(&request->trace);
     free(request);
 
     if (document) {
-        if (!response) {
-            page_load_fail(load, "network response allocation failed");
-            return;
-        }
-        char *transport_error = response->error
-            ? tai_strdup(response->error) : NULL;
-        load->network_failure = response->error != NULL;
-        if (response->error) {
-            char *markup = network_error_markup(load->url, response->error,
-                                                 response->certificate_error);
-            if (!markup) {
-                tai_response_destroy(response);
-                free(transport_error);
-                page_load_fail(load, "network error page allocation failed");
-                return;
-            }
-            free(response->body);
-            response->body = markup;
-            response->length = strlen(markup);
-        }
-        char *setup_error = NULL;
-        bool prepared = page_prepare_document(
-            load->page, load->url, response, load->default_css,
-            &load->resources, &load->resource_count, &setup_error);
-        tai_response_destroy(response);
-        if (!prepared) {
-            free(transport_error);
-            tai_page_destroy(load->page);
-            load->page = NULL;
-            page_load_complete(load, setup_error);
-            return;
-        }
-        for (size_t index = 0; index < load->resource_count; index++) {
-            if (load->resources[index].url)
-                (void)page_load_submit_resource(load, index);
-        }
-        if (!load->pending_resources) {
-            free(transport_error);
-            page_load_finish_resources(load);
-            return;
-        }
-        /* The error detail is intentionally not exposed as a window-fatal
-         * condition; the first-load error page itself is the visible result. */
-        free(transport_error);
+        tai_trace_begin(TAI_SPAN_TASK_FINISH_DOCUMENT);
+        page_load_finish_document(load, response);
+        tai_trace_end(TAI_SPAN_TASK_FINISH_DOCUMENT);
         return;
     }
 
     Resource *resource = &load->resources[resource_index];
     resource->response = response;
     if (load->pending_resources) load->pending_resources--;
-    if (!load->pending_resources) page_load_finish_resources(load);
+    if (!load->pending_resources) {
+        tai_trace_begin(TAI_SPAN_TASK_FINISH_RESOURCES);
+        page_load_finish_resources(load);
+        tai_trace_end(TAI_SPAN_TASK_FINISH_RESOURCES);
+    }
 }
 
 TaiPageLoad *tai_page_load_async(TaiNetwork *network, const TaiUrl *url,
@@ -919,10 +957,12 @@ TaiPageLoad *tai_page_load_async(TaiNetwork *network, const TaiUrl *url,
     }
     request->load = load;
     request->document = true;
+    request->trace = tai_trace_fetch_begin(TAI_FETCH_DOCUMENT, 0);
     request->request = tai_network_submit(
         network, load->url, load->referrer, load->payload, NULL, NULL,
         page_load_request_done, request);
     if (!request->request) {
+        tai_trace_fetch_end(&request->trace);
         free(request);
         page_load_destroy(load);
         diagnostic(error, "page request submission failed");
@@ -1027,6 +1067,7 @@ void tai_page_load_async_cancel(TaiPageLoad *load) {
     while (request) {
         TaiPageLoadRequest *next = request->next;
         tai_network_cancel(load->network, request->request);
+        tai_trace_fetch_end(&request->trace);
         free(request);
         request = next;
     }
@@ -1234,7 +1275,7 @@ bool tai_page_set_scroll_y(TaiPage *page, double scroll_y) {
  * old layout/display pair alive until a self-contained replacement exists.
  * Styling can also fail after changing individual computed-style maps, so the
  * dirty bit remains set until the complete visual frame is available. */
-static bool rebuild_dirty_page(TaiPage *page, char **error) {
+static bool rebuild_dirty_page_body(TaiPage *page, char **error) {
     ScrollSnapshot snapshot = {0};
     TaiNode *root = tai_document_root(page->document);
     if (!node_count(root, &snapshot.count) ||
@@ -1278,6 +1319,13 @@ static bool rebuild_dirty_page(TaiPage *page, char **error) {
     tai_layout_destroy(old_layout);
     snapshot_destroy(&snapshot);
     return true;
+}
+
+static bool rebuild_dirty_page(TaiPage *page, char **error) {
+    tai_trace_begin(TAI_SPAN_RENDER);
+    bool ok = rebuild_dirty_page_body(page, error);
+    tai_trace_end(TAI_SPAN_RENDER);
+    return ok;
 }
 
 /* The layout borrows the DOM and is stale while page->dirty: script may have
@@ -1676,8 +1724,8 @@ TaiNode *tai_page_viewport_hit_test(const TaiPage *page, double x, double y,
     return tai_page_hit_test(page, x, y + page->scroll_y, hit);
 }
 
-bool tai_page_activate_viewport(TaiPage *page, double x, double y,
-                                bool *changed, char **error) {
+static bool activate_viewport_body(TaiPage *page, double x, double y,
+                                   bool *changed, char **error) {
     if (error) { free(*error); *error = NULL; }
     if (changed) *changed = false;
     if (!page || !page->document || !page->javascript || !page->styles ||
@@ -1776,11 +1824,20 @@ bool tai_page_activate_viewport(TaiPage *page, double x, double y,
     return true;
 }
 
+bool tai_page_activate_viewport(TaiPage *page, double x, double y,
+                                bool *changed, char **error) {
+    tai_trace_begin(TAI_SPAN_TASK_CLICK);
+    bool ok = activate_viewport_body(page, x, y, changed, error);
+    tai_trace_end(TAI_SPAN_TASK_CLICK);
+    return ok;
+}
+
 bool tai_page_needs_animation_frame(const TaiPage *page) {
     return page && page->animation_frame_requested;
 }
 
-bool tai_page_run_animation_frame(TaiPage *page, bool *changed, char **error) {
+static bool run_animation_frame_body(TaiPage *page, bool *changed,
+                                     char **error) {
     if (error) { free(*error); *error = NULL; }
     if (changed) *changed = false;
     if (!page || !page->document || !page->javascript || !page->styles ||
@@ -1794,6 +1851,13 @@ bool tai_page_run_animation_frame(TaiPage *page, bool *changed, char **error) {
     if (!rebuild_dirty_page(page, error)) return false;
     if (changed) *changed = true;
     return true;
+}
+
+bool tai_page_run_animation_frame(TaiPage *page, bool *changed, char **error) {
+    tai_trace_begin(TAI_SPAN_TASK_ANIMATION_FRAME);
+    bool ok = run_animation_frame_body(page, changed, error);
+    tai_trace_end(TAI_SPAN_TASK_ANIMATION_FRAME);
+    return ok;
 }
 
 double tai_page_next_task(const TaiPage *page) {

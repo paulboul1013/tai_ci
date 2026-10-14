@@ -2,6 +2,7 @@
 #include "tai/browser.h"
 #include "tai/presentation.h"
 #include "tai/tabset.h"
+#include "tai/trace.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -93,6 +94,19 @@ int main(int argc, char **argv) {
     (void)css_length;
     char *error = NULL;
     if (window) {
+        /* D-T1: Python always traces to BROWSER_TRACE_FILE or ./browser.trace;
+         * native traces only when the variable is set and non-empty. */
+        const char *trace_path = getenv("BROWSER_TRACE_FILE");
+        if (trace_path && *trace_path) {
+            if (!tai_trace_open(trace_path, &error)) {
+                fprintf(stderr, "trace failed: %s\n",
+                        error ? error : "allocation failed");
+                free(css);
+                free(error);
+                return 1;
+            }
+            tai_trace_thread_name("Browser thread");
+        }
         TaiBrowserApp *app = css ? tai_browser_app_create(css, rtl, &error)
                                  : NULL;
         bool success = app && tai_present_browser(
@@ -101,6 +115,8 @@ int main(int argc, char **argv) {
             fprintf(stderr, "window failed: %s\n",
                     error ? error : "tabbed window initialization failed");
         tai_browser_app_destroy(app);
+        /* After the loader thread has been joined: nothing emits past "]}". */
+        tai_trace_close();
         free(css);
         free(error);
         return success ? 0 : 1;
