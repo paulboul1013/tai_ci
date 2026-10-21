@@ -98,11 +98,19 @@ void tai_tabset_destroy(TaiTabSet *tabs);
  * Returns false with an error once TAI_MAX_TABS tabs are open. */
 bool tai_tabset_new_tab(TaiTabSet *tabs, char **error);
 bool tai_tabset_select(TaiTabSet *tabs, size_t index);
-/* Copies the intent's URL/body and targets the active tab at call time. */
+/* Copies the intent's URL/body and targets the active tab at call time.
+ * External intents and external address submissions (mailto:) start the
+ * app's external opener instead; tabs, history and pages stay unchanged, and
+ * false means the opener could not be started. */
 bool tai_tabset_navigate(TaiTabSet *tabs,
                          const TaiNavigationIntent *intent, char **error);
 bool tai_tabset_navigate_address(TaiTabSet *tabs, const char *text,
                                  char **error);
+/* Tests only: every tab set in this tab set's app sends external URLs to
+ * program (looked up in PATH, copied) instead of TAI_EXTERNAL_OPENER; NULL
+ * restores the default. tai-browser never calls this. */
+bool tai_tabset_set_external_opener_for_test(TaiTabSet *tabs,
+                                             const char *program);
 /* The active committed page alone may be toggled. Pending navigation disables
  * the control; all tabs share one collection owned by the tab set. */
 bool tai_tabset_toggle_bookmark(TaiTabSet *tabs, bool *bookmarked,

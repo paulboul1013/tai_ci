@@ -143,6 +143,10 @@ void tai_page_finish_fragment_change(TaiPage *page, bool committed);
 const char *tai_navigation_intent_url(const TaiNavigationIntent *intent);
 bool tai_navigation_intent_is_post(const TaiNavigationIntent *intent);
 const char *tai_navigation_intent_body(const TaiNavigationIntent *intent);
+/* A clicked link whose URL tai_url_is_external accepts: the owner hands the
+ * URL to another application instead of loading it. Form submissions to such
+ * URLs stay ordinary navigations, as in the oracle. */
+bool tai_navigation_intent_is_external(const TaiNavigationIntent *intent);
 void tai_navigation_intent_destroy(TaiNavigationIntent *intent);
 /* Applies an owned intent in the outer page/session owner. A candidate loads
  * with the current page URL as referrer and current viewport size. On failure

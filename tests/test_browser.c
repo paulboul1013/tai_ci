@@ -812,6 +812,38 @@ int main(void) {
     tai_page_destroy(fragment_page);
     tai_url_destroy(fragment_url);
 
+    /* A mailto link becomes an external intent with the fragment dropped,
+     * while a form submitting to mailto stays an ordinary navigation. */
+    TaiUrl *mailto_url = tai_url_parse(
+        "data:text/html,%3Ca%20href%3D%22mailto:a@example.com?s=1%23part%22%3Ego%3C/a%3E%3Cform%20action%3D%22mailto:f@example.com%22%3E%3Cbutton%3ESend%3C/button%3E%3C/form%3E");
+    TaiPage *mailto_page = tai_page_load(network, mailto_url,
+        "html {display:block} body {display:block} a {display:block}",
+        300.0, 100.0, false, &error);
+    assert(mailto_url && mailto_page && !error);
+    changed = false;
+    assert(tai_page_activate_viewport(mailto_page, 14.0, 21.0, &changed,
+                                      &error));
+    assert(!error);
+    intent = NULL;
+    assert(tai_page_take_navigation_intent(mailto_page, &intent));
+    assert(intent && tai_navigation_intent_is_external(intent));
+    assert(!strcmp(tai_navigation_intent_url(intent), "mailto:a@example.com?s=1"));
+    tai_navigation_intent_destroy(intent);
+    assert(!strcmp(tai_url_string(tai_page_url(mailto_page)),
+                   tai_url_string(mailto_url)));
+    TaiNode *mailto_button = find(tai_page_root(mailto_page), "button");
+    assert(mailto_button);
+    assert(activate_control(mailto_page, mailto_button, &changed, &error));
+    assert(!error);
+    intent = NULL;
+    assert(tai_page_take_navigation_intent(mailto_page, &intent));
+    assert(intent && !tai_navigation_intent_is_external(intent));
+    assert(!strcmp(tai_navigation_intent_url(intent),
+                   "mailto:f@example.com?"));
+    tai_navigation_intent_destroy(intent);
+    tai_page_destroy(mailto_page);
+    tai_url_destroy(mailto_url);
+
     check_script_mutation(network);
 
     tai_page_json(stdout, page);

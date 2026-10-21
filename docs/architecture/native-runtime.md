@@ -249,6 +249,21 @@ private, incompatible node layouts.
   before `pthread_create` and only read by the loader afterwards. Only
   integration tests call it: `tai-browser` never trusts a test CA and reads no
   environment variable for trust roots.
+- External URLs (`tai_url_is_external`: `mailto:` only, the oracle's
+  `URL.is_external`) never load. A clicked link to one leaves an intent with
+  `tai_navigation_intent_is_external()`; a form submission to one stays an
+  ordinary navigation that shows the fixed "External mail link" page, as in
+  Python. `tai_tabset_navigate` and `tai_tabset_navigate_address` hand an
+  external URL (serialized, so without fragment) to `tai_external_open` on the
+  SDL thread and change no tab, history or page. `tai_external_open`
+  (`src/external.c`) `posix_spawnp`s the app's opener (`xdg-open`; tests swap
+  it through `tai_tabset_set_external_opener_for_test`, which only the SDL
+  thread reads) with the URL as its only argument and no shell, in a new
+  session with stdin/stdout on `/dev/null`, stderr inherited and every other
+  descriptor closed. It does not wait: a detached thread reaps the child, and
+  a launch failure is an error the caller prints. `TaiSession` (single-page,
+  tests only) ignores external intents, so a mailto click changes nothing
+  there, and rejects external addresses.
 - Window resize updates every committed session page on the SDL thread. A
   pending candidate is resized to the latest viewport immediately before
   commit. Tab selection changes only the active index; it does not move page,

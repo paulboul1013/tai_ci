@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tai/tabset.h"
 #include "tai/bookmarks.h"
+#include "tai/external.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -65,6 +66,8 @@ struct TaiBrowserApp {
     const char *default_css;
     char *home_url;
     char *ca_file;
+    /* NULL selects TAI_EXTERNAL_OPENER. */
+    char *external_opener;
     TaiBookmarks *bookmarks;
     bool rtl;
     uint64_t next_tab_id;
@@ -803,6 +806,7 @@ static void app_free_state(TaiBrowserApp *app) {
     tai_bookmarks_destroy(app->bookmarks);
     free(app->home_url);
     free(app->ca_file);
+    free(app->external_opener);
     free(app->tabsets);
     free(app);
 }
@@ -947,6 +951,28 @@ void tai_browser_app_destroy(TaiBrowserApp *app) {
 
 const char *tai_browser_app_home_url(const TaiBrowserApp *app) {
     return app ? app->home_url : NULL;
+}
+
+bool tai_tabset_set_external_opener_for_test(TaiTabSet *tabs,
+                                             const char *program) {
+    char *copy = program ? tai_strdup(program) : NULL;
+    if (!tabs || (program && !copy)) {
+        free(copy);
+        return false;
+    }
+    free(tabs->app->external_opener);
+    tabs->app->external_opener = copy;
+    return true;
+}
+
+/* The oracle's URL.open_external, including its diagnostic line (stderr
+ * here, like other native diagnostics). The URL string drops any fragment. */
+static bool open_external(TaiTabSet *tabs, const char *url, char **error) {
+    if (!url) return set_error(error, "invalid external URL");
+    fprintf(stderr, "open external URL: %s\n", url);
+    const char *program = tabs->app->external_opener
+        ? tabs->app->external_opener : TAI_EXTERNAL_OPENER;
+    return tai_external_open(program, url, error);
 }
 
 TaiTabSet *tai_tabset_create_in_app(TaiBrowserApp *app, char **error) {
@@ -1097,6 +1123,9 @@ static bool navigate_url(TaiTabSet *tabs, const char *url, const char *body,
 bool tai_tabset_navigate(TaiTabSet *tabs,
                          const TaiNavigationIntent *intent, char **error) {
     if (error) { free(*error); *error = NULL; }
+    if (!tabs || !intent) return set_error(error, "invalid tab navigation");
+    if (tai_navigation_intent_is_external(intent))
+        return open_external(tabs, tai_navigation_intent_url(intent), error);
     return navigate_url(tabs, tai_navigation_intent_url(intent),
                         tai_navigation_intent_body(intent), error);
 }
@@ -1108,13 +1137,11 @@ bool tai_tabset_navigate_address(TaiTabSet *tabs, const char *text,
     char *url = tai_session_normalize_address(text);
     if (!url) return set_error(error, "address URL is malformed or unsupported");
     TaiUrl *parsed = tai_url_parse(url);
-    bool mailto = parsed && !strcmp(tai_url_scheme(parsed), "mailto");
+    bool ok = !parsed ? set_error(error, "address URL allocation failed")
+        : tai_url_is_external(parsed)
+        ? open_external(tabs, tai_url_string(parsed), error)
+        : navigate_url(tabs, url, NULL, error);
     tai_url_destroy(parsed);
-    if (mailto) {
-        free(url);
-        return set_error(error, "mailto requires an external application");
-    }
-    bool ok = navigate_url(tabs, url, NULL, error);
     free(url);
     return ok;
 }

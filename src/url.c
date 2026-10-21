@@ -92,6 +92,9 @@ void tai_url_destroy(TaiUrl *u) {
 bool tai_url_is_http(const TaiUrl *u) {
     return u && (!strcmp(u->scheme, "http") || !strcmp(u->scheme, "https"));
 }
+bool tai_url_is_external(const TaiUrl *u) {
+    return u && !strcmp(u->scheme, "mailto");
+}
 static bool supported(const char *s) {
     return !strcmp(s, "http") || !strcmp(s, "https") || !strcmp(s, "file") ||
         !strcmp(s, "data") || !strcmp(s, "about") || !strcmp(s, "mailto");

@@ -30,6 +30,7 @@ typedef struct {
 struct TaiNavigationIntent {
     char *url;
     char *body;
+    bool external;
 };
 
 /* Shared by the page (its list, one reference) and, once started, the owner
@@ -102,6 +103,10 @@ bool tai_navigation_intent_is_post(const TaiNavigationIntent *intent) {
 
 const char *tai_navigation_intent_body(const TaiNavigationIntent *intent) {
     return intent ? intent->body : NULL;
+}
+
+bool tai_navigation_intent_is_external(const TaiNavigationIntent *intent) {
+    return intent && intent->external;
 }
 
 static bool append(char **text, size_t *length, const char *part) {
@@ -1117,10 +1122,12 @@ void tai_page_finish_fragment_change(TaiPage *page, bool committed) {
 }
 
 static bool set_navigation_intent(TaiPage *page, const TaiUrl *url,
-                                  const char *body, char **error) {
+                                  const char *body, bool external,
+                                  char **error) {
     if (!page || !url) return true;
     TaiNavigationIntent *intent = calloc(1, sizeof(*intent));
     if (!intent) return diagnostic(error, "navigation intent allocation failed");
+    intent->external = external;
     intent->url = tai_strdup(tai_url_string(url));
     if (body) intent->body = tai_strdup(body);
     if (!intent->url || (body && !intent->body)) {
@@ -1569,7 +1576,7 @@ static bool submit_form(TaiPage *page, TaiNode *form, char **error) {
     bool post = method && ascii_case_equal(method, "post");
     bool ok;
     if (post) {
-        ok = set_navigation_intent(page, target, body, error);
+        ok = set_navigation_intent(page, target, body, false, error);
     } else {
         char *get_text = join_url_and_query(target, body, error);
         TaiUrl *get_target = get_text ? tai_url_parse(get_text) : NULL;
@@ -1579,7 +1586,7 @@ static bool submit_form(TaiPage *page, TaiNode *form, char **error) {
             tai_url_destroy(target);
             return diagnostic(error, "form GET URL allocation failed");
         }
-        ok = set_navigation_intent(page, get_target, NULL, error);
+        ok = set_navigation_intent(page, get_target, NULL, false, error);
         tai_url_destroy(get_target);
     }
     free(body);
@@ -1750,9 +1757,9 @@ bool tai_page_activate_viewport(TaiPage *page, double x, double y,
                             resolved = NULL;
                         }
                         else if (resolved &&
-                                 strcmp(tai_url_scheme(resolved), "mailto") &&
-                                 !set_navigation_intent(page, resolved, NULL,
-                                                       error)) {
+                                 !set_navigation_intent(
+                                     page, resolved, NULL,
+                                     tai_url_is_external(resolved), error)) {
                             tai_url_destroy(resolved);
                             return false;
                         }

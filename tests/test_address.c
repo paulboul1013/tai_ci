@@ -87,6 +87,25 @@ static void test_data_navigation_and_failure(void) {
          tai_session_history_length(session) == 2 &&
          tai_session_history_index(session) == 1);
   free(error);
+  error = NULL;
+
+  /* A clicked mailto link is an external intent: the session succeeds
+   * without loading, so a single-page host keeps running. */
+  assert(tai_session_navigate_address(session,
+      "data:text/html,<a href=\"mailto:a@example.invalid\">mail</a>", &error));
+  assert(!error && tai_session_history_length(session) == 3);
+  TaiPage *mail_page = tai_session_page(session);
+  bool changed = false;
+  assert(tai_page_activate_viewport(mail_page, 14.0, 21.0, &changed, &error));
+  assert(!error);
+  TaiNavigationIntent *intent = NULL;
+  assert(tai_page_take_navigation_intent(mail_page, &intent));
+  assert(intent && tai_navigation_intent_is_external(intent));
+  assert(tai_session_navigate(session, intent, &error) && !error);
+  assert(tai_session_page(session) == mail_page &&
+         tai_session_history_length(session) == 3 &&
+         tai_session_history_index(session) == 2);
+  tai_navigation_intent_destroy(intent);
   tai_session_destroy(session);
   tai_network_destroy(network);
 }

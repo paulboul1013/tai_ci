@@ -92,6 +92,9 @@ bool tai_session_navigate(TaiSession *session,
                           const TaiNavigationIntent *intent, char **error) {
     if (!session || !session->network || !session->page || !intent)
         return failure(error, "invalid session navigation");
+    /* No application to hand it to: the click leaves page and history as
+     * they are, which keeps single-page hosts running. */
+    if (tai_navigation_intent_is_external(intent)) return true;
     const char *text = tai_navigation_intent_url(intent);
     TaiUrl *url = text ? tai_url_parse(text) : NULL;
     if (!url) return failure(error, "navigation URL allocation failed");
@@ -223,7 +226,7 @@ bool tai_session_navigate_address(TaiSession *session, const char *text,
     TaiUrl *url = tai_url_parse(normalized);
     free(normalized);
     if (!url) return failure(error, "address URL allocation failed");
-    if (!strcmp(tai_url_scheme(url), "mailto")) {
+    if (tai_url_is_external(url)) {
         tai_url_destroy(url);
         return failure(error, "mailto requires an external application");
     }

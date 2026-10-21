@@ -135,7 +135,9 @@ Chrome y 小於 bottom 的 click 由 toolbar 處理；page y 不小於 bottom �
 dummy SDL 分頁迴圈逐欄比對 address／focused／dirty）。Back/Forward 按鈕使用
 session history availability 決定外觀與是否 traversal。普通文字以 DuckDuckGo query 導覽，
 URL-like 文字直接導覽；`about:blank` 的 query/path 形式保留輸入。地址列未聚焦時，Alt+Left/
-Alt+Right 送往 history callback。直接網址的拒絕策略、mailto 外部啟動與其他未實作控制項的
+Alt+Right 送往 history callback。地址列送出 `mailto:` 與點擊 mailto 連結時交給外部開啟器
+（`xdg-open`），不導覽、不改 history，草稿照常丟棄（見
+[native runtime](architecture/native-runtime.md)）。直接網址的拒絕策略與其他未實作控制項的
 範圍見 [migration plan](../PORTING_PLAN.md)。
 
 同一視窗的 `SDL_EVENT_MOUSE_WHEEL` 與 `SDL_EVENT_KEY_DOWN` 的 `PageUp`/`↑`、

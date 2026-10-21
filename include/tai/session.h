@@ -17,7 +17,10 @@ size_t tai_session_history_index(const TaiSession *session);
 /* Returns an owned history URL for an in-range index. */
 char *tai_session_history_url(const TaiSession *session, size_t index);
 /* All operations leave page and history unchanged if loading or allocation
- * fails. History stores only owned URL strings; traversal always uses GET. */
+ * fails. History stores only owned URL strings; traversal always uses GET.
+ * A session cannot start other applications: an external intent succeeds
+ * without changing anything, an external address submission fails, and
+ * TaiTabSet opens both instead. */
 bool tai_session_navigate(TaiSession *session,
                           const TaiNavigationIntent *intent, char **error);
 /* Returns an owned serialized URL following the Python Chrome address bar

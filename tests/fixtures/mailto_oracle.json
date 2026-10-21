@@ -1,0 +1,112 @@
+{
+  "address": {
+    "bare": {
+      "address": "http://127.0.0.1:<PORT>/a",
+      "dirty": false,
+      "focused": false,
+      "heading": "page-a",
+      "history": [
+        "http://127.0.0.1:<PORT>/a"
+      ],
+      "history_index": 0,
+      "opened": [
+        "mailto:"
+      ],
+      "requests": [],
+      "url": "http://127.0.0.1:<PORT>/a"
+    },
+    "padded_fragment": {
+      "address": "http://127.0.0.1:<PORT>/a",
+      "dirty": false,
+      "focused": false,
+      "heading": "page-a",
+      "history": [
+        "http://127.0.0.1:<PORT>/a"
+      ],
+      "history_index": 0,
+      "opened": [
+        "mailto:pad@example.com"
+      ],
+      "requests": [],
+      "url": "http://127.0.0.1:<PORT>/a"
+    },
+    "query": {
+      "address": "http://127.0.0.1:<PORT>/a",
+      "dirty": false,
+      "focused": false,
+      "heading": "page-a",
+      "history": [
+        "http://127.0.0.1:<PORT>/a"
+      ],
+      "history_index": 0,
+      "opened": [
+        "mailto:someone@example.com?subject=Hi"
+      ],
+      "requests": [],
+      "url": "http://127.0.0.1:<PORT>/a"
+    }
+  },
+  "cancelled": {
+    "clicked": {
+      "address": "http://127.0.0.1:<PORT>/cancel",
+      "dirty": false,
+      "focused": false,
+      "heading": "cancel",
+      "history": [
+        "http://127.0.0.1:<PORT>/cancel"
+      ],
+      "history_index": 0,
+      "opened": [],
+      "requests": [],
+      "url": "http://127.0.0.1:<PORT>/cancel"
+    }
+  },
+  "form": {
+    "submitted": {
+      "address": "mailto:form@example.com?q=hi",
+      "dirty": false,
+      "focused": false,
+      "heading": "External mail link",
+      "history": [
+        "http://127.0.0.1:<PORT>/form",
+        "mailto:form@example.com?q=hi"
+      ],
+      "history_index": 1,
+      "opened": [],
+      "requests": [],
+      "url": "mailto:form@example.com?q=hi"
+    }
+  },
+  "links": {
+    "fragment": {
+      "address": "typed draft",
+      "dirty": true,
+      "focused": false,
+      "heading": "links",
+      "history": [
+        "http://127.0.0.1:<PORT>/links"
+      ],
+      "history_index": 0,
+      "opened": [
+        "mailto:frag@example.com"
+      ],
+      "requests": [],
+      "url": "http://127.0.0.1:<PORT>/links"
+    },
+    "query": {
+      "address": "typed draft",
+      "dirty": true,
+      "focused": false,
+      "heading": "links",
+      "history": [
+        "http://127.0.0.1:<PORT>/links"
+      ],
+      "history_index": 0,
+      "opened": [
+        "mailto:someone@example.com?subject=Hello%20there"
+      ],
+      "requests": [],
+      "url": "http://127.0.0.1:<PORT>/links"
+    }
+  }
+}

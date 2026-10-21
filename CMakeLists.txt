@@ -67,7 +67,7 @@ add_custom_command(OUTPUT "${TAI_JS_SOURCES_HEADER}"
   COMMENT "Embedding JavaScript runtime sources" VERBATIM)
 
 add_library(tai_core src/core.c src/url.c src/dom.c src/css.c src/scheduler.c
-  src/bookmarks.c
+  src/bookmarks.c src/external.c
   src/js.c src/layout.c src/render.c src/network.c src/browser.c src/session.c
   src/tabset.c "${TAI_JS_SOURCES_HEADER}")
 target_include_directories(tai_core PUBLIC include)
@@ -289,6 +289,13 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/new_window_integration.py"
     $<TARGET_FILE:test_new_window>
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
+  add_executable(test_mailto_window tests/test_mailto_window.c)
+  target_link_libraries(test_mailto_window PRIVATE tai_presentation)
+  target_compile_options(test_mailto_window PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME mailto_integration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/mailto_integration.py"
+    $<TARGET_FILE:test_mailto_window>
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
   add_executable(test_tabset_history tests/test_tabset_history.c)
   target_link_libraries(test_tabset_history PRIVATE tai_core)
   target_compile_options(test_tabset_history PRIVATE -Wall -Wextra -Wpedantic -Werror)
@@ -310,6 +317,10 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/https_integration.py"
     $<TARGET_FILE:test_network> $<TARGET_FILE:test_tabset_secure>
     $<TARGET_FILE:test_tabs_secure_window>)
+  add_executable(test_external tests/test_external.c)
+  target_link_libraries(test_external PRIVATE tai_core)
+  target_compile_options(test_external PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME external_open COMMAND test_external)
   add_executable(test_address tests/test_address.c)
   target_link_libraries(test_address PRIVATE tai_core)
   target_compile_options(test_address PRIVATE -Wall -Wextra -Wpedantic -Werror)

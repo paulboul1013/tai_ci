@@ -6,7 +6,7 @@
 [新視窗（Ctrl+N）](docs/new-window-plan.md) 已實作並驗收（2026-09-29），`VALIDATING`，見下方第 5 項。
 其後的 [視窗標題跟隨頁面與改名 Tai Ci](docs/window-title-plan.md) 已實作並驗收（2026-09-29），
 `VALIDATING`，見下方第 6 項。其後的 [JS DOM 補齊](docs/js-dom-plan.md) 已實作並驗收（2026-10-04），
-`VALIDATING`，見下方第 7 項。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+`VALIDATING`，見下方第 7 項。其後的 `mailto:` 外部開啟已實作並驗收（2026-10-21），`VALIDATING`，見下方第 8 項。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 下一個垂直切片
 
@@ -20,8 +20,8 @@
    URL 改變時統一丟棄。證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 4. **驗收：完成（2026-09-28）。** 補上地址草稿的自動 oracle 比對（dummy SDL 分頁迴圈）與
    憑證錯誤後的 history 斷言；CTest、整套 ASan-UBSan-LSan、Xvfb 真實視窗串接操作與獨立審查
-   都通過，證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。剩餘差異都記在下表。整體 browser 尚未符合
-   [專案狀態規則](.agents/skills/project-records/SKILL.md) 的 `COMPLETE`：外部開啟仍未完成。
+   都通過，證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。剩餘差異都記在下表。外部開啟已由第 8 項補上；
+   整體 browser 仍待 [專案狀態規則](.agents/skills/project-records/SKILL.md) 的整體驗收才能標 `COMPLETE`。
    完整 chrome 視覺比對經使用者 2026-09-29 決定不做，外觀差異記在下表「Chrome 外觀」。
 5. **新視窗（Ctrl+N）：已實作，`VALIDATING`（2026-09-29）。** 依 [計畫](docs/new-window-plan.md)
    拆出共用的 `TaiBrowserApp`（loader、cookie、書籤）與單一 SDL 迴圈管理多視窗；
@@ -37,6 +37,12 @@
    同步與非同步 XHR、`requestAnimationFrame`、timer（D5）。`tests/js_dom_oracle_probe.py` 凍結 27 個
    情境＋11 個 scheduling 情境（共 38），`js_dom_differential`／`js_dom_integration` 逐點比對；收尾修正 DOM 深度
    造成的 segfault（D13）與大量 id 的平方時間。證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+8. **`mailto:` 外部開啟：已實作，`VALIDATING`（2026-10-21）。** 比照 Python `URL.is_external`／
+   `open_external`：地址列送出 `mailto:` 與左鍵點擊 mailto 連結都交給外部開啟器，不導覽、不改
+   history、不送請求，URL 去掉 fragment；`preventDefault` 的連結不開；表單 action 為 mailto 時仍
+   載入固定的「External mail link」頁。`tests/mailto_oracle_probe.py` 凍結 Python 5 個情境，
+   `tests/mailto_integration.py` 在 dummy SDL 分頁迴圈以假開啟器逐點比對 7 個檢查點。證據見
+   [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 已知差異與範圍
 
@@ -45,7 +51,7 @@
 | Tabs 上限與呈現 | 使用者指定最多 25 個 tabs；超寬時用等寬編號格。Python 無上限且讓文字換行。極窄格的可讀性仍待改善。 |
 | 載入失敗與 pending | 載入失敗（首次或之後、網路或憑證）兩者都在請求 URL 顯示錯誤頁：一般導覽截斷 forward 項目，Back/Forward 停在目標 index（使用者 2026-09-26 決定，取代原回滾策略）。Pending 期間 native 仍顯示舊 page 與其 scroll；Python 開始導覽時 scroll 已歸零。可見 URL、history 與按鈕狀態在 pending 期間兩者相同。 |
 | Pending 時按 Back | Python 已把 pending URL 寫入 history，Back 後它成為 forward 項目；native 取消尚未提交的導覽並丟掉該項目，Forward 不可用（使用者 2026-09-26 決定維持）。`tests/history_integration.py` 只對這兩個欄位套用此差異。 |
-| 地址與外部開啟 | Native 拒絕 malformed/unsupported 直接網址，尚未啟動 `mailto:` 外部程式；Python 的 URL 解析與外部啟動不同。一般文字仍轉為 DuckDuckGo 查詢。 |
+| 地址與外部開啟 | Native 拒絕 malformed/unsupported 直接網址；一般文字仍轉為 DuckDuckGo 查詢。`mailto:` 的開啟時機、URL 與 history 行為與 Python 相同（`tests/mailto_integration.py`）。使用者 2026-10-21 決定：只用 `xdg-open`（Python `webbrowser` 先看 `$BROWSER` 再依序嘗試多個瀏覽器）、點擊不先詢問（同 Python）。診斷 `open external URL: <url>` 寫到 stderr（Python stdout，同 D1）；Python 的第二行 `webbrowser.open returned: …` 不輸出，啟動失敗時改印 `link navigation failed: could not start xdg-open: …`（地址列為 `address navigation failed: …`）。開啟器不經 shell、在新 session 執行，stdin／stdout 接 `/dev/null`；`xdg-open` 自身的結束狀態兩邊都不觀察。Python 中鍵點 mailto 也會外部開啟；native 尚未移植中鍵開新分頁，所以中鍵無動作。 |
 | 快捷鍵與 wheel | Native 在地址欄未聚焦時支援 Alt+Left/Alt+Right（Python 沒有 history 快捷鍵）；Ctrl+N 見下列「新視窗」；尚無 Escape 專用操作。未知 wheel direction 或非有限 y 為 no-op，與 frozen Python 不同。 |
 | 視覺效果像素 | 使用者 2026-10-14 決定不做 Python（Skia）與 native（Cairo）的逐像素 raster 比對：兩邊的 raster 函式庫不同，混色精度、反鋸齒與 blur 演算法本就不會逐像素相同。Opacity、`#rrggbbaa`、`mix-blend-mode`、`overflow` 圓角裁切、blur 與效果順序以 display-list 結構 oracle（`display_differential`、`hit_differential`、`blur_oracle_probe`）加 native key-pixel 測試（`tests/test_render.c`）驗證，見 [raster 契約](docs/reference-display-raster.md)。 |
 | History 保存 | 兩者均保存 URL，Back/Forward 以 GET 重載（含 POST 結果頁與同頁 fragment 項目，重新 GET 後捲到 fragment）；不保存 POST body、舊 DOM 或 scroll snapshot。跨 tab 與 pending 狀態已由 history oracle 比對。 |
@@ -69,7 +75,7 @@
 | `innerHTML` 字串含 U+0000 | Python 把 NUL 當一般字元留在文字節點（`'a\u0000b<i>c</i>'` 解析成文字 `a\x00b` 與 `<i>`）；native HTML parser 以 NUL 結尾的 C 字串為輸入，`innerHTML` 設定值在第一個 NUL 處截斷（同例只剩文字 `a`）。影響：只有腳本刻意放入 NUL 的頁面可觀察；要消除須讓 parser 與 `TaiNode` 文字改為帶長度的字串。以臨時 oracle probe 實跑確認（切片 3 紀錄），未列入固定情境。 |
 | 窄寬地址欄 | Tabbed Chrome 把地址欄寬度夾限為不超過視窗寬度，<100px 時仍看得到收藏星；Python 與單頁 Chrome 固定最小 100px，右端會超出視窗。安全頁面欄位右移 30px 後同樣夾限：Python 在 232–261px 與 <130px 時右端超出視窗，native 不超出。 |
 
-書籤、新視窗與外部網址啟動是不同邊界；書籤、history 與新視窗已實作。精確幾何與事件路由在 [presentation 契約](docs/reference-presentation.md)，page/session/SDL/loader 所有權在 [native runtime](docs/architecture/native-runtime.md)。
+書籤、新視窗與外部網址啟動是不同邊界；書籤、history、新視窗與 `mailto:` 外部開啟已實作。精確幾何與事件路由在 [presentation 契約](docs/reference-presentation.md)，page/session/SDL/loader 所有權在 [native runtime](docs/architecture/native-runtime.md)。
 
 ## 子系統地圖
 
@@ -86,7 +92,7 @@
 | JavaScript / events | JS runtime → `src/js.c` | QuickJS-NG, DOM, network | VALIDATING | 凍結 `runtime.js` 原文嵌入；JS DOM oracle differential／integration、bridge 配置故障與 JS heap 掃描（`js_dom_oom`）、cancellation、Xvfb 真實視窗 | `fetch`、capture phase、`parentNode` 等 runtime.js 沒有的 API；wrapper 不唯一（見 [綁定升級路線](docs/js-dom-plan.md)）；QuickJS OOM 修補待上游整合 |
 | Scheduling | tasks/clocks → `src/scheduler.c` | threads, network | VALIDATING | priority/FIFO/aging/generation tests | browser/network/frame integration |
 | Profiling / trace | `MeasureTime`（`BROWSER_TRACE_FILE`，Chrome／Perfetto JSON）→ 尚無 | threads | NOT_ANALYZED | — | oracle 會寫 `browser.trace`，native 沒有；待另開切片移植（native-stack 已核准 Perfetto 相容 tracing） |
-| Browser / window | app/tab/chrome → `src/browser.c`, `src/session.c`, `src/tabset.c`, `src/presentation*.c`, `src/main.c` | page, threads, network, Cairo, SDL3 | VALIDATING | [acceptance](ACCEPTANCE.md)、[tabs oracle](tests/tabs_oracle_probe.py)、[new-window oracle](tests/new_window_oracle_probe.py)、[title oracle](tests/title_oracle_probe.py)、native tab/window tests | `mailto:` 外部開啟 |
+| Browser / window | app/tab/chrome → `src/browser.c`, `src/session.c`, `src/tabset.c`, `src/presentation*.c`, `src/main.c` | page, threads, network, Cairo, SDL3 | VALIDATING | [acceptance](ACCEPTANCE.md)、[tabs oracle](tests/tabs_oracle_probe.py)、[new-window oracle](tests/new_window_oracle_probe.py)、[title oracle](tests/title_oracle_probe.py)、[mailto oracle](tests/mailto_oracle_probe.py)、native tab/window tests | 中鍵開新分頁（含中鍵 mailto）；整體 browser 驗收 |
 
 ## 依工作分支讀取
 

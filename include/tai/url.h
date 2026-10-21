@@ -22,5 +22,8 @@ const char *tai_url_origin(const TaiUrl *url);
 long long tai_url_port(const TaiUrl *url);
 bool tai_url_view_source(const TaiUrl *url);
 bool tai_url_is_http(const TaiUrl *url);
+/* The oracle's URL.is_external: links and addresses with this scheme go to
+ * another application instead of loading. Only mailto qualifies. */
+bool tai_url_is_external(const TaiUrl *url);
 void tai_url_json(FILE *out, const TaiUrl *url);
 #endif

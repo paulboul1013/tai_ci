@@ -79,6 +79,7 @@ Public interfaces generally share a name with their implementation; internal fil
 | `session.h` / `session.c` | committed page, URL history, address normalization and page commits |
 | `tabset.h` / `tabset.c` | `TaiBrowserApp` (shared loader/network, bookmarks, tab IDs) and per-window `TaiTabSet`: ordered tabs, async load ownership, generation-checked completion routing, `about:bookmarks` page |
 | `bookmarks.h` / `bookmarks.c` | sorted bookmark collection, snapshots, atomic per-user file persistence |
+| `external.h` / `external.c` | starts the external opener (`xdg-open`) for `mailto:` URLs without a shell or waiting |
 | `main.c` | `tai-browser` JSON/screenshot/`--window` CLI |
 | `html_entities.inc` | generated named-entity lookup included by `dom.c` |
 
@@ -158,6 +159,12 @@ single-page presentation APIs remain available to callers.
   compares them with `test_page_title.c` (`tai_page_title()` per markup page)
   and `test_title_window.c` (SDL titles in the dummy-SDL multi-window loop).
   `fixtures/title_window/` serves the real-window check.
+- `mailto_fixture.py` serves 127.0.0.1 pages with mailto links, a cancelled
+  link and a mailto form; `mailto_oracle_probe.py` and
+  `fixtures/mailto_oracle.json` freeze what Python hands to `webbrowser.open`
+  next to tab, history and address state; `mailto_integration.py` compares
+  them with `test_mailto_window.c` (dummy-SDL tabbed loop, fake opener).
+  `test_external.c` checks the spawn contract.
 - `js_page_fixture.py` serves 127.0.0.1 pages whose external scripts mutate
   the DOM and title, with click/keydown scenarios; `js_page_oracle_probe.py`
   and `fixtures/js_page_oracle.json` freeze the Python Tab's DOM, title,
