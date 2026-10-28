@@ -40,9 +40,10 @@ ctest --test-dir build -R '^presentation_dummy$' --output-on-failure
 ctest --test-dir build --output-on-failure -j 3                    # 全部（約 1 分鐘）
 ```
 
-- **過期物件陷阱：** WSL2 時鐘會倒退，原始碼 mtime 可能早於既有 `.o`，Ninja 會沉默沿用舊物件。
-  編輯後建置前先 `touch` 改過的檔案（Claude Code 已有 hook 自動處理），可疑時以
-  `grep -a -c '<新字串>' build/<target>` 確認產物。
+- **過期物件陷阱：** WSL2 時鐘會倒退，原始碼 mtime 可能早於既有 `.o`，Ninja 會沉默沿用舊物件；
+  `touch` 無效（「現在」本身就在過去）。編輯後建置前執行 `tests/tools/clear_stale_objects.sh`
+  （預設處理自 HEAD 以來改過的檔案，刪除依賴它們的物件檔；Claude Code 的 hook 會逐檔自動執行），
+  可疑時以 `grep -a -c '<新字串>' build/<target>` 確認產物。
 - CTest 名稱不等於執行檔名稱（`test_presentation`→`presentation_dummy`、`test_browser`→
   `browser_headless`、`test_chrome`→`presentation_chrome`）；對照見 `CMakeLists.txt`。
 - `*_differential`／`*_integration`／`*_oracle_probe` 是 Python 驅動，會跑凍結的 oracle。
