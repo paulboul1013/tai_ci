@@ -40,36 +40,39 @@ void tai_pres_pointer_event_to_pixels(SDL_Window *window,
   event->button.y = (float)y;
 }
 
-static bool scroll_page(TaiPage *page, double delta) {
-  double old_scroll = tai_page_scroll_y(page);
-  double proposed = old_scroll + delta;
-  if (!isfinite(proposed) || !tai_page_set_scroll_y(page, proposed)) return false;
-  return tai_page_scroll_y(page) != old_scroll;
-}
-
+/* Every scroll input goes through tai_page_scroll_by, so a click-chosen
+ * overflow container takes it before the page. PageUp/PageDown are native
+ * additions routed like Up/Down (PORTING_PLAN.md). */
 static bool handle_scroll_event(TaiPage *page, const SDL_Event *event,
-                                SDL_WindowID window_id) {
+                                SDL_WindowID window_id, bool *changed,
+                                char **error) {
+  double delta;
   if (event->type == SDL_EVENT_MOUSE_WHEEL) {
     if (event->wheel.windowID != window_id || !isfinite(event->wheel.y))
-      return false;
+      return true;
     double wheel_y = event->wheel.y;
     if (event->wheel.direction == SDL_MOUSEWHEEL_FLIPPED)
       wheel_y = -wheel_y;
     else if (event->wheel.direction != SDL_MOUSEWHEEL_NORMAL)
-      return false;
+      return true;
     /* The frozen SDL2 oracle converts wheel y to int before selecting a
      * single 100px step, so fractional SDL3 wheel deltas remain no-ops. */
-    if (wheel_y >= 1.0) return scroll_page(page, -TAI_PRESENTATION_SCROLL_STEP);
-    if (wheel_y <= -1.0) return scroll_page(page, TAI_PRESENTATION_SCROLL_STEP);
-    return false;
+    if (wheel_y >= 1.0) delta = -TAI_PRESENTATION_SCROLL_STEP;
+    else if (wheel_y <= -1.0) delta = TAI_PRESENTATION_SCROLL_STEP;
+    else return true;
+  } else if (event->type == SDL_EVENT_KEY_DOWN &&
+             event->key.windowID == window_id &&
+             (event->key.key == SDLK_PAGEUP || event->key.key == SDLK_UP)) {
+    delta = -TAI_PRESENTATION_SCROLL_STEP;
+  } else if (event->type == SDL_EVENT_KEY_DOWN &&
+             event->key.windowID == window_id &&
+             (event->key.key == SDLK_PAGEDOWN ||
+              event->key.key == SDLK_DOWN)) {
+    delta = TAI_PRESENTATION_SCROLL_STEP;
+  } else {
+    return true;
   }
-  if (event->type != SDL_EVENT_KEY_DOWN || event->key.windowID != window_id)
-    return false;
-  if (event->key.key == SDLK_PAGEUP || event->key.key == SDLK_UP)
-    return scroll_page(page, -TAI_PRESENTATION_SCROLL_STEP);
-  if (event->key.key == SDLK_PAGEDOWN || event->key.key == SDLK_DOWN)
-    return scroll_page(page, TAI_PRESENTATION_SCROLL_STEP);
-  return false;
+  return tai_page_scroll_by(page, delta, changed, error);
 }
 
 /* This is deliberately a narrow SDL adapter: TaiPage owns coordinate
@@ -108,13 +111,11 @@ bool tai_pres_handle_page_event(TaiPage *page, const SDL_Event *event,
       case SDLK_RIGHT: key = TAI_PAGE_KEY_RIGHT; break;
       case SDLK_RETURN: key = TAI_PAGE_KEY_RETURN; break;
       default:
-        *changed = handle_scroll_event(page, event, window_id);
-        return true;
+        return handle_scroll_event(page, event, window_id, changed, error);
     }
     return tai_page_key(page, key, changed, error);
   }
-  *changed = handle_scroll_event(page, event, window_id);
-  return true;
+  return handle_scroll_event(page, event, window_id, changed, error);
 }
 
 bool tai_pres_sync_text_input(SDL_Window *window, const TaiPage *page,

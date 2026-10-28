@@ -1,0 +1,150 @@
+{
+  "cancelled": {
+    "box": {
+      "containers": {
+        "box": 100.0,
+        "cancel": 0
+      },
+      "page": 0
+    },
+    "cancelled": {
+      "containers": {
+        "box": 100.0,
+        "cancel": 0
+      },
+      "page": 100
+    }
+  },
+  "chrome": {
+    "box": {
+      "containers": {
+        "box": 100.0
+      },
+      "page": 0
+    },
+    "chrome": {
+      "containers": {
+        "box": 100.0
+      },
+      "page": 100
+    }
+  },
+  "container": {
+    "clicked": {
+      "containers": {
+        "box": 0
+      },
+      "page": 0
+    },
+    "key_down": {
+      "containers": {
+        "box": 120.00000655651093
+      },
+      "page": 0
+    },
+    "key_up": {
+      "containers": {
+        "box": 0
+      },
+      "page": 0
+    },
+    "limit": {
+      "containers": {
+        "box": 120.00000655651093
+      },
+      "page": 0
+    },
+    "past_limit": {
+      "containers": {
+        "box": 120.00000655651093
+      },
+      "page": 0
+    },
+    "wheel_down": {
+      "containers": {
+        "box": 100.0
+      },
+      "page": 0
+    },
+    "wheel_up": {
+      "containers": {
+        "box": 20.000006556510925
+      },
+      "page": 0
+    }
+  },
+  "flat": {
+    "restyled": {
+      "containers": {
+        "flat": 0,
+        "gone": 0
+      },
+      "page": 100
+    }
+  },
+  "fragment": {
+    "box": {
+      "containers": {
+        "box": 100.0
+      },
+      "page": 358.0000071525574
+    },
+    "clicked": {
+      "containers": {
+        "box": 0
+      },
+      "page": 358.0000071525574
+    }
+  },
+  "gone": {
+    "removed": {
+      "containers": {
+        "flat": 0
+      },
+      "page": 100
+    }
+  },
+  "navigation": {
+    "page": {
+      "containers": {},
+      "page": 100
+    }
+  },
+  "nested": {
+    "inner": {
+      "containers": {
+        "inner": 80.00000417232513,
+        "outer": 0
+      },
+      "page": 0
+    },
+    "outer": {
+      "containers": {
+        "inner": 80.00000417232513,
+        "outer": 90.00000536441803
+      },
+      "page": 0
+    },
+    "outer_limit": {
+      "containers": {
+        "inner": 80.00000417232513,
+        "outer": 90.00000536441803
+      },
+      "page": 0
+    }
+  },
+  "outside": {
+    "outside": {
+      "containers": {
+        "box": 0
+      },
+      "page": 100
+    },
+    "unclicked": {
+      "containers": {
+        "box": 0
+      },
+      "page": 100
+    }
+  }
+}

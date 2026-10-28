@@ -173,6 +173,12 @@ TaiNode *tai_page_hit_test(const TaiPage *page, double x, double y,
 double tai_page_scroll_y(const TaiPage *page);
 double tai_page_max_scroll_y(const TaiPage *page);
 bool tai_page_set_scroll_y(TaiPage *page, double scroll_y);
+/* Python Tab.scroll_by. Scrolls the overflow container the last unprevented
+ * click chose, clamped and rebuilding the frame; at its limit nothing moves.
+ * Without one, or once it has left the layout (the choice is then dropped),
+ * scrolls the page like tai_page_set_scroll_y. */
+bool tai_page_scroll_by(TaiPage *page, double delta, bool *changed,
+                        char **error);
 /* Converts viewport coordinates to document coordinates exactly once, then
  * resolves the hit while the page owns its document. */
 TaiNode *tai_page_viewport_hit_test(const TaiPage *page, double x, double y,
@@ -214,7 +220,7 @@ double tai_page_next_task(const TaiPage *page);
 bool tai_page_run_tasks(TaiPage *page, double now, size_t budget,
                         bool *changed, char **error);
 /* Clear the currently focused page control, rebuilding its display list when
- * focus styling changes. */
+ * focus styling changes. Also drops the click-chosen scroll container. */
 bool tai_page_blur_input(TaiPage *page, bool *changed, char **error);
 /* Inserts sanitized UTF-8 text into the focused text/password control. Cursor
  * positions are Unicode code-point indexes, never byte indexes. */

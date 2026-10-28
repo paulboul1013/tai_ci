@@ -258,6 +258,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/new_window_oracle_probe.py" --check)
   add_test(NAME middle_click_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/middle_click_oracle_probe.py" --check)
+  add_test(NAME overflow_scroll_oracle_probe COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/overflow_scroll_oracle_probe.py" --check)
   add_test(NAME title_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/title_oracle_probe.py" --check)
   add_test(NAME js_dom_oracle_probe COMMAND "${Python3_EXECUTABLE}"
@@ -316,6 +318,14 @@ if(BUILD_TESTING)
   add_test(NAME middle_click_integration COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/middle_click_integration.py"
     $<TARGET_FILE:test_middle_click_window>
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
+  add_executable(test_overflow_scroll_window
+    tests/test_overflow_scroll_window.c)
+  target_link_libraries(test_overflow_scroll_window PRIVATE tai_presentation)
+  target_compile_options(test_overflow_scroll_window PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME overflow_scroll_integration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/overflow_scroll_integration.py"
+    $<TARGET_FILE:test_overflow_scroll_window>
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
   add_executable(test_tabset_history tests/test_tabset_history.c)
   target_link_libraries(test_tabset_history PRIVATE tai_core)

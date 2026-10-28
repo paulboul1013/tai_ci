@@ -72,6 +72,9 @@ struct TaiPage {
      * that replaces the page drops it. */
     bool animation_frame_requested;
     TaiNode *focused;
+    /* Python Tab.scroll_focus: the overflow container a click chose. Borrowed
+     * like focused (D2); it may leave the layout, which scrolling detects. */
+    TaiNode *scroll_focus;
     TaiNavigationIntent *navigation;
     char *fragment_change;
     TaiUrl *fragment_previous_url;
@@ -1745,6 +1748,119 @@ bool tai_page_link_at_viewport(TaiPage *page, double x, double y, char **url,
     return true;
 }
 
+/* Python Tab.scrollable_ancestor: the innermost scrollable block enclosing
+ * the hit layout object. A display hit names only its node, so the first
+ * layout item for that node stands in for the hit object. */
+typedef struct {
+    const TaiNode *target;
+    const TaiNode **open;
+    size_t open_count, open_capacity;
+    const TaiNode *found;
+    bool failed;
+} ScrollCandidate;
+
+/* Matches render.c's is_scroll_container. */
+static bool is_scroll_container(const TaiLayoutItem *item) {
+    return item->kind == TAI_LAYOUT_BLOCK && item->scrollable;
+}
+
+static bool scroll_candidate_visit(const TaiLayoutItem *item,
+                                   TaiLayoutVisitEvent event, void *opaque) {
+    ScrollCandidate *search = opaque;
+    if (event == TAI_LAYOUT_LEAVE) {
+        if (is_scroll_container(item)) search->open_count--;
+        return true;
+    }
+    if (is_scroll_container(item)) {
+        if (search->open_count == search->open_capacity) {
+            size_t capacity = search->open_capacity ?
+                              search->open_capacity * 2 : 8;
+            const TaiNode **open = capacity <= SIZE_MAX / sizeof(*open) ?
+                realloc(search->open, capacity * sizeof(*open)) : NULL;
+            if (!open) {
+                search->failed = true;
+                return false;
+            }
+            search->open = open;
+            search->open_capacity = capacity;
+        }
+        search->open[search->open_count++] = item->node;
+    }
+    if (item->node != search->target) return true;
+    search->found = search->open_count ?
+                    search->open[search->open_count - 1] : NULL;
+    return false;
+}
+
+static bool scroll_candidate(const TaiPage *page, const TaiNode *hit,
+                             TaiNode **candidate, char **error) {
+    ScrollCandidate search = {.target = hit};
+    char *walk_error = NULL;
+    (void)tai_layout_walk(page->layout, scroll_candidate_visit, &search,
+                          &walk_error);
+    free(walk_error);
+    free(search.open);
+    if (search.failed)
+        return diagnostic(error, "scroll container search allocation failed");
+    *candidate = (TaiNode *)search.found;
+    return true;
+}
+
+typedef struct {
+    const TaiNode *node;
+    double scroll_y, max_scroll;
+    bool found;
+} ScrollableLayout;
+
+/* Python Tab.scrollable_layout_for_node. */
+static bool scrollable_layout_visit(const TaiLayoutItem *item, void *opaque) {
+    ScrollableLayout *search = opaque;
+    if (!is_scroll_container(item) || item->node != search->node) return true;
+    search->scroll_y = item->scroll_y;
+    search->max_scroll = fmax(0.0, item->content_height - item->height);
+    search->found = true;
+    return false;
+}
+
+bool tai_page_scroll_by(TaiPage *page, double delta, bool *changed,
+                        char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (changed) *changed = false;
+    if (!page || !page->document || !page->layout || !page->display ||
+        !isfinite(delta))
+        return diagnostic(error, "invalid page scroll input");
+    bool rebuilt = page->dirty;
+    if (!settle_layout(page, error)) return false;
+    if (changed) *changed = rebuilt;
+    if (page->scroll_focus) {
+        ScrollableLayout layout = {.node = page->scroll_focus};
+        char *visit_error = NULL;
+        (void)tai_layout_visit(page->layout, scrollable_layout_visit, &layout,
+                               &visit_error);
+        free(visit_error);
+        if (layout.found) {
+            /* Handled even at a limit: the page never takes over. */
+            double next = fmax(0.0, fmin(layout.scroll_y + delta,
+                                         layout.max_scroll));
+            if (next == layout.scroll_y) return true;
+            double previous = page->scroll_focus->scroll_y;
+            page->scroll_focus->scroll_y = next;
+            if (!rebuild_dirty_page(page, error)) {
+                page->scroll_focus->scroll_y = previous;
+                return false;
+            }
+            if (changed) *changed = true;
+            return true;
+        }
+        page->scroll_focus = NULL;
+    }
+    double previous = page->scroll_y;
+    if (!tai_page_set_scroll_y(page, page->scroll_y + delta))
+        return diagnostic(error, "invalid page scroll offset");
+    if (changed) *changed = rebuilt || page->scroll_y != previous;
+    return true;
+}
+
 static bool activate_viewport_body(TaiPage *page, double x, double y,
                                    bool *changed, char **error) {
     if (error) { free(*error); *error = NULL; }
@@ -1758,21 +1874,26 @@ static bool activate_viewport_body(TaiPage *page, double x, double y,
     /* Python blurs before hit testing or dispatch, so a prevented activation
      * still visibly clears an already focused control. */
     bool frame_changed = false;
+    page->scroll_focus = NULL;
     if (page->focused) {
         page->focused->focused = false;
         page->focused = NULL;
         frame_changed = true;
     }
 
-    TaiNode *target = tai_page_viewport_hit_test(page, x, y, NULL);
+    TaiNode *hit = tai_page_viewport_hit_test(page, x, y, NULL);
+    TaiNode *target = hit;
     while (target && target->kind != TAI_ELEMENT) target = target->parent;
     if (!target) {
         if (frame_changed && !rebuild_dirty_page(page, error)) return false;
         if (changed) *changed = frame_changed;
         return true;
     }
+    TaiNode *scroll_target = NULL;
+    if (!scroll_candidate(page, hit, &scroll_target, error)) return false;
 
     if (!dispatch_page_event(page, "click", target)) {
+        page->scroll_focus = scroll_target;
         TaiNode *button = NULL;
         for (TaiNode *node = target; node; node = node->parent)
             if (node->kind == TAI_ELEMENT && !strcmp(node->tag, "button")) {
@@ -1928,6 +2049,7 @@ bool tai_page_blur_input(TaiPage *page, bool *changed, char **error) {
     if (changed) *changed = false;
     if (!page || !page->document || !page->display)
         return diagnostic(error, "invalid page blur input");
+    page->scroll_focus = NULL;
     if (!page->focused) return true;
     TaiNode *previously_focused = page->focused;
     previously_focused->focused = false;
