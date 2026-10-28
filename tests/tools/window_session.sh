@@ -3,7 +3,7 @@
 # Usage: window_session.sh [--dir D] CMD [ARGS]   (or TAI_WS_DIR=D)
 #   start --url URL [--fixture DIR] [--port N] [--display :N | --xvfb]
 #         [--data-home DIR] [--size WxH] [--bin PATH]
-#   click X Y | key KEYS...(NAME*N repeats) | type TEXT | wheel up|down [N] | resize W H
+#   click X Y [left|middle] | key KEYS...(NAME*N repeats) | type TEXT | wheel up|down [N] | resize W H
 #   shot NAME [--crop WxH+X+Y] | events [PATTERN] | requests | status | stop
 #   windows | await N | select N|WID | close   (Ctrl+N multi-window sessions)
 #   title                                      (selected window's title)
@@ -182,8 +182,9 @@ x.XCloseDisplay(d)
 PY
   settle; echo "close $WID requested"; }
 
-cmd_click() { (($# == 2)) || die "click X Y"; check
-  front; xdotool mousemove --window "$WID" "$1" "$2" click 1; settle; echo "click $1,$2 ok"; }
+cmd_click() { (($# == 2 || $# == 3)) || die "click X Y [left|middle]"; check
+  local b=1; case "${3:-left}" in left) ;; middle) b=2;; *) die "click button: left|middle";; esac
+  front; xdotool mousemove --window "$WID" "$1" "$2" click "$b"; settle; echo "click $1,$2 ${3:-left} ok"; }
 # key accepts NAME*N as shorthand for N repeats (e.g. BackSpace*40).
 cmd_key() { (($#)) || die "key KEYS..."; check; focus
   local k keys=()
