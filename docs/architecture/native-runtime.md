@@ -253,8 +253,8 @@ private, incompatible node layouts.
   `URL.is_external`) never load. A clicked link to one leaves an intent with
   `tai_navigation_intent_is_external()`; a form submission to one stays an
   ordinary navigation that shows the fixed "External mail link" page, as in
-  Python. `tai_tabset_navigate` and `tai_tabset_navigate_address` hand an
-  external URL (serialized, so without fragment) to `tai_external_open` on the
+  Python. `tai_tabset_navigate`, `tai_tabset_navigate_address` and
+  `tai_tabset_open_link` (a middle-clicked link) hand an external URL (serialized, so without fragment) to `tai_external_open` on the
   SDL thread and change no tab, history or page. `tai_external_open`
   (`src/external.c`) `posix_spawnp`s the app's opener (`xdg-open`; tests swap
   it through `tai_tabset_set_external_opener_for_test`, which only the SDL
@@ -264,6 +264,13 @@ private, incompatible node layouts.
   a launch failure is an error the caller prints. `TaiSession` (single-page,
   tests only) ignores external intents, so a mailto click changes nothing
   there, and rejects external addresses.
+- A middle-clicked link (`tai_page_link_at_viewport`, a pure hit test of the
+  active committed page with no JavaScript dispatch or focus change) goes to
+  `tai_tabset_open_link` on the SDL thread: an external URL is opened as
+  above; any other URL gets a new slot that becomes active and queues a
+  navigation load with a fresh history, like the new-tab button but with the
+  link URL instead of the home URL. It shares the 25-tab cap and fails with
+  an error at the cap, leaving the tabs unchanged.
 - Window resize updates every committed session page on the SDL thread. A
   pending candidate is resized to the latest viewport immediately before
   commit. Tab selection changes only the active index; it does not move page,

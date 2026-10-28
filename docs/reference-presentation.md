@@ -137,7 +137,13 @@ session history availability 決定外觀與是否 traversal。普通文字以 D
 URL-like 文字直接導覽；`about:blank` 的 query/path 形式保留輸入。地址列未聚焦時，Alt+Left/
 Alt+Right 送往 history callback。地址列送出 `mailto:` 與點擊 mailto 連結時交給外部開啟器
 （`xdg-open`），不導覽、不改 history，草稿照常丟棄（見
-[native runtime](architecture/native-runtime.md)）。直接網址的拒絕策略與其他未實作控制項的
+[native runtime](architecture/native-runtime.md)）。Tabbed 視窗的中鍵（`SDL_BUTTON_MIDDLE`）
+比照 Python `BrowserWindow.handle_middle_click`，在 toolbar 之前攔截：y 小於 chrome bottom
+只清除頁面輸入焦點（`tai_page_blur_input`），不命中任何 chrome 控制項、不碰地址列；y 不小於
+bottom 時地址列失焦但保留 dirty 草稿，頁面焦點不變，以截斷後的座標扣除 bottom 經
+`tai_page_link_at_viewport` 純命中測試（不派送 JS，`preventDefault` 擋不住）找最近的
+`<a href>`，`tai_tabset_open_link` 把 mailto 交給外部開啟器、其他 URL（含 `#frag`，解析成
+目前頁面的 URL）在新的 active 分頁載入；新分頁不丟棄草稿。達 25 個分頁時的刻意差異見 [migration plan](../PORTING_PLAN.md) 的「Tabs 上限與呈現」列。直接網址的拒絕策略與其他未實作控制項的
 範圍見 [migration plan](../PORTING_PLAN.md)。
 
 同一視窗的 `SDL_EVENT_MOUSE_WHEEL` 與 `SDL_EVENT_KEY_DOWN` 的 `PageUp`/`↑`、

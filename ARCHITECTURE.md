@@ -165,6 +165,12 @@ single-page presentation APIs remain available to callers.
   next to tab, history and address state; `mailto_integration.py` compares
   them with `test_mailto_window.c` (dummy-SDL tabbed loop, fake opener).
   `test_external.c` checks the spawn contract.
+- `middle_click_fixture.py` serves 127.0.0.1 pages with absolute, relative,
+  fragment and mailto links, plain text, an input and a cancelled link;
+  `middle_click_oracle_probe.py` and `fixtures/middle_click_oracle.json` freeze
+  Python `handle_middle_click` (every tab's URL and history, address and page
+  focus); `middle_click_integration.py` compares them with
+  `test_middle_click_window.c` (dummy-SDL tabbed loop, fake opener).
 - `js_page_fixture.py` serves 127.0.0.1 pages whose external scripts mutate
   the DOM and title, with click/keydown scenarios; `js_page_oracle_probe.py`
   and `fixtures/js_page_oracle.json` freeze the Python Tab's DOM, title,
