@@ -19,6 +19,21 @@ CASES = [
     "<div style='background-color:#112233'>outer "
     "<span style='color:#445566'>nested words</span></div>",
     "<div style='background-color:#1234'>unsupported color fallback</div>",
+    # Oracle tag rules (tests/layout_rule_coverage.py): bullets, nav decorations,
+    # control text, button contents, and blocks that do not paint themselves.
+    "<ul><li>one</li><li style='background-color:#123456'>two</li></ul>",
+    "<nav class='links'><p>a</p></nav><nav class='other'><p>b</p></nav>",
+    "<nav id='toc'><p>a</p><p>b</p></nav>",
+    "<nav id='toc' style='background-color:#123456'>inline toc</nav>",
+    "<p>x <button>go</button> <button style='background-color:#123456;color:#abcdef'>"
+    "<b>two</b> words</button></p>",
+    "<button style='display:block;background-color:#123456'>blk</button>",
+    "<button style='overflow:scroll;height:10px'>a b</button>",
+    "<button></button><button>out <button>in</button></button>",
+    "<p><input value='hi'> <input type='password' value='abc'> <input type='checkbox'> "
+    "<input> <input style='background-color:#123456;color:#abcdef' value='c'></p>",
+    "<input style='display:block;background-color:#123456' value='b'>",
+    "<p>x <abbr>Html ok</abbr> a<sup>s<abbr>b</abbr></sup></p>",
 ]
 SCROLL_CASES = [
     "<div style='height:20px;overflow:scroll;background-color:#112233'>"
@@ -31,11 +46,15 @@ SCROLL_CASES = [
     "<div style='background-color:#aabbcc'>content</div></div></div>",
 ]
 ROUNDED_FILL_CASES = [
+    "<button style='border-radius:6px;background-color:#112233'>r</button>",
+    "<input style='border-radius:4px;background-color:#112233' value='r'>",
     "<div style='height:20px;border-radius:10px;background-color:#112233'></div>",
     "<div style='height:20px;border-radius:10.5px;background-color:#112233'></div>",
     "<div style='height:20px;border-radius:1e999px;background-color:#112233'></div>",
 ]
 EFFECT_CASES = [
+    "<button style='background-color:#ff0000;opacity:0.5;mix-blend-mode:multiply'>fx</button>",
+    "<input style='display:block;background-color:#ff0000;opacity:0.5' value='v'>",
     "<div style='background-color:#ff0000;opacity: 50% '>opacity</div>",
     "<div style='background-color:#ff0000;opacity:bogus'>fallback</div>",
     "<div style='background-color:#ff0000;opacity:0x0p0'>hex fallback</div>",
@@ -47,7 +66,21 @@ EFFECT_CASES = [
     "<div style='background-color:#ff0000;mix-blend-mode:unknown'>fallback</div>",
     "<div style='background-color:#ff0000;mix-blend-mode:normal'>normal</div>",
 ]
+# overflow:clip/scroll clips blocks, inputs and buttons to their own border
+# box (the oracle's destination-in mask, native push_clip); lines never clip.
+CLIP_CASES = [
+    "<main style='height:20px;overflow:clip;border-radius:10px'>"
+    "<div style='height:40px'>a</div></main>",
+    "<div style='height:30px;overflow:scroll'>"
+    "<div style='height:20px;overflow:clip'>n</div></div>",
+    "<button style='overflow:clip;width:30px'>longwordhere</button>",
+    "<button style='overflow:scroll;border-radius:4px'>a b</button>",
+    "<input style='overflow:clip;width:30px' value='longvaluehere'>",
+    "<button style='display:block;overflow:clip'>wrapper</button>",
+    "<p style='overflow:clip'>x <button>in</button></p>",
+]
 BLUR_CASES = [
+    "<button style='background-color:red;filter:blur(2px)'>blur</button>",
     "<div style='background-color:red;filter:blur(2px)'>blur</div>",
     "<div style='background-color:red;filter: BLUR( 2PX ) '>blur</div>",
     "<div style='background-color:red;filter:blur(1e2px)'>blur</div>",
@@ -102,7 +135,10 @@ def oracle_leaves(commands):
     leaves = []
     for command in commands:
         kind = command["kind"]
-        if kind in ("DrawRect", "DrawText"):
+        # An empty DrawText (an input without a value) paints nothing.
+        if kind == "DrawText" and not command["text"]:
+            pass
+        elif kind in ("DrawRect", "DrawText"):
             left, top, right, bottom = command["rect"]
             leaf = {
                 "kind": "fill_rect" if kind == "DrawRect" else "text",
@@ -209,6 +245,30 @@ def oracle_effect_structure(commands):
     return output
 
 
+def oracle_clips(commands):
+    clips = []
+    for command in commands:
+        children = command.get("children", [])
+        if (command["kind"] == "Blend" and command["blend_mode"] == "destination-in"
+                and len(children) == 1 and children[0]["kind"] == "DrawRRect"):
+            left, top, right, bottom = children[0]["rect"]
+            clips.append((left, top, right - left, bottom - top, children[0]["radius"]))
+        else:
+            clips.extend(oracle_clips(children))
+    return clips
+
+
+def native_clips(commands):
+    return [(c["x"], c["y"], c["width"], c["height"], c.get("radius", 0.0))
+            for c in commands if c["kind"] == "push_clip"]
+
+
+def clip_structure(clips):
+    """Clip rects in a stable order: the oracle appends a mask after the
+    content it clips, so nested masks come before their ancestors' masks."""
+    return [list(clip) for clip in sorted(clips, key=lambda c: tuple(round(v, 3) for v in c))]
+
+
 def oracle_blur_structure(commands):
     output = []
     for command in commands:
@@ -251,55 +311,70 @@ def compare(expected, actual, path="display"):
         assert expected == actual, (path, expected, actual)
 
 
-for index, html in enumerate(CASES):
-    expected_output = json.loads(subprocess.check_output(
-        [sys.executable, str(ORACLE), "layout", html]))
-    url = "data:text/html," + quote(html, safe="")
-    actual_output = json.loads(subprocess.check_output(
-        [sys.argv[1], "--headless", url]))
-    compare(oracle_leaves(expected_output["display"]),
-            native_leaves(actual_output["display"]), f"case {index}")
+def main():
+    for index, html in enumerate(CASES):
+        expected_output = json.loads(subprocess.check_output(
+            [sys.executable, str(ORACLE), "layout", html]))
+        url = "data:text/html," + quote(html, safe="")
+        actual_output = json.loads(subprocess.check_output(
+            [sys.argv[1], "--headless", url]))
+        compare(oracle_leaves(expected_output["display"]),
+                native_leaves(actual_output["display"]), f"case {index}")
 
-for index, html in enumerate(SCROLL_CASES):
-    expected_output = json.loads(subprocess.check_output(
-        [sys.executable, str(ORACLE), "layout", html]))
-    url = "data:text/html," + quote(html, safe="")
-    actual_output = json.loads(subprocess.check_output(
-        [sys.argv[1], "--headless", url]))
-    compare(oracle_scroll_structure(expected_output["display"]),
-            native_scroll_structure(actual_output["display"]),
-            f"scroll case {index}")
+    for index, html in enumerate(SCROLL_CASES):
+        expected_output = json.loads(subprocess.check_output(
+            [sys.executable, str(ORACLE), "layout", html]))
+        url = "data:text/html," + quote(html, safe="")
+        actual_output = json.loads(subprocess.check_output(
+            [sys.argv[1], "--headless", url]))
+        compare(oracle_scroll_structure(expected_output["display"]),
+                native_scroll_structure(actual_output["display"]),
+                f"scroll case {index}")
 
-for index, html in enumerate(ROUNDED_FILL_CASES):
-    expected_output = json.loads(subprocess.check_output(
-        [sys.executable, str(ORACLE), "layout", html]))
-    url = "data:text/html," + quote(html, safe="")
-    actual_output = json.loads(subprocess.check_output(
-        [sys.argv[1], "--headless", url]))
-    compare(oracle_rounded_fills(expected_output["display"]),
-            native_rounded_fills(actual_output["display"]),
-            f"rounded fill case {index}")
+    for index, html in enumerate(ROUNDED_FILL_CASES):
+        expected_output = json.loads(subprocess.check_output(
+            [sys.executable, str(ORACLE), "layout", html]))
+        url = "data:text/html," + quote(html, safe="")
+        actual_output = json.loads(subprocess.check_output(
+            [sys.argv[1], "--headless", url]))
+        compare(oracle_rounded_fills(expected_output["display"]),
+                native_rounded_fills(actual_output["display"]),
+                f"rounded fill case {index}")
 
-for index, html in enumerate(EFFECT_CASES):
-    expected_output = json.loads(subprocess.check_output(
-        [sys.executable, str(ORACLE), "layout", html]))
-    url = "data:text/html," + quote(html, safe="")
-    actual_output = json.loads(subprocess.check_output(
-        [sys.argv[1], "--headless", url]))
-    compare(oracle_effect_structure(expected_output["display"]),
-            native_effect_structure(actual_output["display"]),
-            f"effect case {index}")
+    for index, html in enumerate(EFFECT_CASES):
+        expected_output = json.loads(subprocess.check_output(
+            [sys.executable, str(ORACLE), "layout", html]))
+        url = "data:text/html," + quote(html, safe="")
+        actual_output = json.loads(subprocess.check_output(
+            [sys.argv[1], "--headless", url]))
+        compare(oracle_effect_structure(expected_output["display"]),
+                native_effect_structure(actual_output["display"]),
+                f"effect case {index}")
 
-for index, html in enumerate(BLUR_CASES):
-    expected_output = json.loads(subprocess.check_output(
-        [sys.executable, str(ORACLE), "layout", html]))
-    url = "data:text/html," + quote(html, safe="")
-    actual_output = json.loads(subprocess.check_output(
-        [sys.argv[1], "--headless", url]))
-    compare(oracle_blur_structure(expected_output["display"]),
-            native_blur_structure(actual_output["display"]),
-            f"blur case {index}")
+    for index, html in enumerate(BLUR_CASES):
+        expected_output = json.loads(subprocess.check_output(
+            [sys.executable, str(ORACLE), "layout", html]))
+        url = "data:text/html," + quote(html, safe="")
+        actual_output = json.loads(subprocess.check_output(
+            [sys.argv[1], "--headless", url]))
+        compare(oracle_blur_structure(expected_output["display"]),
+                native_blur_structure(actual_output["display"]),
+                f"blur case {index}")
 
-print(f"Display differential: {len(CASES)} leaf and "
-      f"{len(SCROLL_CASES)} scroll and {len(ROUNDED_FILL_CASES)} rounded "
-      f"fill, {len(EFFECT_CASES)} effect, and {len(BLUR_CASES)} blur cases passed")
+    for index, html in enumerate(CLIP_CASES):
+        expected_output = json.loads(subprocess.check_output(
+            [sys.executable, str(ORACLE), "layout", html]))
+        url = "data:text/html," + quote(html, safe="")
+        actual_output = json.loads(subprocess.check_output(
+            [sys.argv[1], "--headless", url]))
+        compare(clip_structure(oracle_clips(expected_output["display"])),
+                clip_structure(native_clips(actual_output["display"])),
+                f"clip case {index}")
+
+    print(f"Display differential: {len(CLIP_CASES)} clip and {len(CASES)} leaf and "
+          f"{len(SCROLL_CASES)} scroll and {len(ROUNDED_FILL_CASES)} rounded "
+          f"fill, {len(EFFECT_CASES)} effect, and {len(BLUR_CASES)} blur cases passed")
+
+
+if __name__ == "__main__":
+    main()

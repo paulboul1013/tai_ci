@@ -169,6 +169,12 @@ if(BUILD_TESTING)
   target_include_directories(test_quickjs_oom PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
   target_compile_options(test_quickjs_oom PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME quickjs_oom COMMAND test_quickjs_oom)
+  add_executable(test_layout_oom tests/test_layout_oom.c)
+  target_link_libraries(test_layout_oom PRIVATE tai_core)
+  target_compile_options(test_layout_oom PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  target_link_options(test_layout_oom PRIVATE "LINKER:--wrap=malloc,--wrap=calloc,--wrap=realloc")
+  add_test(NAME layout_oom COMMAND test_layout_oom
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
   add_executable(test_layout tests/test_layout.c)
   target_link_libraries(test_layout PRIVATE tai_core)
   target_compile_options(test_layout PRIVATE -Wall -Wextra -Wpedantic -Werror)
@@ -196,6 +202,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/hit_differential.py" $<TARGET_FILE:hit_probe>)
   add_test(NAME layout_differential COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/layout_differential.py" $<TARGET_FILE:test_layout>)
+  add_test(NAME layout_rule_coverage COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/layout_rule_coverage.py")
   add_test(NAME resize_layout_differential COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/resize_layout_differential.py" $<TARGET_FILE:test_layout>)
   add_executable(test_network tests/test_network.c)
