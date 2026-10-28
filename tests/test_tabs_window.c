@@ -1,23 +1,9 @@
 #define _POSIX_C_SOURCE 200809L
 #include "tai/presentation.h"
-#include "tai/tabset.h"
+#include "window_driver.h"
 
-#include <SDL3/SDL.h>
 #include <math.h>
 #include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-#define CHECK(condition)                                                       \
-  do {                                                                         \
-    if (!(condition)) {                                                        \
-      fprintf(stderr, "CHECK failed at %s:%d: %s\n", __FILE__, __LINE__,      \
-              #condition);                                                     \
-      exit(EXIT_FAILURE);                                                      \
-    }                                                                          \
-  } while (0)
 
 static const char *css =
     "html {display:block} body {display:block} h1 {display:block} "
@@ -93,15 +79,6 @@ static void *request_quit(void *unused) {
   }};
   (void)SDL_PushEvent(&close);
   return NULL;
-}
-
-static bool contains_text(const TaiNode *node, const char *needle) {
-  if (!node) return false;
-  if (node->kind == TAI_TEXT && node->text && strstr(node->text, needle))
-    return true;
-  for (size_t index = 0; index < node->child_count; index++)
-    if (contains_text(node->children[index], needle)) return true;
-  return false;
 }
 
 static TaiNode *find_styled(TaiNode *node) {
@@ -209,7 +186,7 @@ static void run_close_pending_scenario(const char *initial_url,
 
 int main(int argc, char **argv) {
   CHECK(argc == 2);
-  char base[256], delayed_url[512], home_url[512];
+  char delayed_url[512], home_url[512];
   char subresource_url[512], css_home_url[512];
   char close_url[512], close_home_url[512];
   CHECK(snprintf(base, sizeof(base), "http://127.0.0.1:%s", argv[1]) > 0);

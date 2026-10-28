@@ -11,23 +11,7 @@
  *               ignores inactive tabs; set_active_tab schedules a frame)
  *   navigate    navigating away from an endless animation drops its request
  *   close       closing the window with a frame pending (ASan/LSan) */
-#include "tai/tabset.h"
-#include "../src/presentation_internal.h"
-
-#include <SDL3/SDL.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-#define CHECK(condition)                                                       \
-  do {                                                                         \
-    if (!(condition)) {                                                        \
-      fprintf(stderr, "CHECK failed at %s:%d: %s\n", __FILE__, __LINE__,      \
-              #condition);                                                     \
-      exit(EXIT_FAILURE);                                                      \
-    }                                                                          \
-  } while (0)
+#include "window_driver.h"
 
 static const char *css =
     "html {display:block} body {display:block} p {display:block}";
@@ -50,14 +34,6 @@ static const char *css =
   "function f() { n = n + 1; a.innerHTML = String(n);"                        \
   " requestAnimationFrame(f); } requestAnimationFrame(f);</script>"
 #define PLAIN_PAGE "data:text/html,<p id=a>plain</p>"
-
-/* SDL_Quit after each presentation restarts SDL_GetTicks, so time the
- * scenarios with the monotonic clock. */
-static Uint64 now_ms(void) {
-  struct timespec now;
-  CHECK(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
-  return (Uint64)now.tv_sec * 1000u + (Uint64)now.tv_nsec / 1000000u;
-}
 
 typedef struct Driver Driver;
 typedef bool (*Scenario)(Driver *driver, TaiTabSet *tabs);
@@ -89,23 +65,6 @@ static const char *text_of(const TaiNode *node, const char *id) {
   return NULL;
 }
 
-static const TaiNode *find_id(const TaiNode *node, const char *id) {
-  const char *value =
-      node->kind == TAI_ELEMENT ? tai_map_get(&node->attributes, "id") : NULL;
-  if (value && !strcmp(value, id)) return node;
-  for (size_t index = 0; index < node->child_count; index++) {
-    const TaiNode *found = find_id(node->children[index], id);
-    if (found) return found;
-  }
-  return NULL;
-}
-
-static TaiTabSetView view_of(TaiTabSet *tabs) {
-  TaiTabSetView view = {0};
-  CHECK(tai_tabset_view(tabs, &view));
-  return view;
-}
-
 /* The #a text of the active committed page, or NULL while loading. */
 static const char *active_text(TaiTabSet *tabs) {
   TaiTabSetView view = view_of(tabs);
@@ -113,7 +72,7 @@ static const char *active_text(TaiTabSet *tabs) {
   return text_of(tai_page_root(view.page), "a");
 }
 
-static void next_step(Driver *driver) {
+static void start_next_step(Driver *driver) {
   driver->step++;
   driver->step_started = now_ms();
 }
@@ -134,7 +93,7 @@ static bool interval(Driver *driver, TaiTabSet *tabs) {
       driver->iterations_at[driver->changes] = driver->iterations;
       driver->changes++;
     }
-    if (n == 10) next_step(driver);
+    if (n == 10) start_next_step(driver);
     return true;
   }
   case 1: {
@@ -160,7 +119,7 @@ static bool background(Driver *driver, TaiTabSet *tabs) {
      * inactive before its load can commit (commits happen on this thread). */
     CHECK(tai_tabset_new_tab(tabs, NULL));
     CHECK(tai_tabset_select(tabs, 0));
-    next_step(driver);
+    start_next_step(driver);
     return true;
   case 1: {
     TaiTabSetView view = view_of(tabs);
@@ -177,7 +136,7 @@ static bool background(Driver *driver, TaiTabSet *tabs) {
     }
     CHECK(!strcmp(text_of(tai_page_root(view.page), "a"), "waiting"));
     CHECK(tai_page_needs_animation_frame(view.page));
-    next_step(driver);
+    start_next_step(driver);
     return true;
   }
   case 2: {
@@ -192,18 +151,18 @@ static bool background(Driver *driver, TaiTabSet *tabs) {
   return false;
 }
 
-static bool navigate(Driver *driver, TaiTabSet *tabs) {
+static bool navigate_away(Driver *driver, TaiTabSet *tabs) {
   const char *text = active_text(tabs);
   switch (driver->step) {
   case 0:
     if (!text || atoi(text) < 3) return true;
     CHECK(tai_tabset_navigate_address(tabs, PLAIN_PAGE, NULL));
-    next_step(driver);
+    start_next_step(driver);
     return true;
   case 1:
     if (!text || strcmp(text, "plain")) return true;
     CHECK(!tai_page_needs_animation_frame(view_of(tabs).page));
-    next_step(driver);
+    start_next_step(driver);
     return true;
   case 2:
     CHECK(!strcmp(text, "plain"));
@@ -280,7 +239,7 @@ int main(void) {
   run(&background_driver, PLAIN_PAGE, ONCE_PAGE);
   puts("background: the inactive tab's frame ran after it became active");
 
-  Driver navigate_driver = {.name = "navigate", .scenario = navigate};
+  Driver navigate_driver = {.name = "navigate", .scenario = navigate_away};
   run(&navigate_driver, ENDLESS_PAGE, PLAIN_PAGE);
   puts("navigate: the replaced page's animation stopped");
 

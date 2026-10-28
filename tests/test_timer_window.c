@@ -10,23 +10,7 @@
  *               own task runner)
  *   close       closing the window with an endless interval and an
  *               asynchronous request pending (ASan/LSan) */
-#include "tai/tabset.h"
-#include "../src/presentation_internal.h"
-
-#include <SDL3/SDL.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-#define CHECK(condition)                                                       \
-  do {                                                                         \
-    if (!(condition)) {                                                        \
-      fprintf(stderr, "CHECK failed at %s:%d: %s\n", __FILE__, __LINE__,      \
-              #condition);                                                     \
-      exit(EXIT_FAILURE);                                                      \
-    }                                                                          \
-  } while (0)
+#include "window_driver.h"
 
 static const char *css =
     "html {display:block} body {display:block} p {display:block}";
@@ -51,12 +35,6 @@ static const char *css =
   "x.send();</script>"
 #define PLAIN_PAGE "data:text/html,<p id=a>plain</p>"
 
-static Uint64 now_ms(void) {
-  struct timespec now;
-  CHECK(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
-  return (Uint64)now.tv_sec * 1000u + (Uint64)now.tv_nsec / 1000000u;
-}
-
 typedef struct Driver Driver;
 typedef bool (*Scenario)(Driver *driver, TaiTabSet *tabs);
 struct Driver {
@@ -71,17 +49,6 @@ struct Driver {
   bool finished;
 };
 
-static const TaiNode *find_id(const TaiNode *node, const char *id) {
-  const char *value =
-      node->kind == TAI_ELEMENT ? tai_map_get(&node->attributes, "id") : NULL;
-  if (value && !strcmp(value, id)) return node;
-  for (size_t index = 0; index < node->child_count; index++) {
-    const TaiNode *found = find_id(node->children[index], id);
-    if (found) return found;
-  }
-  return NULL;
-}
-
 static const char *text_in(const TaiPage *page, const char *id) {
   const TaiNode *node = find_id(tai_page_root(page), id);
   return node && node->child_count && node->children[0]->kind == TAI_TEXT
@@ -89,18 +56,12 @@ static const char *text_in(const TaiPage *page, const char *id) {
              : "";
 }
 
-static TaiTabSetView view_of(TaiTabSet *tabs) {
-  TaiTabSetView view = {0};
-  CHECK(tai_tabset_view(tabs, &view));
-  return view;
-}
-
 static const TaiPage *active_page(TaiTabSet *tabs) {
   TaiTabSetView view = view_of(tabs);
   return view.loading ? NULL : view.page;
 }
 
-static void next_step(Driver *driver) {
+static void start_next_step(Driver *driver) {
   driver->step++;
   driver->step_started = now_ms();
 }
@@ -138,7 +99,7 @@ static bool background(Driver *driver, TaiTabSet *tabs) {
     /* The 200 ms timer was armed at load; move to another tab at once. */
     CHECK(!strcmp(text_in(active_page(tabs), "a"), "waiting"));
     CHECK(tai_tabset_new_tab(tabs, NULL));
-    next_step(driver);
+    start_next_step(driver);
     return true;
   case 1: {
     if (now_ms() - driver->step_started < 400) return true;

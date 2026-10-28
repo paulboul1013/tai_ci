@@ -14,111 +14,11 @@
  *   STATE <scenario> <step> <json>   a checkpoint
  *   MARK | SEEN <path> | RELEASE <path>
  *   REQUESTS <scenario> <step>       requests since MARK are the checkpoint */
-#include "tai/tabset.h"
-#include "../src/presentation_internal.h"
+#include "window_driver.h"
 
-#include <SDL3/SDL.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-#define CHECK(condition)                                                       \
-  do {                                                                         \
-    if (!(condition)) {                                                        \
-      fprintf(stderr, "CHECK failed at %s:%d: %s\n", __FILE__, __LINE__,      \
-              #condition);                                                     \
-      exit(EXIT_FAILURE);                                                      \
-    }                                                                          \
-  } while (0)
-
-static char base[128];
 static char *css;
 
-static void command(const char *verb, const char *argument) {
-  printf("%s%s%s\n", verb, argument ? " " : "", argument ? argument : "");
-  fflush(stdout);
-  char reply[16];
-  CHECK(fgets(reply, sizeof(reply), stdin) && !strcmp(reply, "ok\n"));
-}
-
-static const char *url_for(const char *path) {
-  static char buffer[4][256];
-  static int next;
-  char *url = buffer[next++ % 4];
-  CHECK(snprintf(url, sizeof(buffer[0]), "%s%s", base, path) > 0);
-  return url;
-}
-
-/* -- page inspection ------------------------------------------------------ */
-
-static void append_text(const TaiNode *node, char *out, size_t size) {
-  if (node->kind == TAI_TEXT && node->text) {
-    size_t used = strlen(out);
-    CHECK(snprintf(out + used, size - used, "%s", node->text) >= 0);
-  }
-  for (size_t index = 0; index < node->child_count; index++)
-    append_text(node->children[index], out, size);
-}
-
-static const TaiNode *find_tag(const TaiNode *node, const char *tag) {
-  if (node->kind == TAI_ELEMENT && !strcmp(node->tag, tag)) return node;
-  for (size_t index = 0; index < node->child_count; index++) {
-    const TaiNode *match = find_tag(node->children[index], tag);
-    if (match) return match;
-  }
-  return NULL;
-}
-
-static bool heading(const TaiTabSetView *view, char *out, size_t size) {
-  out[0] = '\0';
-  if (!view->page) return false;
-  const TaiNode *h1 = find_tag(tai_page_root(view->page), "h1");
-  if (!h1) return false;
-  append_text(h1, out, size);
-  return true;
-}
-
-static TaiTabSetView view_of(TaiTabSet *tabs) {
-  TaiTabSetView view = {0};
-  CHECK(tai_tabset_view(tabs, &view));
-  return view;
-}
-
-/* True when the committed page is idle and its first <h1> reads expected. */
-static bool loaded(TaiTabSet *tabs, const char *expected) {
-  TaiTabSetView view = view_of(tabs);
-  char text[256];
-  return !view.loading && heading(&view, text, sizeof(text)) &&
-         !strcmp(text, expected);
-}
-
-static bool page_contains(const TaiNode *node, const char *needle) {
-  if (node->kind == TAI_TEXT && node->text && strstr(node->text, needle))
-    return true;
-  for (size_t index = 0; index < node->child_count; index++)
-    if (page_contains(node->children[index], needle)) return true;
-  return false;
-}
-
 /* -- SDL input ------------------------------------------------------------ */
-
-static void push(SDL_Event *event) { CHECK(SDL_PushEvent(event)); }
-
-static void key(SDL_WindowID window_id, SDL_Keycode keycode, SDL_Keymod mod,
-                bool repeat) {
-  SDL_Event event = {.key = {.type = SDL_EVENT_KEY_DOWN,
-                             .windowID = window_id,
-                             .key = keycode,
-                             .mod = mod,
-                             .down = true,
-                             .repeat = repeat}};
-  push(&event);
-}
-
-static void ctrl_n(SDL_WindowID window_id) {
-  key(window_id, SDLK_N, SDL_KMOD_LCTRL, false);
-}
 
 static void text(SDL_WindowID window_id, const char *value) {
   /* SDL keeps the pointer until the event is handled. */
@@ -130,101 +30,13 @@ static void text(SDL_WindowID window_id, const char *value) {
   push(&event);
 }
 
-static void wheel(SDL_WindowID window_id, float y) {
-  SDL_Event event = {.wheel = {.type = SDL_EVENT_MOUSE_WHEEL,
-                               .windowID = window_id,
-                               .y = y,
-                               .direction = SDL_MOUSEWHEEL_NORMAL}};
-  push(&event);
-}
-
-static void click(SDL_WindowID window_id, double x, double y) {
-  SDL_Event event = {.button = {.type = SDL_EVENT_MOUSE_BUTTON_DOWN,
-                                .windowID = window_id,
-                                .button = SDL_BUTTON_LEFT,
-                                .down = true,
-                                .x = (float)x,
-                                .y = (float)y}};
-  push(&event);
-}
-
 static void close_request(SDL_WindowID window_id) {
   SDL_Event event = {.window = {.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED,
                                 .windowID = window_id}};
   push(&event);
 }
 
-/* The loop handles one event per iteration; this reports that every pushed
- * event has been handled. */
-static bool drained(void) {
-  SDL_PumpEvents();
-  return SDL_PeepEvents(NULL, 0, SDL_PEEKEVENT, SDL_EVENT_FIRST,
-                        SDL_EVENT_LAST) == 0;
-}
-
-typedef struct {
-  const TaiNode *target;
-  double x, y;
-  bool found;
-} TargetPoint;
-
-static bool find_target_point(const TaiLayoutItem *item, void *opaque) {
-  TargetPoint *point = opaque;
-  if (point->found || item->kind != TAI_LAYOUT_TEXT) return true;
-  for (const TaiNode *node = item->node; node; node = node->parent) {
-    if (node == point->target) {
-      point->x = item->x + item->width / 2.0;
-      point->y = item->y + item->height / 2.0;
-      point->found = true;
-      break;
-    }
-  }
-  return true;
-}
-
-static void click_page_link(const TaiPresWindowInfo *window) {
-  TaiTabSetView view = view_of(window->tabs);
-  const TaiNode *link = find_tag(tai_page_root(view.page), "a");
-  CHECK(link);
-  TargetPoint point = {.target = link};
-  char *error = NULL;
-  CHECK(tai_layout_visit(tai_page_layout(view.page), find_target_point,
-                         &point, &error));
-  CHECK(error == NULL && point.found);
-  click(window->window_id, point.x,
-        point.y - tai_page_scroll_y(view.page) +
-            tabs_chrome_bottom(window->width, window->wraps));
-}
-
-/* -- tab-set actions ------------------------------------------------------ */
-
-static void navigate(TaiTabSet *tabs, const char *path) {
-  char *error = NULL;
-  CHECK(tai_tabset_navigate_address(tabs, url_for(path), &error));
-  CHECK(error == NULL);
-}
-
-/* Python probe set_draft: dirty exactly when there is text. */
-static void set_draft(AddressEditor *editor, const char *value, bool focused) {
-  char *copy = tai_strdup(value);
-  CHECK(copy);
-  free(editor->text);
-  editor->text = copy;
-  editor->cursor = strlen(copy);
-  editor->dirty = *copy != '\0';
-  editor->focused = focused;
-}
-
 /* -- reporting ------------------------------------------------------------ */
-
-static void json_string(const char *value) {
-  putchar('"');
-  for (const char *p = value; *p; p++) {
-    if (*p == '"' || *p == '\\') putchar('\\');
-    putchar(*p);
-  }
-  putchar('"');
-}
 
 static void window_json(const TaiPresWindowInfo *window) {
   TaiTabSetView view = view_of(window->tabs);
@@ -237,43 +49,32 @@ static void window_json(const TaiPresWindowInfo *window) {
   const char *window_title = SDL_GetWindowTitle(native);
   CHECK(window_title);
   char title[256];
-  bool has_heading = heading(&view, title, sizeof(title));
+  bool has_heading = heading(view.page, title, sizeof(title));
   printf("{\"title\": ");
-  json_string(window_title);
+  tai_json_string(stdout, window_title);
   printf(", \"size\": [%d, %d], \"tab_count\": %zu, \"active_index\": %zu, "
          "\"url\": ", width, height, view.tab_count, view.active_index);
-  json_string(view.url ? view.url : "");
+  tai_json_string(stdout, view.url ? view.url : "");
   printf(", \"heading\": ");
-  if (has_heading) json_string(title);
+  if (has_heading) tai_json_string(stdout, title);
   else printf("null");
   printf(", \"history\": [");
   for (size_t index = 0; index < view.history_count; index++) {
     char *entry = tai_tabset_history_url(window->tabs, index);
     CHECK(entry);
     if (index) printf(", ");
-    json_string(entry);
+    tai_json_string(stdout, entry);
     free(entry);
   }
   printf("], \"history_index\": %zu, \"scroll\": %.3f, \"address\": ",
          view.history_index,
          view.page ? tai_page_scroll_y(view.page) : 0.0);
-  json_string(shown ? shown : "");
+  tai_json_string(stdout, shown ? shown : "");
   printf(", \"address_focused\": %s, \"address_dirty\": %s, "
          "\"bookmarked\": %s}",
          editor->focused ? "true" : "false",
          editor->dirty ? "true" : "false",
          view.bookmarked ? "true" : "false");
-}
-
-static void state_begin(const char *scenario, const char *step) {
-  printf("STATE %s %s ", scenario, step);
-}
-
-static void state_end(void) {
-  putchar('\n');
-  fflush(stdout);
-  char reply[16];
-  CHECK(fgets(reply, sizeof(reply), stdin) && !strcmp(reply, "ok\n"));
 }
 
 static void report_app(const char *scenario, const char *step,
@@ -324,23 +125,10 @@ struct Driver {
   bool finished;
 };
 
-static void next_step(Driver *driver) {
-  driver->step++;
-  CHECK(clock_gettime(CLOCK_MONOTONIC, &driver->deadline) == 0);
-  driver->deadline.tv_sec += 10;
-}
-
 static bool frame(void *opaque, const TaiPresWindowInfo *windows,
                   size_t count) {
   Driver *driver = opaque;
-  struct timespec now;
-  CHECK(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
-  if (now.tv_sec > driver->deadline.tv_sec ||
-      (now.tv_sec == driver->deadline.tv_sec &&
-       now.tv_nsec > driver->deadline.tv_nsec)) {
-    fprintf(stderr, "%s timed out in step %d\n", driver->name, driver->step);
-    exit(EXIT_FAILURE);
-  }
+  check_deadline(&driver->deadline, driver->name, driver->step);
   return driver->scenario(driver, windows, count);
 }
 
@@ -349,8 +137,6 @@ static bool new_window_ready(const TaiPresWindowInfo *windows, size_t count,
                              size_t wanted) {
   return count == wanted && loaded(windows[wanted - 1].tabs, "home");
 }
-
-#define ADVANCE() do { next_step(driver); return true; } while (0)
 
 static bool ctrl_n_basic(Driver *driver, const TaiPresWindowInfo *w,
                          size_t count) {
@@ -464,7 +250,8 @@ static bool routing(Driver *driver, const TaiPresWindowInfo *w,
       return true;
     report_app(driver->name, "wheel", w, count);
     set_draft(w[0].editor, "", false);
-    click_page_link(&w[0]);
+    click(w[0].tabs, w[0].window_id, w[0].width, w[0].wraps, SDL_BUTTON_LEFT,
+          is_tag, "a");
     ADVANCE();
   case 5:
     if (!loaded(w[0].tabs, "page-b")) return true;
@@ -509,7 +296,7 @@ static bool shared_bookmarks(Driver *driver, const TaiPresWindowInfo *w,
   case 4:
     if (!loaded(w[0].tabs, "Bookmarks")) return true;
     report_raw(driver->name, "first_list_has_c",
-               page_contains(tai_page_root(view_of(w[0].tabs).page),
+               contains_text(tai_page_root(view_of(w[0].tabs).page),
                              url_for("/c")) ? "true" : "false");
     driver->finished = true;
     return false;
@@ -651,7 +438,7 @@ static void run(const char *name, Scenario scenario, const char *path) {
   CHECK(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
   CHECK(SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software"));
   Driver driver = {.name = name, .scenario = scenario, .step = -1};
-  next_step(&driver);
+  next_step(&driver.step, &driver.deadline);
   TaiPresBrowserObserver observer = {.frame = frame, .opaque = &driver};
   bool presented = tai_pres_present_browser_observed(app, url_for(path), 800,
                                                      600, &observer, &error);

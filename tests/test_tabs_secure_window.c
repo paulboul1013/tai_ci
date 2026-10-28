@@ -18,27 +18,12 @@
  * A focused field turns Return into a navigation to its (unchanged) text, so
  * the history count shows whether a click focused the field. */
 #include "tai/presentation.h"
-#include "tai/tabset.h"
-#include "../src/presentation_internal.h"
+#include "window_driver.h"
 
-#include <SDL3/SDL.h>
 #include <limits.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <stdatomic.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-#define CHECK(condition)                                                       \
-  do {                                                                         \
-    if (!(condition)) {                                                        \
-      fprintf(stderr, "CHECK failed at %s:%d: %s\n", __FILE__, __LINE__,      \
-              #condition);                                                     \
-      exit(EXIT_FAILURE);                                                      \
-    }                                                                          \
-  } while (0)
 
 static const char *css =
     "html {display:block} body {display:block} h1 {display:block} "
@@ -135,15 +120,6 @@ static void *post_script(void *opaque) {
   SDL_Event quit = {.type = SDL_EVENT_QUIT};
   (void)SDL_PushEvent(&quit);
   return NULL;
-}
-
-static bool contains_text(const TaiNode *node, const char *needle) {
-  if (!node) return false;
-  if (node->kind == TAI_TEXT && node->text && strstr(node->text, needle))
-    return true;
-  for (size_t index = 0; index < node->child_count; index++)
-    if (contains_text(node->children[index], needle)) return true;
-  return false;
 }
 
 static TaiTabSetView settle(TaiTabSet *tabs) {
