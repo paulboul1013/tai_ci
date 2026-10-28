@@ -256,6 +256,10 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/history_oracle_probe.py" --check)
   add_test(NAME new_window_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/new_window_oracle_probe.py" --check)
+  add_test(NAME mailto_oracle_probe COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/mailto_oracle_probe.py" --check)
+  add_test(NAME test_registration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/tools/check_test_registration.py")
   add_test(NAME middle_click_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/middle_click_oracle_probe.py" --check)
   add_test(NAME overflow_scroll_oracle_probe COMMAND "${Python3_EXECUTABLE}"
