@@ -1110,6 +1110,19 @@ bool tai_tabset_new_tab(TaiTabSet *tabs, char **error) {
     return append_new_slot(tabs, tabs->app->home_url, error);
 }
 
+bool tai_tabset_open_link(TaiTabSet *tabs, const char *url, char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (!tabs || !tabs->started || !url)
+        return set_error(error, "invalid link tab");
+    TaiUrl *parsed = tai_url_parse(url);
+    if (!parsed) return set_error(error, "link URL is malformed or unsupported");
+    bool ok = tai_url_is_external(parsed)
+        ? open_external(tabs, tai_url_string(parsed), error)
+        : append_new_slot(tabs, url, error);
+    tai_url_destroy(parsed);
+    return ok;
+}
+
 bool tai_tabset_select(TaiTabSet *tabs, size_t index) {
     if (!tabs || index >= tabs->count) return false;
     tabs->active = index;

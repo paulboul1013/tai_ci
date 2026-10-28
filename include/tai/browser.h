@@ -177,6 +177,14 @@ bool tai_page_set_scroll_y(TaiPage *page, double scroll_y);
  * resolves the hit while the page owns its document. */
 TaiNode *tai_page_viewport_hit_test(const TaiPage *page, double x, double y,
                                     TaiDisplayHit *hit);
+/* Python BrowserWindow.committed_link_at: the URL of the nearest <a href>
+ * at or above the viewport hit, resolved against the page URL, into *url
+ * (owned by the caller), or NULL when there is no link. An href that does
+ * not resolve counts as no link, as in left-click activation. No event is
+ * dispatched and focus is unchanged. False on invalid input or when copying
+ * the URL fails. */
+bool tai_page_link_at_viewport(TaiPage *page, double x, double y, char **url,
+                               char **error);
 /* Dispatches a primary viewport activation through the page's DOM/JS seam.
  * A finite miss, non-finite coordinate, or prevented event without invalidation
  * succeeds with *changed false. On a JS invalidation, this rebuilds the styled

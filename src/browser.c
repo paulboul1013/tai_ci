@@ -1724,6 +1724,27 @@ TaiNode *tai_page_viewport_hit_test(const TaiPage *page, double x, double y,
     return tai_page_hit_test(page, x, y + page->scroll_y, hit);
 }
 
+bool tai_page_link_at_viewport(TaiPage *page, double x, double y, char **url,
+                               char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (!url) return diagnostic(error, "invalid page link input");
+    *url = NULL;
+    if (!page || !page->url) return diagnostic(error, "invalid page link input");
+    if (!isfinite(x)) return true;
+    for (const TaiNode *node = tai_page_viewport_hit_test(page, x, y, NULL);
+         node; node = node->parent) {
+        if (node->kind != TAI_ELEMENT || strcmp(node->tag, "a")) continue;
+        const char *href = tai_map_get(&node->attributes, "href");
+        if (!href) continue;
+        TaiUrl *resolved = tai_url_resolve(page->url, href);
+        if (!resolved) return true;
+        *url = tai_strdup(tai_url_string(resolved));
+        tai_url_destroy(resolved);
+        return *url ? true : diagnostic(error, "link URL allocation failed");
+    }
+    return true;
+}
+
 static bool activate_viewport_body(TaiPage *page, double x, double y,
                                    bool *changed, char **error) {
     if (error) { free(*error); *error = NULL; }

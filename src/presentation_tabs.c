@@ -188,6 +188,43 @@ static bool is_new_window_key(const SDL_Event *event) {
          (event->key.mod & SDL_KMOD_CTRL) && !event->key.repeat;
 }
 
+/* Python BrowserWindow.handle_middle_click. Above the chrome bottom it only
+ * blurs the page; below, it unfocuses the address field (keeping a draft),
+ * then opens the link under the pointer without dispatching to the page. */
+static bool window_middle_click(PresWindow *w, const TaiTabSetView *view,
+                                const SDL_Event *event,
+                                double chrome_bottom_y, char **error) {
+  if (event->button.y < chrome_bottom_y) {
+    bool blurred = false;
+    if (view->page && !tai_page_blur_input(view->page, &blurred, error))
+      return false;
+    w->page_changed = w->page_changed || blurred;
+    w->chrome_changed = true;
+    return true;
+  }
+  if (w->editor.focused) {
+    w->editor.focused = false;
+    w->chrome_changed = true;
+  }
+  if (!view->page) return true;
+  char *url = NULL;
+  /* Truncated like presentation_events.c, as the SDL2 reference does. */
+  if (!tai_page_link_at_viewport(view->page, trunc(event->button.x),
+                                 trunc(event->button.y - chrome_bottom_y),
+                                 &url, error))
+    return false;
+  if (!url) return true;
+  char *open_error = NULL;
+  if (!tai_tabset_open_link(w->tabs, url, &open_error))
+    fprintf(stderr, "link navigation failed: %s\n",
+            open_error ? open_error : "navigation failed");
+  free(open_error);
+  free(url);
+  w->page_changed = true;
+  w->chrome_changed = true;
+  return true;
+}
+
 /* Applies one SDL event addressed to w. Returns false on a fatal error. */
 static bool window_event(PresWindow *w, SDL_Event *event, char **error) {
   TaiTabSet *tabs = w->tabs;
@@ -216,7 +253,15 @@ static bool window_event(PresWindow *w, SDL_Event *event, char **error) {
       event->button.windowID == window_id &&
       event->button.button == SDL_BUTTON_LEFT &&
       isfinite(event->button.y) && event->button.y >= chrome_bottom_y;
-  if (toolbar_click) {
+  bool middle_click = event->type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+      event->button.windowID == window_id &&
+      event->button.button == SDL_BUTTON_MIDDLE &&
+      isfinite(event->button.x) && isfinite(event->button.y);
+  if (middle_click) {
+    if (!window_middle_click(w, &view, event, chrome_bottom_y, error))
+      return false;
+    handled = true;
+  } else if (toolbar_click) {
     if (!tai_pres_handle_tabs_chrome_click(tabs, event, window_id,
                                            w->pixel_width, &w->editor,
                                            &w->page_changed,

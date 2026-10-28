@@ -106,6 +106,11 @@ bool tai_tabset_navigate(TaiTabSet *tabs,
                          const TaiNavigationIntent *intent, char **error);
 bool tai_tabset_navigate_address(TaiTabSet *tabs, const char *text,
                                  char **error);
+/* Python BrowserWindow.handle_middle_click's link action: an external URL
+ * (mailto:) goes to the external opener, any other URL loads in a new tab
+ * appended and selected like New Tab. Fails with an error at TAI_MAX_TABS
+ * tabs (Python has no limit) or when the opener cannot start. */
+bool tai_tabset_open_link(TaiTabSet *tabs, const char *url, char **error);
 /* Tests only: every tab set in this tab set's app sends external URLs to
  * program (looked up in PATH, copied) instead of TAI_EXTERNAL_OPENER; NULL
  * restores the default. tai-browser never calls this. */

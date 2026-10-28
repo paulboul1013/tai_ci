@@ -553,17 +553,36 @@ static void tab_limit_scenario(void) {
   CHECK(tai_tabset_start(tabs, "data:text/html,<p>initial</p>",
                          800.0, 525.0, &error));
   CHECK(error == NULL);
-  for (size_t index = 1; index < 25; index++) {
+  for (size_t index = 1; index < 24; index++) {
     CHECK(tai_tabset_new_tab(tabs, &error));
     CHECK(error == NULL);
     TaiTabSetView view = read_view(tabs);
     CHECK(view.tab_count == index + 1 && view.active_index == index);
   }
+  /* A middle-clicked link takes the last slot and loads its own URL. */
+  const char *linked = "data:text/html,<p>linked</p>";
+  CHECK(tai_tabset_select(tabs, 3));
+  CHECK(tai_tabset_open_link(tabs, linked, &error));
+  CHECK(error == NULL);
+  TaiTabSetView view = read_view(tabs);
+  CHECK(view.tab_count == 25 && view.active_index == 24);
+  CHECK(view.url && !strcmp(view.url, linked));
+  CHECK(view.history_count == 1);
   CHECK(!tai_tabset_new_tab(tabs, &error));
   CHECK(error && strstr(error, "25"));
   free(error);
-  TaiTabSetView view = read_view(tabs);
-  CHECK(view.tab_count == 25 && view.active_index == 24);
+  error = NULL;
+  CHECK(tai_tabset_select(tabs, 3));
+  CHECK(!tai_tabset_open_link(tabs, "data:text/html,<p>over</p>", &error));
+  CHECK(error && strstr(error, "25"));
+  free(error);
+  error = NULL;
+  /* mailto takes no tab, so the cap does not stop it. */
+  CHECK(tai_tabset_set_external_opener_for_test(tabs, "true"));
+  CHECK(tai_tabset_open_link(tabs, "mailto:cap@example.com", &error));
+  CHECK(error == NULL);
+  view = read_view(tabs);
+  CHECK(view.tab_count == 25 && view.active_index == 3);
   CHECK(tai_tabset_select(tabs, 0));
   CHECK(tai_tabset_select(tabs, 24));
   tai_tabset_destroy(tabs);

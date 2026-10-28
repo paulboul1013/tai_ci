@@ -1,0 +1,268 @@
+{
+  "absolute": {
+    "opened": {
+      "active": 1,
+      "address": "http://127.0.0.1:<PORT>/b",
+      "dirty": false,
+      "focused": false,
+      "input_focused": false,
+      "opened": [],
+      "requests": [
+        "GET /b"
+      ],
+      "tab_count": 2,
+      "tabs": [
+        {
+          "heading": "links",
+          "history": [
+            "http://127.0.0.1:<PORT>/links"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/links"
+        },
+        {
+          "heading": "page-b",
+          "history": [
+            "http://127.0.0.1:<PORT>/b"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/b"
+        }
+      ]
+    }
+  },
+  "cancelled": {
+    "opened": {
+      "active": 1,
+      "address": "http://127.0.0.1:<PORT>/b",
+      "dirty": false,
+      "focused": false,
+      "input_focused": false,
+      "opened": [],
+      "requests": [
+        "GET /b"
+      ],
+      "tab_count": 2,
+      "tabs": [
+        {
+          "heading": "cancel",
+          "history": [
+            "http://127.0.0.1:<PORT>/cancel"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/cancel"
+        },
+        {
+          "heading": "page-b",
+          "history": [
+            "http://127.0.0.1:<PORT>/b"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/b"
+        }
+      ]
+    }
+  },
+  "chrome": {
+    "chrome": {
+      "active": 0,
+      "address": "typed draft",
+      "dirty": true,
+      "focused": true,
+      "input_focused": false,
+      "opened": [],
+      "requests": [],
+      "tab_count": 1,
+      "tabs": [
+        {
+          "heading": "links",
+          "history": [
+            "http://127.0.0.1:<PORT>/links"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/links"
+        }
+      ]
+    },
+    "focused": {
+      "active": 0,
+      "address": "http://127.0.0.1:<PORT>/links",
+      "dirty": false,
+      "focused": false,
+      "input_focused": true,
+      "opened": [],
+      "requests": [],
+      "tab_count": 1,
+      "tabs": [
+        {
+          "heading": "links",
+          "history": [
+            "http://127.0.0.1:<PORT>/links"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/links"
+        }
+      ]
+    },
+    "text": {
+      "active": 0,
+      "address": "http://127.0.0.1:<PORT>/links",
+      "dirty": false,
+      "focused": false,
+      "input_focused": true,
+      "opened": [],
+      "requests": [],
+      "tab_count": 1,
+      "tabs": [
+        {
+          "heading": "links",
+          "history": [
+            "http://127.0.0.1:<PORT>/links"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/links"
+        }
+      ]
+    }
+  },
+  "draft": {
+    "link": {
+      "active": 1,
+      "address": "typed draft",
+      "dirty": true,
+      "focused": false,
+      "input_focused": false,
+      "opened": [],
+      "requests": [
+        "GET /b"
+      ],
+      "tab_count": 2,
+      "tabs": [
+        {
+          "heading": "links",
+          "history": [
+            "http://127.0.0.1:<PORT>/links"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/links"
+        },
+        {
+          "heading": "page-b",
+          "history": [
+            "http://127.0.0.1:<PORT>/b"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/b"
+        }
+      ]
+    },
+    "text": {
+      "active": 0,
+      "address": "typed draft",
+      "dirty": true,
+      "focused": false,
+      "input_focused": false,
+      "opened": [],
+      "requests": [],
+      "tab_count": 1,
+      "tabs": [
+        {
+          "heading": "links",
+          "history": [
+            "http://127.0.0.1:<PORT>/links"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/links"
+        }
+      ]
+    }
+  },
+  "fragment": {
+    "opened": {
+      "active": 1,
+      "address": "http://127.0.0.1:<PORT>/links#part",
+      "dirty": false,
+      "focused": false,
+      "input_focused": false,
+      "opened": [],
+      "requests": [
+        "GET /links"
+      ],
+      "tab_count": 2,
+      "tabs": [
+        {
+          "heading": "links",
+          "history": [
+            "http://127.0.0.1:<PORT>/links"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/links"
+        },
+        {
+          "heading": "links",
+          "history": [
+            "http://127.0.0.1:<PORT>/links#part"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/links#part"
+        }
+      ]
+    }
+  },
+  "mailto": {
+    "clicked": {
+      "active": 0,
+      "address": "http://127.0.0.1:<PORT>/links",
+      "dirty": false,
+      "focused": false,
+      "input_focused": false,
+      "opened": [
+        "mailto:frag@example.com"
+      ],
+      "requests": [],
+      "tab_count": 1,
+      "tabs": [
+        {
+          "heading": "links",
+          "history": [
+            "http://127.0.0.1:<PORT>/links"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/links"
+        }
+      ]
+    }
+  },
+  "relative": {
+    "opened": {
+      "active": 1,
+      "address": "http://127.0.0.1:<PORT>/c",
+      "dirty": false,
+      "focused": false,
+      "input_focused": false,
+      "opened": [],
+      "requests": [
+        "GET /c"
+      ],
+      "tab_count": 2,
+      "tabs": [
+        {
+          "heading": "links",
+          "history": [
+            "http://127.0.0.1:<PORT>/links"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/links"
+        },
+        {
+          "heading": "page-c",
+          "history": [
+            "http://127.0.0.1:<PORT>/c"
+          ],
+          "history_index": 0,
+          "url": "http://127.0.0.1:<PORT>/c"
+        }
+      ]
+    }
+  }
+}
