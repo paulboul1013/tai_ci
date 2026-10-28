@@ -331,31 +331,6 @@ static double fill_radius(const TaiNode *node) {
   return radius > 0 ? (double)radius : 0.0;
 }
 
-static char *font_family(const char *value) {
-  const char *end = strchr(value, ',');
-  size_t length = end ? (size_t)(end - value) : strlen(value);
-  while (length && isspace((unsigned char)value[length - 1])) length--;
-  while (length && isspace((unsigned char)*value)) {
-    value++;
-    length--;
-  }
-  if ((length >= 2) &&
-      ((value[0] == '\'' && value[length - 1] == '\'') ||
-       (value[0] == '"' && value[length - 1] == '"'))) {
-    value++;
-    length -= 2;
-  }
-  const char *replacement = NULL;
-  if (length == 5 && !strncmp(value, "serif", length))
-    replacement = "Times New Roman";
-  else if (length == 10 && !strncmp(value, "sans-serif", length))
-    replacement = "Arial";
-  else if (length == 9 && !strncmp(value, "monospace", length))
-    replacement = "Courier New";
-  if (replacement) return tai_strdup(replacement);
-  return tai_strndup(value, length);
-}
-
 static bool make_fill(Build *build, const TaiLayoutItem *item) {
   const char *value = tai_map_get(&item->node->style, "background-color");
   if (!value) value = tai_map_get(&item->node->style, "background");
@@ -377,17 +352,79 @@ static bool make_fill(Build *build, const TaiLayoutItem *item) {
   return append(build, command);
 }
 
+static bool element_tag(const TaiNode *node, const char *name) {
+  return node && node->kind == TAI_ELEMENT && node->tag &&
+         !strcmp(node->tag, name);
+}
+
+static bool make_rect(Build *build, const TaiLayoutItem *item, double x,
+                      double y, double width, double height,
+                      const char *fill) {
+  return append(build, (TaiDisplayCommand){
+                           .kind = TAI_DRAW_FILL_RECT,
+                           .x = x, .y = y, .width = width, .height = height,
+                           .rgba = color(fill, NULL),
+                           .node_id = item->node->id,
+                       });
+}
+
+/* BlockLayout.paint: background, then the nav and list decorations. */
+static bool make_block(Build *build, const TaiLayoutItem *item) {
+  if (item->wrapper) return true;
+  if (!make_fill(build, item)) return false;
+  const TaiLayoutCaption *caption = &item->caption;
+  if (element_tag(item->node, "nav")) {
+    const char *class_name = tai_map_get(&item->node->attributes, "class");
+    if (class_name && !strcmp(class_name, "links"))
+      return make_rect(build, item, item->x, item->y, item->width,
+                       item->height, "lightgray");
+    if (caption->text) {
+      if (!make_rect(build, item, item->x, item->y, item->width,
+                     caption->band_height, "gray"))
+        return false;
+      TaiDisplayCommand command = {
+          .kind = TAI_DRAW_TEXT,
+          .x = item->x + caption->x, .y = item->y + caption->y,
+          .width = caption->width, .height = caption->height,
+          .rgba = color("black", NULL),
+          .text = tai_strdup(caption->text),
+          .font_family = tai_strdup(caption->font_family),
+          .font_size = caption->font_size,
+          .ascent = caption->ascent,
+          .bold = caption->bold,
+          .node_id = item->node->id,
+      };
+      if (!command.text || !command.font_family) {
+        free((char *)command.text);
+        free((char *)command.font_family);
+        build->failed = true;
+        return false;
+      }
+      if (!append(build, command)) {
+        free((char *)command.text);
+        free((char *)command.font_family);
+        return false;
+      }
+    }
+    return true;
+  }
+  if (element_tag(item->node, "li"))
+    return make_rect(build, item, item->x - 15, item->y + 8, 5, 5, "black");
+  return true;
+}
+
 static bool make_text(Build *build, const TaiLayoutItem *item) {
   if (!item->word || !*item->word) return true;
   TaiDisplayCommand command = {
       .kind = TAI_DRAW_TEXT,
       .x = item->x,
       .y = item->y,
-      .width = item->width,
+      .width = item->text_width,
       .height = item->height,
       .rgba = color(style(item->node, "color", "black"), NULL),
       .text = tai_strdup(item->word),
-      .font_family = font_family(style(item->node, "font-family", "serif")),
+      .font_family = tai_strdup(item->font_family ? item->font_family
+                                                  : "Times New Roman"),
       .font_size = item->font_size > 0 ? item->font_size : 16.0,
       .ascent = item->ascent,
       .hit_radius = effect_radius(item->node),
@@ -500,13 +537,28 @@ static bool make_control(Build *build, const TaiLayoutItem *item) {
   return true;
 }
 
+/* The item's own paint commands, before its children's. */
+static bool make_own(Build *build, const TaiLayoutItem *item) {
+  switch (item->kind) {
+  case TAI_LAYOUT_BLOCK: return make_block(build, item);
+  case TAI_LAYOUT_TEXT: return make_text(build, item);
+  case TAI_LAYOUT_IMAGE: return make_image(build, item);
+  case TAI_LAYOUT_INPUT:
+  case TAI_LAYOUT_BUTTON: return make_control(build, item);
+  default: return true;
+  }
+}
+
 static bool is_scroll_container(const TaiLayoutItem *item) {
   return item->kind == TAI_LAYOUT_BLOCK && item->scrollable;
 }
 
+/* The reference clips every layout object with its own border box: blocks,
+ * inputs and buttons (paint_visual_effects with self_rect). */
 static bool is_clip_container(const TaiLayoutItem *item) {
-  if (item->kind != TAI_LAYOUT_BLOCK || !item->node ||
-      item->node->kind != TAI_ELEMENT)
+  if ((item->kind != TAI_LAYOUT_BLOCK && item->kind != TAI_LAYOUT_INPUT &&
+       item->kind != TAI_LAYOUT_BUTTON) ||
+      !item->node || item->node->kind != TAI_ELEMENT || item->wrapper)
     return false;
   const char *overflow = style(item->node, "overflow", "visible");
   return !strcmp(overflow, "clip") || !strcmp(overflow, "scroll");
@@ -569,7 +621,7 @@ static bool collect(const TaiLayoutItem *item, TaiLayoutVisitEvent event,
   }
   BlendStart blend = {.start = build->count};
   if (item->node && item->node->kind == TAI_ELEMENT &&
-      (!item->node->tag || strcmp(item->node->tag, "button-content"))) {
+      !item->wrapper) {
     bool special_blend = false;
     TaiBlendMode mode = effect_blend_mode(item->node, &special_blend);
     double opacity = effect_opacity(item->node);
@@ -604,7 +656,7 @@ static bool collect(const TaiLayoutItem *item, TaiLayoutVisitEvent event,
   }
   BlurStart blur = {.start = build->count};
   if (item->node && item->node->kind == TAI_ELEMENT &&
-      (!item->node->tag || strcmp(item->node->tag, "button-content"))) {
+      !item->wrapper) {
     double sigma = effect_blur_sigma(item->node);
     if (isnan(sigma)) {
       build->failed = true;
@@ -621,7 +673,7 @@ static bool collect(const TaiLayoutItem *item, TaiLayoutVisitEvent event,
   if (!remember_blur(build, blur)) return false;
   if (clipped) {
     if (clip.scroll) {
-      if (item->kind == TAI_LAYOUT_BLOCK && !make_fill(build, item)) return false;
+      if (item->kind == TAI_LAYOUT_BLOCK && !make_block(build, item)) return false;
       if (!append(build, (TaiDisplayCommand){
                            .kind = TAI_DRAW_HIT_TEST,
                            .x = item->x, .y = item->y,
@@ -638,17 +690,12 @@ static bool collect(const TaiLayoutItem *item, TaiLayoutVisitEvent event,
                            .scroll_y = item->scroll_y,
                        }))
         return false;
-    } else if (item->kind == TAI_LAYOUT_BLOCK && !make_fill(build, item)) {
+    } else if (!make_own(build, item)) {
       return false;
     }
     return remember_clip(build, clip);
   }
-  if (item->kind == TAI_LAYOUT_BLOCK && !make_fill(build, item)) return false;
-  if (item->kind == TAI_LAYOUT_TEXT && !make_text(build, item)) return false;
-  if (item->kind == TAI_LAYOUT_IMAGE && !make_image(build, item)) return false;
-  if ((item->kind == TAI_LAYOUT_INPUT || item->kind == TAI_LAYOUT_BUTTON) &&
-      !make_control(build, item)) return false;
-  return !build->failed;
+  return make_own(build, item) && !build->failed;
 }
 
 static void release_commands(TaiDisplayCommand *items, size_t count) {

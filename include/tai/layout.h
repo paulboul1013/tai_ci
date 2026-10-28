@@ -18,14 +18,33 @@ typedef enum {
   TAI_CONTROL_CHECKBOX,
   TAI_CONTROL_BUTTON
 } TaiControlKind;
+/* A header band a block paints above its children (the nav#toc header);
+ * text is NULL when the block has none. Strings are borrowed like the item's
+ * word. Text geometry is relative to the block's x/y; the band spans the
+ * block width from its top. */
+typedef struct {
+  const char *text, *font_family;
+  double band_height, x, y, width, height, ascent, font_size;
+  bool bold;
+} TaiLayoutCaption;
 typedef struct {
   TaiLayoutItemKind kind;
   TaiControlKind control;
   const TaiNode *node;
   const char *word;
+  /* The family word was measured with (borrowed like word) and its measured
+   * width. */
+  const char *font_family;
+  double text_width;
   double x, y, width, height, ascent, descent, space, font_size, caret_x;
   double content_height, scroll_y;
   bool bold, italic, scrollable;
+  /* Only wraps its children: the block and lines laying out a <button>'s
+   * contents (the reference's synthetic button-content node), or the block
+   * around a display:block input or button. It paints no box, effects or clip
+   * of its own. */
+  bool wrapper;
+  TaiLayoutCaption caption;
   /* Borrowed immutable premultiplied Cairo ARGB32 pixels, valid only during
    * the callback. image_stride is bytes per row. */
   const unsigned char *image_pixels;

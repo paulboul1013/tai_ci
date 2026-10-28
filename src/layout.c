@@ -26,11 +26,15 @@ struct Box {
   Box **children;
   size_t count;
   double x, y, width, height, ascent, descent, space, font_size, caret_x;
-  double content_height, scroll_y;
-  bool bold, italic, scrollable;
+  double content_height, scroll_y, text_width;
+  /* sup text aligns its top with the line's normal text; wrapper is
+   * TaiLayoutItem.wrapper. */
+  bool bold, italic, scrollable, sup, wrapper;
   TaiControlKind control;
   char *word;
+  const char *family; /* borrowed from the layout's font cache */
   Image *image;
+  TaiLayoutCaption caption; /* strings borrowed: static text, cached family */
 };
 /* One resolved family/weight/slant/size, memoized per layout like the
  * reference's TYPEFACES cache. The FcFontMatch and FT_New_Face cost is paid
@@ -193,12 +197,58 @@ static Font *font_open(TaiLayout *l, const char *family, bool bold,
   return font;
 }
 /* Returns a font borrowed from l, valid until tai_layout_destroy. */
-static Font *face(TaiLayout *l, TaiNode *node, bool pre, double *size) {
+static Font *font_get(TaiLayout *l, const char *family, bool bold, bool italic,
+                      double size) {
+  Font *font = NULL;
+  for (size_t i = 0; i < l->font_count && !font; i++) {
+    Font *candidate = l->fonts[i];
+    if (candidate->bold == bold && candidate->italic == italic &&
+        candidate->size == size && !strcmp(candidate->family, family))
+      font = candidate;
+  }
+  if (!font && l->font_count == l->font_capacity) {
+    size_t capacity = l->font_capacity ? l->font_capacity * 2 : 8;
+    Font **fonts = capacity <= SIZE_MAX / sizeof(*fonts)
+                       ? realloc(l->fonts, capacity * sizeof(*fonts))
+                       : NULL;
+    if (!fonts) {
+      l->failed = true;
+      return NULL;
+    }
+    l->fonts = fonts;
+    l->font_capacity = capacity;
+  }
+  if (!font) {
+    font = font_open(l, family, bold, italic, size);
+    if (font)
+      l->fonts[l->font_count++] = font;
+  }
+  if (!font)
+    l->failed = true;
+  return font;
+}
+static bool text_bold(TaiNode *node) {
+  const char *weight = property(node, "font-weight", "normal");
+  return !strcmp(weight, "bold") || atoi(weight) >= 600;
+}
+static bool text_italic(TaiNode *node) {
+  const char *slant = property(node, "font-style", "normal");
+  return !strcmp(slant, "italic") || !strcmp(slant, "oblique");
+}
+/* The font the reference uses for node's text. sup halves the size and
+ * small_caps (abbr's lowercase letters) takes 80% of that in bold, each
+ * truncated like Python's int(). */
+static Font *face(TaiLayout *l, TaiNode *node, bool pre, bool sup,
+                  bool small_caps, double *size) {
   *size = fmax(1, nearbyint(strtod(property(node, "font-size", "16px"), NULL)));
   if (!isfinite(*size) || *size > 1000000) {
     l->failed = true;
     return NULL;
   }
+  if (sup)
+    *size = fmax(1, floor(*size / 2));
+  if (small_caps)
+    *size = fmax(1, floor(*size * 0.8));
   const char *family =
       pre ? "Courier New" : property(node, "font-family", "Times");
   char *name = tai_strndup(family, strcspn(family, ","));
@@ -222,39 +272,16 @@ static Font *face(TaiLayout *l, TaiNode *node, bool pre, double *size) {
     start = "Arial";
   else if (!strcmp(start, "monospace"))
     start = "Courier New";
-  const char *weight = property(node, "font-weight", "normal"),
-             *slant = property(node, "font-style", "normal");
-  bool bold = !strcmp(weight, "bold") || atoi(weight) >= 600;
-  bool italic = !strcmp(slant, "italic") || !strcmp(slant, "oblique");
-  Font *font = NULL;
-  for (size_t i = 0; i < l->font_count && !font; i++) {
-    Font *candidate = l->fonts[i];
-    if (candidate->bold == bold && candidate->italic == italic &&
-        candidate->size == *size && !strcmp(candidate->family, start))
-      font = candidate;
-  }
-  if (!font && l->font_count == l->font_capacity) {
-    size_t capacity = l->font_capacity ? l->font_capacity * 2 : 8;
-    Font **fonts = capacity <= SIZE_MAX / sizeof(*fonts)
-                       ? realloc(l->fonts, capacity * sizeof(*fonts))
-                       : NULL;
-    if (!fonts) {
-      free(name);
-      l->failed = true;
-      return NULL;
-    }
-    l->fonts = fonts;
-    l->font_capacity = capacity;
-  }
-  if (!font) {
-    font = font_open(l, start, bold, italic, *size);
-    if (font)
-      l->fonts[l->font_count++] = font;
-  }
+  Font *font = font_get(l, start, small_caps || text_bold(node),
+                        text_italic(node), *size);
   free(name);
-  if (!font)
-    l->failed = true;
   return font;
+}
+static double font_ascent(const Font *f) {
+  return (double)f->face->ascender * f->size / f->face->units_per_EM;
+}
+static double font_descent(const Font *f) {
+  return -(double)f->face->descender * f->size / f->face->units_per_EM;
 }
 static Advance *advance_slot(Advance *table, size_t capacity,
                              utf8proc_int32_t c) {
@@ -484,7 +511,9 @@ typedef struct {
   TaiLayout *owner;
   Box *block, *line;
   double cursor;
-  bool pre;
+  /* Python's is_pre/is_sup/is_abbr: set by the open tag, cleared by the close
+   * tag, so an inner </sup> also ends an outer <sup>. */
+  bool pre, sup, abbr;
 } Inline;
 static bool newline(Inline *in) {
   Box *line = box(in->owner, "LineLayout", in->block->node);
@@ -496,8 +525,154 @@ static bool newline(Inline *in) {
   in->cursor = 0;
   return true;
 }
+static Box *text_box(TaiLayout *l, TaiNode *node, char *word, Font *f,
+                     bool bold, bool sup) {
+  Box *b = box(l, "TextLayout", node);
+  if (!b) {
+    free(word);
+    return NULL;
+  }
+  b->word = word;
+  b->width = b->text_width = measure(f, word);
+  b->font_size = f->size;
+  b->family = f->family;
+  b->bold = bold;
+  b->italic = text_italic(node);
+  b->sup = sup;
+  b->ascent = font_ascent(f);
+  b->descent = font_descent(f);
+  b->height = b->ascent + b->descent;
+  return b;
+}
+static void release_all(Box **boxes, size_t count) {
+  for (size_t i = 0; i < count; i++)
+    release(boxes[i]);
+  free(boxes);
+}
+/* Python str.upper() results longer than one code point (SpecialCasing),
+ * generated with Python 3.12.3 / Unicode 15.0.0.
+ * utf8proc_toupper maps these characters to themselves. */
+static const struct {
+  utf8proc_int32_t lower;
+  const char *upper;
+} SPECIAL_UPPER[] = {
+    {0xdf, "\123\123"}, {0x149, "\312\274\116"}, {0x1f0, "\112\314\214"},
+    {0x390, "\316\231\314\210\314\201"}, {0x3b0, "\316\245\314\210\314\201"},
+    {0x587, "\324\265\325\222"}, {0x1e96, "\110\314\261"},
+    {0x1e97, "\124\314\210"}, {0x1e98, "\127\314\212"},
+    {0x1e99, "\131\314\212"}, {0x1e9a, "\101\312\276"},
+    {0x1f50, "\316\245\314\223"}, {0x1f52, "\316\245\314\223\314\200"},
+    {0x1f54, "\316\245\314\223\314\201"}, {0x1f56, "\316\245\314\223\315\202"},
+    {0x1f80, "\341\274\210\316\231"}, {0x1f81, "\341\274\211\316\231"},
+    {0x1f82, "\341\274\212\316\231"}, {0x1f83, "\341\274\213\316\231"},
+    {0x1f84, "\341\274\214\316\231"}, {0x1f85, "\341\274\215\316\231"},
+    {0x1f86, "\341\274\216\316\231"}, {0x1f87, "\341\274\217\316\231"},
+    {0x1f90, "\341\274\250\316\231"}, {0x1f91, "\341\274\251\316\231"},
+    {0x1f92, "\341\274\252\316\231"}, {0x1f93, "\341\274\253\316\231"},
+    {0x1f94, "\341\274\254\316\231"}, {0x1f95, "\341\274\255\316\231"},
+    {0x1f96, "\341\274\256\316\231"}, {0x1f97, "\341\274\257\316\231"},
+    {0x1fa0, "\341\275\250\316\231"}, {0x1fa1, "\341\275\251\316\231"},
+    {0x1fa2, "\341\275\252\316\231"}, {0x1fa3, "\341\275\253\316\231"},
+    {0x1fa4, "\341\275\254\316\231"}, {0x1fa5, "\341\275\255\316\231"},
+    {0x1fa6, "\341\275\256\316\231"}, {0x1fa7, "\341\275\257\316\231"},
+    {0x1fb2, "\341\276\272\316\231"}, {0x1fb3, "\316\221\316\231"},
+    {0x1fb4, "\316\206\316\231"}, {0x1fb6, "\316\221\315\202"},
+    {0x1fb7, "\316\221\315\202\316\231"}, {0x1fc2, "\341\277\212\316\231"},
+    {0x1fc3, "\316\227\316\231"}, {0x1fc4, "\316\211\316\231"},
+    {0x1fc6, "\316\227\315\202"}, {0x1fc7, "\316\227\315\202\316\231"},
+    {0x1fd2, "\316\231\314\210\314\200"}, {0x1fd3, "\316\231\314\210\314\201"},
+    {0x1fd6, "\316\231\315\202"}, {0x1fd7, "\316\231\314\210\315\202"},
+    {0x1fe2, "\316\245\314\210\314\200"}, {0x1fe3, "\316\245\314\210\314\201"},
+    {0x1fe4, "\316\241\314\223"}, {0x1fe6, "\316\245\315\202"},
+    {0x1fe7, "\316\245\314\210\315\202"}, {0x1ff2, "\341\277\272\316\231"},
+    {0x1ff3, "\316\251\316\231"}, {0x1ff4, "\316\217\316\231"},
+    {0x1ff6, "\316\251\315\202"}, {0x1ff7, "\316\251\315\202\316\231"},
+    {0xfb00, "\106\106"}, {0xfb01, "\106\111"}, {0xfb02, "\106\114"},
+    {0xfb03, "\106\106\111"}, {0xfb04, "\106\106\114"}, {0xfb05, "\123\124"},
+    {0xfb06, "\123\124"}, {0xfb13, "\325\204\325\206"},
+    {0xfb14, "\325\204\324\265"}, {0xfb15, "\325\204\324\273"},
+    {0xfb16, "\325\216\325\206"}, {0xfb17, "\325\204\324\275"},
+};
+/* Python's char.upper() as UTF-8, owned by the caller. */
+static char *upper(utf8proc_int32_t c) {
+  for (size_t i = 0; i < sizeof(SPECIAL_UPPER) / sizeof(*SPECIAL_UPPER); i++)
+    if (SPECIAL_UPPER[i].lower == c)
+      return tai_strdup(SPECIAL_UPPER[i].upper);
+  utf8proc_uint8_t utf8[4];
+  utf8proc_ssize_t length = utf8proc_encode_char(utf8proc_toupper(c), utf8);
+  return tai_strndup((const char *)utf8, (size_t)length);
+}
+/* The reference's abbr_word: one box per character, lowercase letters
+ * uppercased in bold small caps; the word wraps as a whole and only its last
+ * box carries the space. */
+static void abbr_word(Inline *in, TaiNode *node, const char *s, size_t n) {
+  TaiLayout *l = in->owner;
+  double size;
+  Font *normal = face(l, node, false, in->sup, false, &size);
+  if (!normal)
+    return;
+  Font *caps = NULL;
+  Box **pieces = NULL;
+  size_t count = 0;
+  double total = 0;
+  for (size_t i = 0; i < n;) {
+    utf8proc_int32_t c;
+    utf8proc_ssize_t used =
+        utf8proc_iterate((const utf8proc_uint8_t *)s + i, (utf8proc_ssize_t)(n - i), &c);
+    if (used < 1) {
+      used = 1;
+      c = 0xfffd;
+    }
+    i += (size_t)used;
+    if (c == 0xad)
+      continue;
+    bool lower = utf8proc_islower(c);
+    if (lower && !caps)
+      caps = face(l, node, false, in->sup, true, &size);
+    Font *f = lower ? caps : normal;
+    utf8proc_uint8_t utf8[4];
+    char *text = !f ? NULL : lower ? upper(c) :
+        tai_strndup((const char *)utf8, (size_t)utf8proc_encode_char(c, utf8));
+    Box **grown = text ? realloc(pieces, (count + 1) * sizeof(*grown)) : NULL;
+    if (!grown) {
+      free(text);
+      l->failed = true;
+      release_all(pieces, count);
+      return;
+    }
+    pieces = grown;
+    pieces[count] = text_box(l, node, text, f, lower || text_bold(node), in->sup);
+    if (!pieces[count]) {
+      release_all(pieces, count);
+      return;
+    }
+    total += pieces[count++]->width;
+  }
+  if (!count)
+    return;
+  double space = measure(normal, " ");
+  pieces[count - 1]->space = space;
+  if (in->cursor + total > in->block->width && in->line->count &&
+      !newline(in)) {
+    release_all(pieces, count);
+    return;
+  }
+  for (size_t i = 0; i < count; i++)
+    if (!append(l, in->line, pieces[i])) {
+      for (size_t j = i; j < count; j++)
+        release(pieces[j]);
+      free(pieces);
+      return;
+    }
+  free(pieces);
+  in->cursor += total + space;
+}
 static void word(Inline *in, TaiNode *node, const char *s, size_t n) {
   TaiLayout *l = in->owner;
+  if (in->abbr && !in->pre) {
+    abbr_word(in, node, s, n);
+    return;
+  }
   Image *image = in->pre ? NULL : emoji(l, s, n);
   Box *b = box(l, image ? "EmojiLayout" : "TextLayout", node);
   if (!b)
@@ -520,24 +695,23 @@ static void word(Inline *in, TaiNode *node, const char *s, size_t n) {
     *w = 0;
   }
   double size;
-  Font *f = face(l, node, in->pre, &size);
+  Font *f = face(l, node, in->pre, in->sup, false, &size);
   if (!f) {
     release(b);
     return;
   }
   b->width = image ? 22.0 : measure(f, b->word);
+  b->text_width = b->width;
   b->font_size = size;
-  b->bold = !strcmp(property(node, "font-weight", "normal"), "bold") ||
-            atoi(property(node, "font-weight", "normal")) >= 600;
-  b->italic = !strcmp(property(node, "font-style", "normal"), "italic") ||
-              !strcmp(property(node, "font-style", "normal"), "oblique");
+  b->family = f->family;
+  b->bold = text_bold(node);
+  b->italic = text_italic(node);
+  b->sup = in->sup && !image;
   b->image = image;
   double image_height = image ? fmax(1.0, round_ties_even(
       (double)image->height * 22.0 / (double)image->width)) : 0.0;
-  b->ascent = image ? image_height :
-      (double)f->face->ascender * size / f->face->units_per_EM;
-  b->descent = image ? 0.0 :
-      -(double)f->face->descender * size / f->face->units_per_EM;
+  b->ascent = image ? image_height : font_ascent(f);
+  b->descent = image ? 0.0 : font_descent(f);
   b->height = b->ascent + b->descent;
   b->space = in->pre ? 0 : measure(f, " ");
   if (!in->pre && in->cursor + b->width > in->block->width && in->line->count &&
@@ -552,23 +726,8 @@ static void word(Inline *in, TaiNode *node, const char *s, size_t n) {
   in->cursor += b->width + b->space;
 }
 
-static bool append_text(char **text, size_t *length, const char *part) {
-  size_t count = strlen(part);
-  if (*length > SIZE_MAX - count - 1) return false;
-  char *next = realloc(*text, *length + count + 1);
-  if (!next) return false;
-  memcpy(next + *length, part, count + 1);
-  *text = next;
-  *length += count;
-  return true;
-}
-
-static bool node_text(const TaiNode *node, char **text, size_t *length) {
-  if (node->kind == TAI_TEXT) return append_text(text, length, node->text);
-  for (size_t i = 0; i < node->child_count; i++)
-    if (!node_text(node->children[i], text, length)) return false;
-  return true;
-}
+static Box *layout_block(TaiLayout *l, TaiNode **nodes, size_t count, double x,
+                         double y, double width, bool contents);
 
 static char *password_display(const char *value) {
   size_t count = 0;
@@ -598,13 +757,12 @@ static void inline_control(Inline *in, TaiNode *node) {
       TAI_CONTROL_TEXT;
 
   double size;
-  Font *f = face(layout, node, false, &size);
+  Font *f = face(layout, node, false, false, false, &size);
   if (!f) { release(box_control); return; }
   box_control->font_size = size;
-  box_control->bold = !strcmp(property(node, "font-weight", "normal"), "bold") ||
-                      atoi(property(node, "font-weight", "normal")) >= 600;
-  box_control->italic = !strcmp(property(node, "font-style", "normal"), "italic") ||
-                        !strcmp(property(node, "font-style", "normal"), "oblique");
+  box_control->family = f->family;
+  box_control->bold = text_bold(node);
+  box_control->italic = text_italic(node);
   box_control->space = measure(f, " ");
   if (checkbox) {
     box_control->width = 13.0;
@@ -616,23 +774,25 @@ static void inline_control(Inline *in, TaiNode *node) {
     box_control->width = fixed_px(property(node, "width", "auto"),
                                    &css_width) && css_width > 0.0
                              ? css_width : 200.0;
-    box_control->ascent =
-        (double)f->face->ascender * size / f->face->units_per_EM;
-    box_control->descent =
-        -(double)f->face->descender * size / f->face->units_per_EM;
+    box_control->ascent = font_ascent(f);
+    box_control->descent = font_descent(f);
     box_control->height = box_control->ascent + box_control->descent;
     if (button) {
-      char *contents = NULL;
-      size_t length = 0;
-      if (!node_text(node, &contents, &length)) {
-        free(contents);
-        release(box_control);
-        layout->failed = true;
-        return;
+      /* The reference lays the children out as a block 4px inside the
+       * button; it is placed at the origin here and moved with the button
+       * once the line positions it. */
+      double line = box_control->height, content_height = line;
+      if (node->child_count) {
+        Box *content = layout_block(layout, &node, 1, 0, 0,
+                                    fmax(1, box_control->width - 8), true);
+        if (!append(layout, box_control, content)) {
+          release(content);
+          release(box_control);
+          return;
+        }
+        content_height = content->height;
       }
-      box_control->word = contents ? contents : tai_strdup("");
-      if (!box_control->word) layout->failed = true;
-      box_control->height += 8.0;
+      box_control->height = fmax(content_height, line) + 8.0;
       box_control->ascent = box_control->height;
       box_control->descent = 0.0;
     } else {
@@ -653,6 +813,7 @@ static void inline_control(Inline *in, TaiNode *node) {
           codepoints++;
         }
         box_control->caret_x = measure_n(f, box_control->word, byte_index);
+        box_control->text_width = measure(f, box_control->word);
       }
     }
   }
@@ -722,26 +883,138 @@ static void recurse(Inline *in, TaiNode *n) {
     newline(in);
     return;
   }
-  bool pre = tag(n, "pre"), paragraph = tag(n, "p");
+  bool pre = tag(n, "pre"), paragraph = tag(n, "p"), sup = tag(n, "sup"),
+       abbr = tag(n, "abbr");
   if (pre)
     in->pre = true;
+  if (sup)
+    in->sup = true;
+  if (abbr)
+    in->abbr = true;
   if ((pre || paragraph) && in->line->count)
     newline(in);
   for (size_t i = 0; i < n->child_count; i++)
     recurse(in, n->children[i]);
   if (pre)
     in->pre = false;
+  if (sup)
+    in->sup = false;
+  if (abbr)
+    in->abbr = false;
   if ((pre || paragraph) && in->line->count)
     newline(in);
 }
+static void move_subtree(Box *b, double dx, double dy) {
+  b->x += dx;
+  b->y += dy;
+  for (size_t i = 0; i < b->count; i++)
+    move_subtree(b->children[i], dx, dy);
+}
+static bool whitespace_text(const TaiNode *n) {
+  if (n->kind != TAI_TEXT || !*n->text)
+    return false;
+  for (const char *p = n->text; *p;) {
+    utf8proc_int32_t c;
+    utf8proc_ssize_t len = utf8proc_iterate((const unsigned char *)p, -1, &c);
+    if (len < 1 || !whitespace(c))
+      return false;
+    p += len;
+  }
+  return true;
+}
+/* Lays out one child group below cy and moves cy past it. */
+static void place_group(TaiLayout *l, Box *b, TaiNode **group, size_t count,
+                  double *cy) {
+  Box *child = layout_block(l, group, count, b->x, *cy, b->width, false);
+  if (append(l, b, child))
+    *cy += child->height;
+  else
+    release(child);
+}
+static bool push_node(TaiLayout *l, TaiNode ***list, size_t *used, TaiNode *n) {
+  TaiNode **next = realloc(*list, (*used + 1) * sizeof(*next));
+  if (!next) {
+    l->failed = true;
+    return false;
+  }
+  *list = next;
+  (*list)[(*used)++] = n;
+  return true;
+}
+/* The reference's child_groups: consecutive inline children share a group,
+ * each block child is its own group, and an h6 followed (past whitespace
+ * text) by a <p> shares one group with that paragraph's children. */
+static bool block_children(TaiLayout *l, Box *b, TaiNode **nodes, size_t count,
+                           double *cy) {
+  TaiNode **children = NULL, **group = NULL, **merged = NULL;
+  size_t total = 0, used = 0;
+  bool ok = true;
+  for (size_t i = 0; ok && i < count; i++)
+    for (size_t j = 0; ok && j < nodes[i]->child_count; j++)
+      if (!tag(nodes[i]->children[j], "head"))
+        ok = push_node(l, &children, &total, nodes[i]->children[j]);
+  for (size_t i = 0; ok && i < total;) {
+    TaiNode *n = children[i];
+    if (tag(n, "h6")) {
+      size_t j = i + 1;
+      while (j < total && whitespace_text(children[j]))
+        j++;
+      if (j < total && tag(children[j], "p")) {
+        if (used)
+          place_group(l, b, group, used, cy);
+        used = 0;
+        size_t merged_count = 0;
+        ok = push_node(l, &merged, &merged_count, n);
+        for (size_t k = 0; ok && k < children[j]->child_count; k++)
+          ok = push_node(l, &merged, &merged_count, children[j]->children[k]);
+        if (ok)
+          place_group(l, b, merged, merged_count, cy);
+        free(merged);
+        merged = NULL;
+        i = j + 1;
+        continue;
+      }
+      if (j < total && !block(children[j])) {
+        ok = push_node(l, &group, &used, n);
+        i++;
+        continue;
+      }
+    }
+    if (block(n) || tag(n, "h6")) {
+      if (used)
+        place_group(l, b, group, used, cy);
+      used = 0;
+      place_group(l, b, &n, 1, cy);
+    } else {
+      ok = push_node(l, &group, &used, n);
+    }
+    i++;
+  }
+  if (ok && used)
+    place_group(l, b, group, used, cy);
+  free(group);
+  free(children);
+  return ok;
+}
+/* The block-mode header band height above a nav#toc (VSTEP + 4). */
+static const double TOC_HEADER = 22.0;
+static bool table_of_contents(TaiNode *n) {
+  const char *id = n->kind == TAI_ELEMENT ? tai_map_get(&n->attributes, "id") : NULL;
+  return tag(n, "nav") && id && !strcmp(id, "toc");
+}
+/* contents lays out a <button>'s children (nodes[0] is the button): its own
+ * tag is not a control and it never scrolls, like the reference's synthetic
+ * button-content node. */
 static Box *layout_block(TaiLayout *l, TaiNode **nodes, size_t count, double x,
-                         double y, double width) {
+                         double y, double width, bool contents) {
   Box *b = box(l, "BlockLayout", nodes[0]);
   if (!b)
     return NULL;
   b->x = x;
   b->y = y;
   b->width = width;
+  bool control = tag(nodes[0], "input") || tag(nodes[0], "button");
+  b->wrapper = contents || control;
   if (tag(nodes[0], "li")) {
     b->x += 20;
     b->width -= 20;
@@ -749,78 +1022,58 @@ static Box *layout_block(TaiLayout *l, TaiNode **nodes, size_t count, double x,
   double w = px(property(nodes[0], "width", "auto"), 0);
   if (w)
     b->width = w;
+  /* A display:block input or button still lays itself out inline. */
   bool blocks = false;
-  for (size_t i = 0; i < count; i++)
-    for (size_t j = 0; j < nodes[i]->child_count; j++)
-      if (block(nodes[i]->children[j]))
-        blocks = true;
-  if (blocks) {
-    TaiNode **group = NULL;
-    size_t used = 0;
-    double cy = y;
+  if (contents || !control)
     for (size_t i = 0; i < count; i++)
-      for (size_t j = 0; j < nodes[i]->child_count; j++) {
-        TaiNode *n = nodes[i]->children[j];
-        if (tag(n, "head"))
-          continue;
-        if (block(n) && used) {
-          Box *child = layout_block(l, group, used, b->x, cy, b->width);
-          if (append(l, b, child))
-            cy += child->height;
-          else
-            release(child);
-          used = 0;
-        }
-        if (block(n)) {
-          Box *child = layout_block(l, &n, 1, b->x, cy, b->width);
-          if (append(l, b, child))
-            cy += child->height;
-          else
-            release(child);
-        } else {
-          TaiNode **next = realloc(group, (used + 1) * sizeof(*next));
-          if (!next) {
-            l->failed = true;
-            free(group);
-            release(b);
-            return NULL;
-          }
-          group = next;
-          group[used++] = n;
-        }
-      }
-    if (used) {
-      Box *child = layout_block(l, group, used, b->x, cy, b->width);
-      if (append(l, b, child))
-        cy += child->height;
-      else
-        release(child);
+      for (size_t j = 0; j < nodes[i]->child_count; j++)
+        if (block(nodes[i]->children[j]))
+          blocks = true;
+  if (blocks) {
+    double cy = y + (table_of_contents(nodes[0]) ? TOC_HEADER : 0);
+    if (!block_children(l, b, nodes, count, &cy)) {
+      release(b);
+      return NULL;
     }
-    free(group);
     b->height = cy - y;
   } else {
-    Inline in = {l, b, NULL, 0, false};
+    Inline in = {l, b, NULL, 0, false, false, false};
     if (!newline(&in)) {
       release(b);
       return NULL;
     }
-    for (size_t i = 0; i < count; i++)
-      recurse(&in, nodes[i]);
+    if (contents)
+      for (size_t i = 0; i < nodes[0]->child_count; i++)
+        recurse(&in, nodes[0]->children[i]);
+    else
+      for (size_t i = 0; i < count; i++)
+        recurse(&in, nodes[i]);
     if (b->count && !b->children[b->count - 1]->count)
       release(b->children[--b->count]);
     double cy = y;
+    for (size_t i = 0; contents && i < b->count; i++)
+      b->children[i]->wrapper = true;
     for (size_t i = 0; i < b->count; i++) {
       Box *line = b->children[i];
       line->x = b->x;
       line->y = cy;
       line->width = b->width;
-      double asc = 0, desc = 0, tw = 0;
+      /* sup text tops align with the tallest normal text, or with the line's
+       * tallest child when the line has no normal text. */
+      double asc = 0, desc = 0, normal = 0, tw = 0;
+      bool has_normal = false;
       for (size_t j = 0; j < line->count; j++) {
         Box *c = line->children[j];
         asc = fmax(asc, c->ascent);
         desc = fmax(desc, c->descent);
+        if (!strcmp(c->kind, "TextLayout") && !c->sup) {
+          normal = has_normal ? fmax(normal, c->ascent) : c->ascent;
+          has_normal = true;
+        }
         tw += c->width + c->space;
       }
+      if (!has_normal)
+        normal = asc;
       if (line->count)
         tw -= line->children[line->count - 1]->space;
       const char *align = property(b->node, "text-align", "left");
@@ -832,7 +1085,9 @@ static Box *layout_block(TaiLayout *l, TaiNode **nodes, size_t count, double x,
       for (size_t j = 0; j < line->count; j++) {
         Box *c = line->children[j];
         c->x = cx;
-        c->y = cy + 1.25 * asc - c->ascent;
+        c->y = cy + 1.25 * asc - (c->sup ? normal : c->ascent);
+        if (c->control == TAI_CONTROL_BUTTON && c->count)
+          move_subtree(c->children[0], c->x + 4, c->y + 4);
         cx += c->width + c->space;
       }
       line->height = 1.25 * (asc + desc);
@@ -840,11 +1095,24 @@ static Box *layout_block(TaiLayout *l, TaiNode **nodes, size_t count, double x,
     }
     b->height = cy - y;
   }
+  if (table_of_contents(nodes[0])) {
+    Font *f = font_get(l, "Times New Roman", true, false, 12);
+    if (!f) {
+      release(b);
+      return NULL;
+    }
+    b->caption = (TaiLayoutCaption){
+        .text = "Table of Contents", .font_family = f->family,
+        .band_height = TOC_HEADER, .x = 4, .y = 2,
+        .width = measure(f, "Table of Contents"),
+        .height = font_ascent(f) + font_descent(f), .ascent = font_ascent(f),
+        .font_size = 12, .bold = true};
+  }
   b->content_height = b->height;
   double fixed_height;
   if (fixed_px(property(nodes[0], "height", "auto"), &fixed_height))
     b->height = fixed_height;
-  if (nodes[0]->kind == TAI_ELEMENT &&
+  if (!contents && nodes[0]->kind == TAI_ELEMENT &&
       !strcmp(property(nodes[0], "overflow", "visible"), "scroll") &&
       fixed_px(property(nodes[0], "height", "auto"), &fixed_height)) {
     b->scrollable = true;
@@ -881,7 +1149,7 @@ TaiLayout *tai_layout_create(TaiNode *root, double width, bool rtl,
     l->root->x = 13;
     l->root->y = 18;
     l->root->width = width - 26;
-    Box *child = layout_block(l, &root, 1, 13, 18, width - 26);
+    Box *child = layout_block(l, &root, 1, 13, 18, width - 26, false);
     if (append(l, l->root, child))
       l->root->height = child->height;
     else
@@ -925,29 +1193,26 @@ static TaiLayoutItemKind item_kind(const Box *b) {
   if (!strcmp(b->kind, "ButtonLayout")) return TAI_LAYOUT_BUTTON;
   return TAI_LAYOUT_TEXT;
 }
-static bool visit_box(const Box *b, TaiLayoutVisitor visitor, void *opaque) {
-  TaiLayoutItem item = {
-      .kind = item_kind(b),
-      .control = b->control,
-      .node = b->node,
-      .word = b->word,
-      .x = b->x,
-      .y = b->y,
-      .width = b->width,
-      .height = b->height,
-      .ascent = b->ascent,
-      .descent = b->descent,
-      .space = b->space,
-      .font_size = b->font_size,
+static TaiLayoutItem item_of(const Box *b) {
+  return (TaiLayoutItem){
+      .kind = item_kind(b), .control = b->control,
+      .node = b->node, .word = b->word,
+      .font_family = b->family, .text_width = b->text_width,
+      .x = b->x, .y = b->y, .width = b->width, .height = b->height,
+      .ascent = b->ascent, .descent = b->descent, .space = b->space,
+      .font_size = b->font_size, .content_height = b->content_height,
       .caret_x = b->caret_x,
-      .content_height = b->content_height,
-      .scroll_y = b->scroll_y,
-      .bold = b->bold, .italic = b->italic, .scrollable = b->scrollable,
+      .scroll_y = b->scroll_y, .bold = b->bold, .italic = b->italic,
+      .scrollable = b->scrollable, .wrapper = b->wrapper,
+      .caption = b->caption,
       .image_pixels = b->image ? b->image->pixels : NULL,
       .image_width = b->image ? b->image->width : 0,
       .image_height = b->image ? b->image->height : 0,
       .image_stride = b->image ? b->image->stride : 0,
   };
+}
+static bool visit_box(const Box *b, TaiLayoutVisitor visitor, void *opaque) {
+  TaiLayoutItem item = item_of(b);
   if (!visitor(&item, opaque)) return false;
   for (size_t i = 0; i < b->count; i++)
     if (!visit_box(b->children[i], visitor, opaque)) return false;
@@ -955,20 +1220,7 @@ static bool visit_box(const Box *b, TaiLayoutVisitor visitor, void *opaque) {
 }
 static bool walk_box(const Box *b, TaiLayoutTreeVisitor visitor,
                      void *opaque) {
-  TaiLayoutItem item = {
-      .kind = item_kind(b), .control = b->control,
-      .node = b->node, .word = b->word,
-      .x = b->x, .y = b->y, .width = b->width, .height = b->height,
-      .ascent = b->ascent, .descent = b->descent, .space = b->space,
-      .font_size = b->font_size, .content_height = b->content_height,
-      .caret_x = b->caret_x,
-      .scroll_y = b->scroll_y, .bold = b->bold, .italic = b->italic,
-      .scrollable = b->scrollable,
-      .image_pixels = b->image ? b->image->pixels : NULL,
-      .image_width = b->image ? b->image->width : 0,
-      .image_height = b->image ? b->image->height : 0,
-      .image_stride = b->image ? b->image->stride : 0,
-  };
+  TaiLayoutItem item = item_of(b);
   if (!visitor(&item, TAI_LAYOUT_ENTER, opaque)) return false;
   for (size_t i = 0; i < b->count; i++)
     if (!walk_box(b->children[i], visitor, opaque)) return false;
@@ -1029,7 +1281,8 @@ bool tai_layout_control_caret_index(const TaiLayout *layout, size_t node_id,
   double size;
   /* The font cache is memoization, not observable layout state; the owning
    * thread has exclusive access to the layout (see layout.h). */
-  Font *f = face((TaiLayout *)layout, box_control->node, false, &size);
+  Font *f = face((TaiLayout *)layout, box_control->node, false, false, false,
+                 &size);
   if (!f) return false;
   size_t offset = 0, codepoints = 0, length = strlen(box_control->word);
   double local_x = document_x - box_control->x;
