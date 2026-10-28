@@ -147,7 +147,13 @@ bottom 時地址列失焦但保留 dirty 草稿，頁面焦點不變，以截斷
 範圍見 [migration plan](../PORTING_PLAN.md)。
 
 同一視窗的 `SDL_EVENT_MOUSE_WHEEL` 與 `SDL_EVENT_KEY_DOWN` 的 `PageUp`/`↑`、
-`PageDown`/`↓` 直接透過 `TaiPage` 的既有 page-scroll seam。Frozen Python oracle 的 step
+`PageDown`/`↓` 都經 `tai_page_scroll_by()`（Python `Tab.scroll_by`）。最近一次未被
+`preventDefault` 的頁面點擊若落在可捲動容器（`overflow:scroll` 加固定 px `height`）內，最內層
+容器取得捲動焦點，輸入先捲它：夾限於 `[0, content_height − height]`，到底時頁面不接手；容器已
+不在 layout（被移除或不再可捲動）時清除焦點改捲頁面。頁面點擊（含落空與被取消）與 chrome 區
+點擊都先清除焦點；內容區中鍵不動它。PageUp/PageDown 比照 ↑/↓ 是刻意差異，見
+[migration plan](../PORTING_PLAN.md)「快捷鍵與 wheel」列；oracle 比對見
+`tests/overflow_scroll_integration.py`。Frozen Python oracle 的 step
 是 100px：normal wheel 正 tick/`PageUp`/`↑` 為 −100，負 tick/`PageDown`/`↓` 為 +100；
 flipped wheel 先反向。
 Python 將 wheel y 轉為 int，因此 native 對絕對值小於一的 SDL3 float delta 不動。非有限、未知

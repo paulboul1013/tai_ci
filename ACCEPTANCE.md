@@ -28,6 +28,7 @@ Pixel-perfect 只在字型、版本、backend 與環境固定時使用；優先�
 
 | Slice | Date | State | Summary (proven / main gap) | Detail |
 | --- | --- | --- | --- | --- |
+| overflow 容器捲動 | 2026-10-28 | VALIDATING | 未被取消的頁面點擊把最內層 `overflow:scroll` 容器設為捲動焦點，wheel 與 ↑/↓/PageUp/PageDown 先捲它、到底時頁面不接手、容器離開 layout 時改捲頁面，頁面與 chrome 點擊清焦點；overflow-scroll oracle 9 個情境、native 21 個檢查點相符，含負向對照；CTest 64/64、ASan-UBSan-LSan 64/64、Xvfb 真實視窗、獨立審查（ownership／Spec／Standards）通過 | [detail](docs/acceptance/2026-10-28-overflow-scroll.md) |
 | 中鍵開新分頁 | 2026-10-28 | VALIDATING | 內容區中鍵以命中測試找 `<a href>`（不派送 JS），mailto 外部開啟、其他 URL 開新 active 分頁，草稿保留；chrome 區中鍵只清頁面焦點；middle-click oracle 7 個情境、native 9 個檢查點相符，含負向對照；25 分頁上限單元檢查；CTest 62/62、ASan-UBSan-LSan 62/62／Xvfb 真實視窗與獨立審查未做 | [detail](docs/acceptance/2026-10-28-middle-click.md) |
 | `mailto:` 外部開啟 | 2026-10-21 | VALIDATING | 地址列與點擊 mailto 交給 `xdg-open`、不導覽不改 history；mailto oracle 5 個情境、native 7 個檢查點相符，含負向對照；spawn 契約單元測試；CTest 56/56、ASan-UBSan-LSan 56/56、Xvfb 真實視窗（假開啟器）、獨立審查的修正已套用／中鍵 mailto 由 2026-10-28 切片補上、reaper thread 沒有上限 | [detail](docs/acceptance/2026-10-21-mailto.md) |
 | Trace（`MeasureTime` 移植） | 2026-10-14 | VALIDATING | `BROWSER_TRACE_FILE` 非空時 `--window` 寫 Chrome／Perfetto JSON；事件名稱以凍結 oracle trace 核對（native 名稱皆在 oracle 中，只少 `commit`），Xvfb 真實視窗整合測試含未設／空字串／不可寫路徑；CTest 58/58、ASan-UBSan-LSan 58/58、獨立審查無缺陷，取消與關閉時的 `b`/`e` 配對有 Xvfb 測試與突變驗證／多視窗未驗、ASan 版整合測試偶發無法結束 | [detail](docs/acceptance/2026-10-14-trace.md) |

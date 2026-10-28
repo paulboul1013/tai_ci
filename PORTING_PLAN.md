@@ -8,7 +8,8 @@
 `VALIDATING`，見下方第 6 項。其後的 [JS DOM 補齊](docs/js-dom-plan.md) 已實作並驗收（2026-10-04），
 `VALIDATING`，見下方第 7 項。其後的 Trace（`MeasureTime` 移植）已實作並驗收（2026-10-14），`VALIDATING`，
 見子系統地圖「Profiling / trace」列。其後的 `mailto:` 外部開啟已實作並驗收（2026-10-21），`VALIDATING`，見下方第 8 項。
-其後的中鍵開新分頁已實作並驗收（2026-10-28），`VALIDATING`，見下方第 9 項。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+其後的中鍵開新分頁已實作並驗收（2026-10-28），`VALIDATING`，見下方第 9 項。
+其後的 overflow 容器捲動已實作並驗收（2026-10-28），`VALIDATING`，見下方第 10 項。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 下一個垂直切片
 
@@ -52,20 +53,27 @@
    中鍵只清除頁面輸入焦點。`tests/middle_click_oracle_probe.py` 凍結 Python 7 個情境，
    `tests/middle_click_integration.py` 在 dummy SDL 分頁迴圈以假開啟器逐點比對 9 個檢查點；
    25 分頁上限由 `tests/test_tabset.c` 檢查。證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+10. **overflow 容器捲動：已實作，`VALIDATING`（2026-10-28）。** 比照 Python `Tab.scroll_focus`：
+   頁面點擊先清除捲動焦點，未被 `preventDefault` 時改為命中物件最內層的可捲動區塊（`overflow:
+   scroll` 加固定 px `height`）；wheel 與 ↑/↓ 經 `tai_page_scroll_by()` 先捲該容器（夾限、到底時
+   頁面不接手），容器已不在 layout 時清除焦點改捲頁面；chrome 區點擊清除焦點。
+   `tests/overflow_scroll_oracle_probe.py` 凍結 Python 9 個情境，`tests/overflow_scroll_integration.py`
+   在 dummy SDL 分頁迴圈逐點比對 21 個檢查點；PageUp/PageDown 的刻意差異見下表「快捷鍵與
+   wheel」列。證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 已知差異與範圍
 
 | 項目 | 目前 native 行為與移植影響 |
 |---|---|
-| Tabs 上限與呈現 | 使用者指定最多 25 個 tabs；超寬時用等寬編號格。Python 無上限且讓文字換行。極窄格的可讀性仍待改善。達上限時中鍵點連結不開分頁，只在 stderr 印 `link navigation failed: maximum of 25 tabs reached`（使用者 2026-10-28 決定維持上限；Python 照樣開新分頁）；中鍵 mailto 不佔分頁，達上限仍外部開啟。 |
+| Tabs 上限與呈現 | 使用者指定最多 25 個 tabs；超寬時用等寬編號格。Python 無上限且讓文字換行。極窄格的可讀性仍待改善。達上限時中鍵點連結不開分頁，只在 stderr 印 `link navigation failed: maximum of 25 tabs reached`（使用者 2026-10-28 決定維持上限；Python 照樣開新分頁）；中鍵 mailto 不佔分頁，達上限仍外部開啟。；達上限時點「+」整個不動作，也不 blur 頁面，所以先前點過的 overflow 容器仍保有捲動焦點（Python 每次 chrome 點擊都 blur） |
 | 載入失敗與 pending | 載入失敗（首次或之後、網路或憑證）兩者都在請求 URL 顯示錯誤頁：一般導覽截斷 forward 項目，Back/Forward 停在目標 index（使用者 2026-09-26 決定，取代原回滾策略）。Pending 期間 native 仍顯示舊 page 與其 scroll；Python 開始導覽時 scroll 已歸零。可見 URL、history 與按鈕狀態在 pending 期間兩者相同。 |
 | Pending 時按 Back | Python 已把 pending URL 寫入 history，Back 後它成為 forward 項目；native 取消尚未提交的導覽並丟掉該項目，Forward 不可用（使用者 2026-09-26 決定維持）。`tests/history_integration.py` 只對這兩個欄位套用此差異。 |
 | 地址與外部開啟 | Native 拒絕 malformed/unsupported 直接網址；一般文字仍轉為 DuckDuckGo 查詢。`mailto:` 的開啟時機、URL 與 history 行為與 Python 相同（`tests/mailto_integration.py`）。使用者 2026-10-21 決定：只用 `xdg-open`（Python `webbrowser` 先看 `$BROWSER` 再依序嘗試多個瀏覽器）、點擊不先詢問（同 Python）。診斷 `open external URL: <url>` 寫到 stderr（Python stdout，同 D1）；Python 的第二行 `webbrowser.open returned: …` 不輸出，啟動失敗時改印 `link navigation failed: could not start xdg-open: …`（地址列為 `address navigation failed: …`）。開啟器不經 shell、在新 session 執行，stdin／stdout 接 `/dev/null`；`xdg-open` 自身的結束狀態兩邊都不觀察。中鍵點 mailto 連結兩者都外部開啟（`tests/middle_click_integration.py`）。 |
-| 快捷鍵與 wheel | Native 在地址欄未聚焦時支援 Alt+Left/Alt+Right（Python 沒有 history 快捷鍵）；Ctrl+N 見下列「新視窗」；尚無 Escape 專用操作。未知 wheel direction 或非有限 y 為 no-op，與 frozen Python 不同。 |
+| 快捷鍵與 wheel | Native 在地址欄未聚焦時支援 Alt+Left/Alt+Right（Python 沒有 history 快捷鍵）；Ctrl+N 見下列「新視窗」；尚無 Escape 專用操作。未知 wheel direction 或非有限 y 為 no-op，與 frozen Python 不同。PageUp/PageDown 是 native 才有的捲動鍵（Python 只有 ↑/↓ 與 wheel），比照 ↑/↓ 先捲點擊選中的 overflow 容器、到底時頁面不接手（使用者 2026-10-28 決定；`tests/test_overflow_scroll_window.c` 的 `pagekeys` 情境）。 |
 | 視覺效果像素 | 使用者 2026-10-14 決定不做 Python（Skia）與 native（Cairo）的逐像素 raster 比對：兩邊的 raster 函式庫不同，混色精度、反鋸齒與 blur 演算法本就不會逐像素相同。Opacity、`#rrggbbaa`、`mix-blend-mode`、`overflow` 圓角裁切、blur 與效果順序以 display-list 結構 oracle（`display_differential`、`hit_differential`、`blur_oracle_probe`）加 native key-pixel 測試（`tests/test_render.c`）驗證，見 [raster 契約](docs/reference-display-raster.md)。 |
 | History 保存 | 兩者均保存 URL，Back/Forward 以 GET 重載（含 POST 結果頁與同頁 fragment 項目，重新 GET 後捲到 fragment）；不保存 POST body、舊 DOM 或 scroll snapshot。跨 tab 與 pending 狀態已由 history oracle 比對。 |
 | Chrome 外觀 | 使用者 2026-09-29 決定 native 與 Python 各自保留自己的 chrome 外觀，不做完整視覺比對。控制項的位置、命中區、狀態與行為仍以 oracle 比對（`tabs_oracle_probe`、`tab_strip_differential`、`https_oracle_probe` 等）。已知外觀差異：Python 按鈕為 `browser.css` 的橘底加實線邊框，native 為淺灰立體按鈕；Back／Forward 圖示 Python 為 `<`／`>`，native 為箭頭；非作用中分頁連結 Python 純藍、native 深藍；網址列 Python 無邊框 16px 襯線字，native 有邊框 12px 無襯線字；native 在 chrome 底部多一條分隔線。同樣不再追的排版差異：窄寬 tab 標籤本身的排版仍是近似：Python 逐字換行（例如 84–119px、Tab 0 作用中時 Tab 1 整個移到第二行 `[0,39.2,37,55.2]`，<84px 時 `[Tab` 與 `0]` 分兩行），native 以固定規則放置標籤與命中區；<70px 的 Python 列高也未建模。 |
-| Tab 列換行時的 viewport | Python 只在視窗 resize 或建立新 tab 時以當下 chrome bottom 計算 tab 高度，New Tab 造成換行後，既有 tab 的 viewport 仍是舊高度（下緣超出視窗 20px）；native 在換行狀態改變時立即把所有 tab 的 viewport 調成新 chrome bottom 以下的高度，讓捲動範圍與可見區一致。Python 依粗體／一般標籤混合，換行後列高另有 ≤0.14px 的差異，native 使用單一行高。 |
+| Tab 列換行時的 viewport | Python 只在視窗 resize 或建立新 tab 時以當下 chrome bottom 計算 tab 高度，New Tab 造成換行後，既有 tab 的 viewport 仍是舊高度（下緣超出視窗 20px）；native 在換行狀態改變時立即把所有 tab 的 viewport 調成新 chrome bottom 以下的高度，讓捲動範圍與可見區一致。Python 依粗體／一般標籤混合，換行後列高另有 ≤0.14px 的差異，native 使用單一行高。同一原因也影響第一個分頁：Python `new_tab` 在 tab 列出現前以不含 tab 列的 chrome bottom 計算高度（800×600 時 531.66px），直到 resize 才修正；native 一開始就用含 tab 列的 525.18px，頁面最大捲動因此少 6.48px（2026-10-28 overflow 捲動切片發現，非刻意，native 與可見區一致）。 |
 | HTTPS 鎖頭時機 | Python 導覽一開始就清除 `secure`，pending 期間沒有鎖頭；native 在新頁面 commit 前保留舊頁面的鎖頭（使用者於 2026-09-26 決定），延伸既有「pending 時顯示舊頁面」策略。載入失敗（含憑證錯誤）時兩者都顯示錯誤頁、沒有鎖頭。 |
 | 測試信任根 | 本機 HTTPS 測試需要信任每次產生的 CA。Python oracle 以 `SSL_CERT_FILE` 設定；native 只透過測試用 `tai_network_set_ca_file()`／`tai_tabset_create_for_test()`，不讀環境變數，`tai-browser` 從不呼叫（使用者於 2026-09-26 決定）。 |
 | 書籤控制 | Python 以單一 toolbar 星星（黃／白底）切換收藏，須手動輸入 `about:bookmarks` 看清單。Native 以地址欄內灰／金星切換收藏，並以地址欄左側獨立按鈕開啟清單；`about:bookmarks` 仍可直接輸入。可收藏條件、排序與逸出與 Python 相同。幾何見 [presentation 契約](docs/reference-presentation.md)。 |
@@ -104,7 +112,7 @@
 | JavaScript / events | JS runtime → `src/js.c` | QuickJS-NG, DOM, network | VALIDATING | 凍結 `runtime.js` 原文嵌入；JS DOM oracle differential／integration、bridge 配置故障與 JS heap 掃描（`js_dom_oom`）、cancellation、Xvfb 真實視窗 | `fetch`、capture phase、`parentNode` 等 runtime.js 沒有的 API；wrapper 不唯一（見 [綁定升級路線](docs/js-dom-plan.md)）；QuickJS OOM 修補待上游整合 |
 | Scheduling | tasks/clocks → `src/scheduler.c` | threads, network | VALIDATING | priority/FIFO/aging/generation tests | browser/network/frame integration |
 | Profiling / trace | `MeasureTime` → `src/trace.c`（`include/tai/trace.h`） | threads, core | VALIDATING | `trace`、`trace_format`（含多執行緒壓力）、`trace_oracle_probe`、Xvfb `trace_window_integration`（[2026-10-14 驗收](docs/acceptance/2026-10-14-trace.md)） | 多視窗與 `about:` 頁未追蹤驗證；導覽取消與關閉時進行中請求的 `b`/`e` 配對已有 Xvfb 測試 |
-| Browser / window | app/tab/chrome → `src/browser.c`, `src/session.c`, `src/tabset.c`, `src/presentation*.c`, `src/main.c` | page, threads, network, Cairo, SDL3 | VALIDATING | [acceptance](ACCEPTANCE.md)、[tabs oracle](tests/tabs_oracle_probe.py)、[new-window oracle](tests/new_window_oracle_probe.py)、[title oracle](tests/title_oracle_probe.py)、[mailto oracle](tests/mailto_oracle_probe.py)、[middle-click oracle](tests/middle_click_oracle_probe.py)、native tab/window tests | 整體 browser 驗收 |
+| Browser / window | app/tab/chrome → `src/browser.c`, `src/session.c`, `src/tabset.c`, `src/presentation*.c`, `src/main.c` | page, threads, network, Cairo, SDL3 | VALIDATING | [acceptance](ACCEPTANCE.md)、[tabs oracle](tests/tabs_oracle_probe.py)、[new-window oracle](tests/new_window_oracle_probe.py)、[title oracle](tests/title_oracle_probe.py)、[mailto oracle](tests/mailto_oracle_probe.py)、[middle-click oracle](tests/middle_click_oracle_probe.py)、[overflow-scroll oracle](tests/overflow_scroll_oracle_probe.py)、native tab/window tests | 整體 browser 驗收 |
 
 ## 依工作分支讀取
 

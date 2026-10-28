@@ -53,8 +53,15 @@ private, incompatible node layouts.
   fields intact. The adapter replaces the texture only after the new frame is
   presented; exposed windows repaint the retained texture. On its caller thread
   it adapts only accepted window wheel, PageUp/PageDown, and up/down arrow
-  events into finite proposals through `TaiPage`'s clamped page-scroll
-  interface; an unchanged clamp leaves the retained texture untouched.
+  events into finite 100px deltas through `tai_page_scroll_by`; an unchanged
+  clamp leaves the retained texture untouched. `TaiPage` keeps a borrowed
+  `scroll_focus` node (Python `Tab.scroll_focus`, valid until the document is
+  destroyed, D2): page activation clears it and an unprevented click sets it to
+  the innermost scrollable layout block around the hit; `tai_page_blur_input`
+  clears it. A delta first moves that container's DOM `scroll_y` and rebuilds
+  the layout and display list (restoring the old offset if the rebuild
+  fails); a container that left the layout drops the focus and the page
+  scrolls instead.
   Each present composes a stateless scrollbar thumb from borrowed page scroll
   and viewport values above the retained texture. The overlay owns no resource
   and never mutates the display list or Cairo pixels; expose recomposes it.
@@ -65,8 +72,8 @@ private, incompatible node layouts.
   click. SDL text input runs only while that window is focused and
   the current page has an active text/password control; focus loss and adapter
   cleanup stop it. Backspace, left/right, and Return go through the focused
-  page-control seam, while PageUp/PageDown and up/down retain page-scroll
-  behavior.
+  page-control seam, while PageUp/PageDown and up/down keep going through
+  `tai_page_scroll_by`.
   A future raster worker may receive a self-contained display list, never
   mutable DOM state.
 
