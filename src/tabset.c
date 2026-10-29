@@ -3,6 +3,7 @@
 #include "tai/bookmarks.h"
 #include "tai/external.h"
 #include "tai/trace.h"
+#include "tai/visited.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -39,6 +40,9 @@ struct LoadTask {
     char *body;
     char *referrer;
     char *internal_markup;
+    /* The app's visited links when the navigation started: the loader styles
+     * with it, and the page borrows it until commit replaces its net. */
+    TaiVisited *visited;
     LoadKind kind;
     size_t history_target;
     double width;
@@ -62,7 +66,8 @@ struct TabSlot {
 /* Process-wide state shared by every window's tab set. The registry, tab IDs,
  * bookmarks and configuration belong to the SDL owner thread; the loader
  * thread owns the network and touches only the mutex-protected queues and
- * the immutable configuration strings. */
+ * the immutable configuration strings. visited holds the requested URL of
+ * every committed page and fragment change; loads get a copy. */
 struct TaiBrowserApp {
     const char *default_css;
     char *home_url;
@@ -70,6 +75,7 @@ struct TaiBrowserApp {
     /* NULL selects TAI_EXTERNAL_OPENER. */
     char *external_opener;
     TaiBookmarks *bookmarks;
+    TaiVisited *visited;
     bool rtl;
     uint64_t next_tab_id;
     TaiTabSet **tabsets;
@@ -179,6 +185,7 @@ static void task_destroy(LoadTask *task) {
     free(task->body);
     free(task->referrer);
     free(task->internal_markup);
+    tai_visited_destroy(task->visited);
     free(task);
 }
 
@@ -543,7 +550,8 @@ static void load_task_start(Loader *loader, LoadTask *task) {
                       .checkpoint = loader_checkpoint,
                       .cancelled = task_cancelled,
                       .start = loader_start,
-                      .cookies = app->cookies, .userdata = task};
+                      .cookies = app->cookies, .visited = task->visited,
+                      .userdata = task};
     tai_trace_begin(TAI_SPAN_TASK_LOAD);
     TaiPageLoad *load = task->internal_markup
         ? tai_page_load_async_markup(network, url, task->internal_markup,
@@ -747,6 +755,7 @@ static LoadTask *task_create(TaiTabSet *tabs, TabSlot *slot, const char *url,
     if (!strcmp(url, "about:bookmarks"))
         task->internal_markup = bookmarks_markup(tabs->app->bookmarks);
     if (body) task->body = tai_strdup(body);
+    task->visited = tai_visited_copy(tabs->app->visited);
     const TaiPage *page = tai_session_page(slot->session);
     /* Python captures the tab's current URL before replacing it. While a
      * previous navigation is pending, that provisional URL is the referrer
@@ -759,7 +768,7 @@ static LoadTask *task_create(TaiTabSet *tabs, TabSlot *slot, const char *url,
     task->width = tabs->width;
     task->height = tabs->height;
     atomic_init(&task->cancelled, false);
-    if (!task->url || (!strcmp(url, "about:bookmarks") &&
+    if (!task->url || !task->visited || (!strcmp(url, "about:bookmarks") &&
                        !task->internal_markup) || (body && !task->body) ||
         (referrer && !task->referrer)) {
         task_destroy(task);
@@ -823,6 +832,7 @@ static void completions_free(Completion *completion) {
 
 static void app_free_state(TaiBrowserApp *app) {
     tai_bookmarks_destroy(app->bookmarks);
+    tai_visited_destroy(app->visited);
     free(app->home_url);
     free(app->ca_file);
     free(app->external_opener);
@@ -847,9 +857,11 @@ static TaiBrowserApp *app_create(const char *default_css, bool rtl,
     app->home_url = tai_strdup(home_url);
     app->ca_file = ca_file ? tai_strdup(ca_file) : NULL;
     app->bookmarks = tai_bookmarks_create();
+    app->visited = tai_visited_create();
     app->rtl = rtl;
     app->next_tab_id = 1;
-    if (!app->home_url || !app->bookmarks || (ca_file && !app->ca_file)) {
+    if (!app->home_url || !app->bookmarks || !app->visited ||
+        (ca_file && !app->ca_file)) {
         set_error(error, "browser state allocation failed");
         app_free_state(app);
         return NULL;
@@ -879,7 +891,8 @@ static TaiBrowserApp *app_create(const char *default_css, bool rtl,
     app->cookies = tai_cookie_jar_create();
     app->event_net = (TaiPageNet){.request = app_xhr_request,
                                   .start = app_start,
-                                  .cookies = app->cookies, .userdata = app};
+                                  .cookies = app->cookies,
+                                  .visited = app->visited, .userdata = app};
     if (!app->cookies ||
         pthread_create(&app->loader_thread, NULL, loader_main, app) != 0) {
         set_error(error, app->cookies ? "page loader thread creation failed"
@@ -1232,7 +1245,16 @@ bool tai_tabset_record_fragment(TaiTabSet *tabs, const char *url,
     if (error) { free(*error); *error = NULL; }
     TabSlot *slot = active_slot(tabs);
     if (!slot) return set_error(error, "no active tab");
-    return tai_session_record_fragment(slot->session, url, error);
+    if (!tai_session_record_fragment(slot->session, url, error)) return false;
+    /* Python adds the new URL and renders again (set_needs_render). Neither
+     * failure undoes the history entry: the link only stays unvisited. */
+    char *restyle_error = NULL;
+    if (!tai_visited_add(tabs->app->visited, url) ||
+        !tai_page_restyle(tai_session_page(slot->session), &restyle_error))
+        fprintf(stderr, "visited link update failed: %s\n",
+                restyle_error ? restyle_error : "allocation failed");
+    free(restyle_error);
+    return true;
 }
 
 bool tai_tabset_resize(TaiTabSet *tabs, double width, double height,
@@ -1322,8 +1344,18 @@ bool tai_tabset_pump(TaiTabSet *tabs, bool *changed, char **error) {
                             task->history_target, error)
                         : tai_session_commit_navigation(slot->session,
                                                         candidate, error);
-                    if (committed) candidate = NULL;
-                    else {
+                    if (committed) {
+                        candidate = NULL;
+                        /* The page URL is the parsed requested URL, as
+                         * Python's str(url). Like the fragment case, a
+                         * failure only leaves links to it unvisited. */
+                        const TaiUrl *url = tai_page_url(
+                            tai_session_page(slot->session));
+                        if (!items->network_failure &&
+                            !tai_visited_add(tabs->app->visited,
+                                             tai_url_string(url)))
+                            fprintf(stderr, "visited link record failed\n");
+                    } else {
                         all_ok = false;
                         if (!error || !*error)
                             set_error(error, "tab navigation commit failed");

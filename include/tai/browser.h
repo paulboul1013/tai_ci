@@ -5,6 +5,7 @@
 #include "tai/layout.h"
 #include "tai/network.h"
 #include "tai/render.h"
+#include "tai/visited.h"
 
 /* The browser's name: the window title before a page commits and for pages
  * without a usable <title>. The Python oracle uses its own name. */
@@ -42,9 +43,10 @@ bool tai_page_fetch_abandoned(const TaiPageFetch *fetch);
 void tai_page_fetch_finish(TaiPageFetch *fetch, TaiResponse *response,
                            const char *failure);
 
-/* How a page's scripts reach the network: document.cookie and synchronous
- * XMLHttpRequest. The owner that runs the page's JS injects it; every
- * pointer is borrowed and must outlive the page's use of it.
+/* How a page's scripts reach the network (document.cookie and synchronous
+ * XMLHttpRequest), plus the visited links it styles with. The owner that
+ * runs the page's JS injects it; every pointer is borrowed and must outlive
+ * the page's use of it.
  *   request     sends one request and blocks until it completes, on the
  *               thread running the page's JS. Returns an owned response (a
  *               transport failure sets response->error), or NULL with an
@@ -58,7 +60,10 @@ void tai_page_fetch_finish(TaiPageFetch *fetch, TaiResponse *response,
  *               call tai_page_fetch_finish exactly once; false means it
  *               could not start (the page reports a failure). NULL: every
  *               asynchronous request fails
- *   cookies     the shared jar; NULL makes document.cookie read "" */
+ *   cookies     the shared jar; NULL makes document.cookie read ""
+ *   visited     read at every restyle on the thread running the page: an
+ *               <a href> whose resolved URL it contains matches :visited.
+ *               NULL: no link is visited */
 typedef struct {
     TaiResponse *(*request)(void *userdata, const TaiUrl *url,
                             const TaiUrl *referrer, const char *payload,
@@ -68,6 +73,7 @@ typedef struct {
     bool (*cancelled)(void *userdata);
     bool (*start)(void *userdata, TaiPageFetch *fetch);
     TaiCookieJar *cookies;
+    const TaiVisited *visited;
     void *userdata;
 } TaiPageNet;
 /* Total time limit of one synchronous XMLHttpRequest, across redirects. */
@@ -140,6 +146,9 @@ bool tai_page_fragment_url_changed(const TaiPage *page);
 /* Resolves the pending fragment transaction after session history recording.
  * On failure restores the old URL and scroll without allocation. */
 void tai_page_finish_fragment_change(TaiPage *page, bool committed);
+/* Styles the page again (marking visited links from its net) and rebuilds
+ * its frame. On failure the previous frame stays and the page stays dirty. */
+bool tai_page_restyle(TaiPage *page, char **error);
 const char *tai_navigation_intent_url(const TaiNavigationIntent *intent);
 bool tai_navigation_intent_is_post(const TaiNavigationIntent *intent);
 const char *tai_navigation_intent_body(const TaiNavigationIntent *intent);

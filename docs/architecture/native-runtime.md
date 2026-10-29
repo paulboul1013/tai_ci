@@ -149,9 +149,10 @@ private, incompatible node layouts.
   synchronous single-session adapter.
 - `TaiBrowserApp` is the process-wide state every window shares, matching
   Python's `BrowserApp`: the loader thread and its `TaiNetwork` (one cookie
-  jar), the bookmark collection, the New Tab URL, default CSS (borrowed), RTL,
-  the app-wide tab ID counter, and a registry of the tab sets created in it.
-  The registry, IDs and bookmarks belong to the SDL owner thread. The app must
+  jar), the bookmark collection, the visited-link set, the New Tab URL,
+  default CSS (borrowed), RTL, the app-wide tab ID counter, and a registry of
+  the tab sets created in it. The registry, IDs, bookmarks and visited set
+  belong to the SDL owner thread. The app must
   outlive every tab set created with `tai_tabset_create_in_app`; the
   single-window `tai_tabset_create*` constructors build a private app that the
   tab set owns and destroys with itself.
@@ -242,6 +243,16 @@ private, incompatible node layouts.
   unchanged. If the file cannot be opened or parsed, the app warns on
   stderr, keeps the file untouched, and uses a memory-only collection.
   The `_with_home_url` and `_for_test` variants are always memory-only.
+- `TaiBrowserApp` owns one in-memory `TaiVisited` set shared by all tabs and
+  windows. The SDL thread adds a page's requested URL when the page commits
+  (not when the result is the network error page) and the new URL when a
+  fragment change is recorded; the fragment case then restyles the page with
+  `tai_page_restyle`. `task_create` copies the set into the `LoadTask`; the
+  loader's `TaiPageNet.visited` borrows that copy, so the loader never reads
+  the mutable set. Commit replaces the page's net with the app's event net,
+  whose `visited` borrows the app set, before `task_destroy` frees the copy.
+  Every page restyle (`page_style` in `src/browser.c`) marks each `<a href>`
+  whose resolved URL is in the set; other tabs update on their next restyle.
 - Page security is a property of the committed `TaiPage`, not extra tab-set
   state: `tai_page_secure()` is true when the page's requested URL is `https`
   and its document response had no transport or certificate error (redirects

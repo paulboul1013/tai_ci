@@ -67,7 +67,7 @@ add_custom_command(OUTPUT "${TAI_JS_SOURCES_HEADER}"
   COMMENT "Embedding JavaScript runtime sources" VERBATIM)
 
 add_library(tai_core src/core.c src/url.c src/dom.c src/css.c src/scheduler.c
-  src/bookmarks.c src/external.c
+  src/bookmarks.c src/external.c src/visited.c
   src/js.c src/layout.c src/render.c src/network.c src/browser.c src/session.c
   src/tabset.c src/trace.c "${TAI_JS_SOURCES_HEADER}")
 target_include_directories(tai_core PUBLIC include)
@@ -226,6 +226,12 @@ if(BUILD_TESTING)
   target_link_options(test_bookmarks PRIVATE
     "LINKER:--wrap=malloc,--wrap=realloc,--wrap=fsync,--wrap=rename")
   add_test(NAME bookmarks COMMAND test_bookmarks)
+  add_executable(test_visited tests/test_visited.c)
+  target_link_libraries(test_visited PRIVATE tai_core)
+  target_compile_options(test_visited PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  target_link_options(test_visited PRIVATE
+    "LINKER:--wrap=malloc,--wrap=calloc,--wrap=realloc")
+  add_test(NAME visited COMMAND test_visited)
   add_executable(test_tabset_bookmarks tests/test_tabset_bookmarks.c)
   target_link_libraries(test_tabset_bookmarks PRIVATE tai_core)
   target_compile_options(test_tabset_bookmarks PRIVATE
@@ -312,6 +318,10 @@ if(BUILD_TESTING)
   target_link_libraries(test_timer_window PRIVATE tai_presentation)
   target_compile_options(test_timer_window PRIVATE -Wall -Wextra -Wpedantic -Werror)
   add_test(NAME timer_window COMMAND test_timer_window)
+  add_executable(test_visited_window tests/test_visited_window.c)
+  target_link_libraries(test_visited_window PRIVATE tai_presentation)
+  target_compile_options(test_visited_window PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME visited_window COMMAND test_visited_window)
   add_executable(test_new_window tests/test_new_window.c)
   target_link_libraries(test_new_window PRIVATE tai_presentation)
   target_compile_options(test_new_window PRIVATE -Wall -Wextra -Wpedantic -Werror)

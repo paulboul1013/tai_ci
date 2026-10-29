@@ -621,9 +621,32 @@ static bool page_apply_resources(TaiPage *page, Resource *resources,
     return true;
 }
 
+/* Python Tab.mark_visited_links. An href that does not resolve, even for
+ * lack of memory, only leaves its link unvisited. */
+static void mark_visited(TaiNode *node, const TaiUrl *base,
+                         const TaiVisited *visited) {
+    if (node->kind != TAI_ELEMENT) return;
+    node->visited = false;
+    const char *href = !strcmp(node->tag, "a")
+        ? tai_map_get(&node->attributes, "href") : NULL;
+    if (href && visited) {
+        TaiUrl *resolved = tai_url_resolve(base, href);
+        node->visited = resolved &&
+            tai_visited_contains(visited, tai_url_string(resolved));
+        tai_url_destroy(resolved);
+    }
+    for (size_t index = 0; index < node->child_count; index++)
+        mark_visited(node->children[index], base, visited);
+}
+
+static bool page_style(TaiPage *page, char **error) {
+    TaiNode *root = tai_document_root(page->document);
+    mark_visited(root, page->url, page->net.visited);
+    return tai_css_style(root, page->styles, error);
+}
+
 static bool page_first_frame(TaiPage *page, char **error) {
-    if (!tai_css_style(tai_document_root(page->document), page->styles, error))
-        return false;
+    if (!page_style(page, error)) return false;
     page->layout = tai_layout_create(tai_document_root(page->document),
                                      page->viewport_width, page->rtl, error);
     if (!page->layout) return false;
@@ -1292,7 +1315,7 @@ static bool rebuild_dirty_page_body(TaiPage *page, char **error) {
     size_t snapshot_index = 0;
     snapshot_scroll(root, &snapshot, &snapshot_index);
 
-    if (!tai_css_style(root, page->styles, error)) {
+    if (!page_style(page, error)) {
         snapshot_destroy(&snapshot);
         return false;
     }
@@ -1329,6 +1352,15 @@ static bool rebuild_dirty_page(TaiPage *page, char **error) {
     bool ok = rebuild_dirty_page_body(page, error);
     tai_trace_end(TAI_SPAN_RENDER);
     return ok;
+}
+
+bool tai_page_restyle(TaiPage *page, char **error) {
+    if (error) { free(*error); *error = NULL; }
+    if (!page || !page->document || !page->styles || !page->layout ||
+        !page->display)
+        return diagnostic(error, "invalid page restyle input");
+    page->dirty = true;
+    return rebuild_dirty_page(page, error);
 }
 
 /* The layout borrows the DOM and is stale while page->dirty: script may have

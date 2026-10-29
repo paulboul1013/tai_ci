@@ -77,8 +77,9 @@ Public interfaces generally share a name with their implementation; internal fil
 | `scheduler.h` / `scheduler.c` | priority tasks、generation cancellation、frame deadlines |
 | `browser.h` / `browser.c` | `TaiPage` navigation and subsystem orchestration |
 | `session.h` / `session.c` | committed page, URL history, address normalization and page commits |
-| `tabset.h` / `tabset.c` | `TaiBrowserApp` (shared loader/network, bookmarks, tab IDs) and per-window `TaiTabSet`: ordered tabs, async load ownership, generation-checked completion routing, `about:bookmarks` page |
+| `tabset.h` / `tabset.c` | `TaiBrowserApp` (shared loader/network, bookmarks, visited set, tab IDs) and per-window `TaiTabSet`: ordered tabs, async load ownership, generation-checked completion routing, `about:bookmarks` page |
 | `bookmarks.h` / `bookmarks.c` | sorted bookmark collection, snapshots, atomic per-user file persistence |
+| `visited.h` / `visited.c` | sorted in-memory visited-URL set; owned copies for the loader |
 | `external.h` / `external.c` | starts the external opener (`xdg-open`) for `mailto:` URLs without a shell or waiting |
 | `main.c` | `tai-browser` JSON/screenshot/`--window` CLI |
 | `html_entities.inc` | generated named-entity lookup included by `dom.c` |
