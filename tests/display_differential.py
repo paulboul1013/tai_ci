@@ -109,23 +109,28 @@ NAMED_COLORS = {
     "lightgreen": (144, 238, 144, 255),
     "orange": (255, 165, 0, 255),
     "orangered": (255, 69, 0, 255),
+    "transparent": (0, 0, 0, 0),
 }
 
 
 def rgba(value):
     value = value.strip().casefold()
     channels = NAMED_COLORS.get(value)
+    # browser.py parse_color: any other value, such as an unlisted name
+    # ("purple" from a:visited) or a malformed hex color, paints black.
     if channels is None:
-        raw = value.removeprefix("#")
-        if len(raw) == 3:
-            channels = tuple(int(char * 2, 16) for char in raw) + (255,)
-        elif len(raw) == 6:
-            channels = tuple(int(raw[index:index + 2], 16)
-                             for index in (0, 2, 4)) + (255,)
-        elif len(raw) == 8:
-            channels = tuple(int(raw[index:index + 2], 16)
-                             for index in (0, 2, 4, 6))
-        else:
+        channels = (0, 0, 0, 255)
+        raw = value[1:] if value.startswith("#") else ""
+        try:
+            if len(raw) == 3:
+                channels = tuple(int(char * 2, 16) for char in raw) + (255,)
+            elif len(raw) == 6:
+                channels = tuple(int(raw[index:index + 2], 16)
+                                 for index in (0, 2, 4)) + (255,)
+            elif len(raw) == 8:
+                channels = tuple(int(raw[index:index + 2], 16)
+                                 for index in (0, 2, 4, 6))
+        except ValueError:
             channels = (0, 0, 0, 255)
     red, green, blue, alpha = channels
     return red << 24 | green << 16 | blue << 8 | alpha
