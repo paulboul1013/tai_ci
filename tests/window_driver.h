@@ -190,6 +190,14 @@ static inline void key(SDL_WindowID window_id, SDL_Keycode keycode,
   push(&event);
 }
 
+/* text must outlive the event: SDL keeps the pointer of a pushed event. */
+static inline void text_input(SDL_WindowID window_id, const char *text) {
+  SDL_Event event = {.text = {.type = SDL_EVENT_TEXT_INPUT,
+                              .windowID = window_id,
+                              .text = text}};
+  push(&event);
+}
+
 static inline void ctrl_n(SDL_WindowID window_id) {
   key(window_id, SDLK_N, SDL_KMOD_LCTRL, false);
 }

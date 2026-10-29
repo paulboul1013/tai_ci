@@ -351,6 +351,13 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/overflow_scroll_integration.py"
     $<TARGET_FILE:test_overflow_scroll_window>
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
+  add_executable(test_e2e_window tests/test_e2e_window.c)
+  target_link_libraries(test_e2e_window PRIVATE tai_presentation)
+  target_compile_options(test_e2e_window PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME e2e_integration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e_integration.py"
+    $<TARGET_FILE:test_e2e_window>
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
   add_executable(test_tabset_history tests/test_tabset_history.c)
   target_link_libraries(test_tabset_history PRIVATE tai_core)
   target_compile_options(test_tabset_history PRIVATE -Wall -Wextra -Wpedantic -Werror)
