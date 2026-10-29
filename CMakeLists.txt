@@ -274,6 +274,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/overflow_scroll_oracle_probe.py" --check)
   add_test(NAME title_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/title_oracle_probe.py" --check)
+  add_test(NAME e2e_oracle_probe COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e_oracle_probe.py" --check)
   add_test(NAME js_dom_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/js_dom_oracle_probe.py" --check)
   add_test(NAME js_page_oracle_probe COMMAND "${Python3_EXECUTABLE}"

@@ -7,6 +7,8 @@ import subprocess
 import sys
 from urllib.parse import quote
 
+from e2e_shape import layout_shape
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ORACLE = ROOT / "tests" / "oracle.py"
 CASES = [
@@ -16,11 +18,6 @@ CASES = [
     "<pre>one\n\n  two\tthree</pre>",
     "<p style='text-align:center;font-size:150%'>center text</p>",
 ]
-
-def layout_shape(node):
-    keys = ("kind", "x", "y", "width", "height", "word")
-    return {**{key: node[key] for key in keys if key in node},
-            "children": [layout_shape(child) for child in node["children"]]}
 
 def compare(expected, actual, path="root"):
     if isinstance(expected, dict):
