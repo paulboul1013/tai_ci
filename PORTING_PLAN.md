@@ -10,7 +10,8 @@
 見子系統地圖「Profiling / trace」列。其後的 `mailto:` 外部開啟已實作並驗收（2026-10-21），`VALIDATING`，見下方第 8 項。
 其後的中鍵開新分頁已實作並驗收（2026-10-28），`VALIDATING`，見下方第 9 項。
 其後的 overflow 容器捲動已實作並驗收（2026-10-28），`VALIDATING`，見下方第 10 項。
-其後的 layout／paint oracle 規則補齊已實作並驗收（2026-10-28），`VALIDATING`，見下方第 11 項。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+其後的 layout／paint oracle 規則補齊已實作並驗收（2026-10-28），`VALIDATING`，見下方第 11 項。
+其後的完整管線 E2E 與它找到的 `:visited` 標記已實作並驗收（2026-10-29），`VALIDATING`，見下方第 12、13 項。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 下一個垂直切片
 
@@ -67,6 +68,15 @@
    22px 標題帶、`nav.links` 底色、`li` 項目符號、input 文字寬度，以及 display:block 控制項的
    block 不自繪。新的 `tests/layout_rule_coverage.py` 以 AST 掃描凍結 oracle 的 layout／paint 規則，
    任何規則沒有 differential 案例時 CTest 失敗。證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+12. **完整管線 E2E：已實作，`VALIDATING`（2026-10-29）。** 依 [計畫](docs/e2e-plan.md)：本機網站經
+   302、gzip、chunked 載入外部 CSS 與 JS，劇本為載入、fragment、表單連結、輸入、送出、Back 兩次。
+   `tests/e2e_oracle_probe.py` 凍結 Python 7 個檢查點，`tests/e2e_integration.py` 在 dummy SDL 逐點比對
+   DOM、layout、display、history、scroll、inputs 與請求；`tests/e2e_window_integration.py` 在 Xvfb 真實視窗
+   以截圖區域、請求與標題驗證，並跑 native-only 的 inline script 頁（D6）。證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+13. **已造訪連結 `:visited`：已實作，`VALIDATING`（2026-10-29）。** E2E 找到 native 從不設定
+   `TaiNode.visited`。依 [計畫](docs/visited-plan.md) 新增 app 共用的 `TaiVisited`：commit 與 fragment
+   時記錄、loader 拿快照、每次 style 前標記連結；刻意差異見下表「已造訪連結」列。證據見
+   [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 已知差異與範圍
 
@@ -98,6 +108,7 @@
 | DOM 深度上限（D13） | Python 以遞迴走訪 DOM，約 1000 層巢狀就 `RecursionError`；native 的 style／layout／paint 也遞迴，修正前純 HTML 50,000 層即堆疊溢位 segfault（任何網頁都能觸發）。使用者 2026-10-04 決定比照 Blink：任何節點最多 512 層祖先（`TAI_DOM_MAX_DEPTH`）。Parser 遇到第 512 層以下要開的元素時，先關閉最深的開啟元素，讓新元素成為它之後的兄弟（文字仍可放在第 512 層），多出的結束標籤只抵銷這些元素（被提前關閉的 `<b>`／`<i>` 等格式元素，其結束標籤只把它從格式清單移除，不再彈出上限以內的元素）；被提前關閉的 `<p>`／`<li>` 不再觸發 Python 的隱含關閉，所以上限以下的巢狀與 Python 不同；`appendChild`／`insertBefore` 會使深度超過上限（含移動的子樹高度、脫離文件的樹）時丟 `Error('Document depth limit reached')` 且樹不變；`innerHTML` 依目標元素的深度同樣攤平，元素已在上限而片段有子節點時丟同一錯誤。影響：512–約 1000 層的頁面兩者的樹不同（Python 保留巢狀），更深的頁面 Python 崩潰。證據：`tests/test_dom.c`（`depth_limit`：600 層 `<div>`／`<b>`／`<div><i>`、innerHTML、搬移子樹、脫離文件的樹）、`tests/test_js.c`（`test_depth_limit`）、ASan headless 600／50,000 層與腳本建樹、Xvfb 真實視窗 50,000 層頁面。 |
 | `innerHTML` 字串含 U+0000 | Python 把 NUL 當一般字元留在文字節點（`'a\u0000b<i>c</i>'` 解析成文字 `a\x00b` 與 `<i>`）；native HTML parser 以 NUL 結尾的 C 字串為輸入，`innerHTML` 設定值在第一個 NUL 處截斷（同例只剩文字 `a`）。影響：只有腳本刻意放入 NUL 的頁面可觀察；要消除須讓 parser 與 `TaiNode` 文字改為帶長度的字串。以臨時 oracle probe 實跑確認（切片 3 紀錄），未列入固定情境。 |
 | 缺字型的替代字型 | 頁面指定系統沒有安裝的字型（例如 Georgia）時，native 以 fontconfig 選相近字型（Georgia→DejaVu Serif），Python 的 Skia 改用自己的預設字型（DejaVu Sans），所以字寬不同（`Georgia` 65 對 63）。使用者 2026-10-28 決定保留 native 行為：替代字型較接近原意。`tests/layout_differential.py` 的 `FALLBACK_CASES` 把 oracle 的字型換成 `fc-match` 的結果再比對，行為改變時測試失敗。已安裝的字型兩邊相同。 |
+| 已造訪連結（`:visited`） | Python 在 `Tab.load` 開始時就把請求 URL 加入 app 共用的集合，載入失敗也算。Native 在頁面**提交**時才記錄它的請求 URL（含 fragment、redirect 之前；Back/Forward 也算），顯示網路或憑證錯誤頁的載入不記錄，比照真實瀏覽器（使用者 2026-10-29 決定）。跳到 fragment 時兩者都記錄新 URL 並重新 style 該頁。集合由所有 tab 與視窗共用、只在記憶體、無上限，同 Python；其他 tab 在下次重新 style 時才更新，同 Python。影響：頁面第一次顯示時，指向它自己 URL 的連結在 Python 已是 visited，native 要等該頁下一次重新 style。證據：`tests/test_visited.c`、`tests/test_visited_window.c`、`tests/e2e_integration.py`。 |
 | 窄寬地址欄 | Tabbed Chrome 把地址欄寬度夾限為不超過視窗寬度，<100px 時仍看得到收藏星；Python 與單頁 Chrome 固定最小 100px，右端會超出視窗。安全頁面欄位右移 30px 後同樣夾限：Python 在 232–261px 與 <130px 時右端超出視窗，native 不超出。 |
 | 追蹤開關（D-T1） | Python 視窗模式一律寫 `BROWSER_TRACE_FILE`（預設 `./browser.trace`）；native 只在 `--window` 且 `BROWSER_TRACE_FILE` 非空時寫，未設或空字串不建立檔案，每個掛點只多一次原子讀取（使用者 2026-10-14 決定）。headless 不追蹤，與 Python 同。檔案無法建立時兩者都中止：native 印 `trace failed: …` 並 exit 1。 |
 | 追蹤事件與執行緒（D-T2～D-T7） | 同名事件代表同一件工作，名稱表見 `src/trace.c`，`tests/trace_oracle_probe.py` 以凍結 oracle trace 核對每個名稱。native 不發 `commit` 與所有 instant 診斷（`scheduler_pick`、`frame_*`、`raster_*`、`present_backend`、`input_dispatch_latency`、`resource_process`、`resource_fetch_batch_*`），因為對應的 Python 階段不存在（使用者 2026-10-14 決定只發 native 實際做的事）。執行緒只有 `Browser thread`（SDL、事件 JS、timer、rAF、raster、present）與 `Loader thread`（網路、解析、載入期 JS、首幀）；Python 另有每個 tab 的 `Main thread`、`Network I/O worker`、`Raster-and-draw thread`。`Network I/O: document`／`asynchronous XHR`、`resource_fetch[i]: script|style` 在 Python 是 worker 執行緒上的 B/E，native 因單一 libcurl multi 交錯處理而改為 Loader 上帶 id 的 async `b`/`e`；同步 XHR 的 B/E 在等待的執行緒上。tid 是循序小整數（Python 為 `threading.get_ident()`）；未命名就發事件的執行緒自動命名 `Thread <tid>`。`resource_fetch[i]` 的 i 比照 Python：計入 inline style、不計 inline script。 |
