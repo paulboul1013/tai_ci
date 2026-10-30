@@ -268,6 +268,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/https_oracle_probe.py" --check)
   add_test(NAME history_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/history_oracle_probe.py" --check)
+  add_test(NAME stale_oracle_probe COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/stale_oracle_probe.py" --check)
   add_test(NAME new_window_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/new_window_oracle_probe.py" --check)
   add_test(NAME mailto_oracle_probe COMMAND "${Python3_EXECUTABLE}"
@@ -373,6 +375,13 @@ if(BUILD_TESTING)
     $<TARGET_FILE:test_tabset_history>
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css"
     $<TARGET_FILE:test_history_window>)
+  add_executable(test_tabset_stale tests/test_tabset_stale.c)
+  target_link_libraries(test_tabset_stale PRIVATE tai_core)
+  target_compile_options(test_tabset_stale PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME stale_integration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/stale_integration.py"
+    $<TARGET_FILE:test_tabset_stale>
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
   add_executable(test_tabset_secure tests/test_tabset_secure.c)
   target_link_libraries(test_tabset_secure PRIVATE tai_core)
   target_compile_options(test_tabset_secure PRIVATE -Wall -Wextra -Wpedantic -Werror)

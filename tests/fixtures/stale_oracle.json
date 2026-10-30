@@ -1,0 +1,179 @@
+{
+  "css_late": {
+    "b_committed": {
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "page-b",
+      "history": [
+        "http://127.0.0.1:<PORT>/start",
+        "http://127.0.0.1:<PORT>/css-a",
+        "http://127.0.0.1:<PORT>/b"
+      ],
+      "history_index": 2,
+      "requests": [
+        "/css-a",
+        "/slow.css",
+        "/b"
+      ],
+      "url": "http://127.0.0.1:<PORT>/b"
+    },
+    "css_released": {
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "page-b",
+      "history": [
+        "http://127.0.0.1:<PORT>/start",
+        "http://127.0.0.1:<PORT>/css-a",
+        "http://127.0.0.1:<PORT>/b"
+      ],
+      "history_index": 2,
+      "requests": [
+        "/css-a",
+        "/slow.css",
+        "/b"
+      ],
+      "url": "http://127.0.0.1:<PORT>/b"
+    }
+  },
+  "js_late": {
+    "b_committed": {
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "page-b",
+      "history": [
+        "http://127.0.0.1:<PORT>/start",
+        "http://127.0.0.1:<PORT>/js-a",
+        "http://127.0.0.1:<PORT>/b"
+      ],
+      "history_index": 2,
+      "requests": [
+        "/js-a",
+        "/slow.js",
+        "/b"
+      ],
+      "url": "http://127.0.0.1:<PORT>/b"
+    },
+    "js_released": {
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "page-b",
+      "history": [
+        "http://127.0.0.1:<PORT>/start",
+        "http://127.0.0.1:<PORT>/js-a",
+        "http://127.0.0.1:<PORT>/b"
+      ],
+      "history_index": 2,
+      "requests": [
+        "/js-a",
+        "/slow.js",
+        "/b"
+      ],
+      "url": "http://127.0.0.1:<PORT>/b"
+    }
+  },
+  "out_of_order_newest_first": {
+    "a_b_released": {
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "slow-c",
+      "history": [
+        "http://127.0.0.1:<PORT>/start",
+        "http://127.0.0.1:<PORT>/slow-a",
+        "http://127.0.0.1:<PORT>/slow-b",
+        "http://127.0.0.1:<PORT>/slow-c"
+      ],
+      "history_index": 3,
+      "requests": [
+        "/slow-a",
+        "/slow-b",
+        "/slow-c"
+      ],
+      "url": "http://127.0.0.1:<PORT>/slow-c"
+    },
+    "c_committed": {
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "slow-c",
+      "history": [
+        "http://127.0.0.1:<PORT>/start",
+        "http://127.0.0.1:<PORT>/slow-a",
+        "http://127.0.0.1:<PORT>/slow-b",
+        "http://127.0.0.1:<PORT>/slow-c"
+      ],
+      "history_index": 3,
+      "url": "http://127.0.0.1:<PORT>/slow-c"
+    },
+    "pending": {
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "start",
+      "history": [
+        "http://127.0.0.1:<PORT>/start",
+        "http://127.0.0.1:<PORT>/slow-a",
+        "http://127.0.0.1:<PORT>/slow-b",
+        "http://127.0.0.1:<PORT>/slow-c"
+      ],
+      "history_index": 3,
+      "url": "http://127.0.0.1:<PORT>/slow-c"
+    }
+  },
+  "out_of_order_oldest_first": {
+    "a_released": {
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "start",
+      "history": [
+        "http://127.0.0.1:<PORT>/start",
+        "http://127.0.0.1:<PORT>/slow-a",
+        "http://127.0.0.1:<PORT>/slow-b",
+        "http://127.0.0.1:<PORT>/slow-c"
+      ],
+      "history_index": 3,
+      "url": "http://127.0.0.1:<PORT>/slow-c"
+    },
+    "b_released": {
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "start",
+      "history": [
+        "http://127.0.0.1:<PORT>/start",
+        "http://127.0.0.1:<PORT>/slow-a",
+        "http://127.0.0.1:<PORT>/slow-b",
+        "http://127.0.0.1:<PORT>/slow-c"
+      ],
+      "history_index": 3,
+      "url": "http://127.0.0.1:<PORT>/slow-c"
+    },
+    "c_committed": {
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "slow-c",
+      "history": [
+        "http://127.0.0.1:<PORT>/start",
+        "http://127.0.0.1:<PORT>/slow-a",
+        "http://127.0.0.1:<PORT>/slow-b",
+        "http://127.0.0.1:<PORT>/slow-c"
+      ],
+      "history_index": 3,
+      "requests": [
+        "/slow-a",
+        "/slow-b",
+        "/slow-c"
+      ],
+      "url": "http://127.0.0.1:<PORT>/slow-c"
+    },
+    "pending": {
+      "can_go_back": true,
+      "can_go_forward": false,
+      "heading": "start",
+      "history": [
+        "http://127.0.0.1:<PORT>/start",
+        "http://127.0.0.1:<PORT>/slow-a",
+        "http://127.0.0.1:<PORT>/slow-b",
+        "http://127.0.0.1:<PORT>/slow-c"
+      ],
+      "history_index": 3,
+      "url": "http://127.0.0.1:<PORT>/slow-c"
+    }
+  }
+}
