@@ -18,7 +18,8 @@ events (scheduler and frame-clock diagnostics, timing-dependent) are dropped.
 
 With TEST_TRACE, --check also asserts that every native name printed by
 `test_trace --vocabulary` occurs in the frozen oracle trace with the same
-phase family, so one name never means two kinds of work.
+phase family, so one name never means two kinds of work. The only exception
+is the native-only instant set NATIVE_ONLY (PORTING_PLAN.md, D-T9).
 """
 
 import argparse
@@ -250,16 +251,23 @@ def run_probe():
         return summarize(trace_check.load(trace_path))
 
 
+# Native-only instants, with no oracle event (D-T9, user decision 2026-10-30).
+NATIVE_ONLY = {"stale_completion_dropped"}
+
+
 def check_vocabulary(result, test_trace):
     """Every native name must name oracle duration work (D-T4 changes only
-    the phase of fetch slices, not their meaning)."""
+    the phase of fetch slices, not their meaning), except NATIVE_ONLY."""
     oracle_names = {name for spans in result["threads"].values() for name in spans}
-    spans, fetches = trace_check.vocabulary(test_trace)
+    spans, fetches, instants = trace_check.vocabulary(test_trace)
     missing = sorted(spans - oracle_names)
     missing += [pattern.pattern for pattern in fetches
                 if not any(pattern.match(name) for name in oracle_names)]
     if missing:
         raise SystemExit("native trace names the oracle never emits: {}".format(missing))
+    if instants != NATIVE_ONLY or NATIVE_ONLY & oracle_names:
+        raise SystemExit("native-only instants {} != allowed {}".format(
+            sorted(instants), sorted(NATIVE_ONLY)))
 
 
 def main():

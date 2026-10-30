@@ -315,6 +315,29 @@ supported commands, coordinate semantics, test evidence, and missing paint
 features belong to
 [`docs/reference-display-raster.md`](../reference-display-raster.md).
 
+## Trace
+
+`include/tai/trace.h` is one process-wide Chrome JSON trace with no handle.
+Only `main.c` (`--window`) opens and closes it, after the loader is joined.
+Each event is written under one mutex, so the Browser and Loader threads
+share no other trace state. When tracing is off, each emit is one relaxed
+atomic load.
+
+- Args are borrowed `TaiTraceArg` entries. Callers pass fields they already
+  own (`LoadTask` url, tab ID and generation, `TaiUrl` strings); trace.c
+  writes them during the call and keeps nothing. Strings go through
+  `tai_json_string`.
+- `Task: Tab.load` (Loader) carries `url`, `tab`, `generation`. The fetch
+  async slices carry `url` on their `b` event.
+- `tai_tabset_pump` (Browser thread) wraps an accepted completion in a
+  `commit` span with `tab`, `generation`, `url`. A discarded completion emits
+  the native-only instant `stale_completion_dropped` with `tab`,
+  `generation`, `current_generation` (null when the tab is gone), `url` and
+  `reason` (`superseded`, `tab_gone`, `not_active`). The loader never reads
+  these values from the slot; the pump reads them on its own thread.
+- `tests/tools/window_session.sh start` writes `$TAI_WS_DIR/trace.json`
+  unless `BROWSER_TRACE_FILE` is set.
+
 ## Runtime resources
 
 The default CSS is an install-time resource rather than page-owned memory. Its

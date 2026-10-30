@@ -17,6 +17,12 @@ per scenario:
   a WM_DELETE_WINDOW request, release /slow-a. The browser must exit 0
   promptly.
 
+Each session traces to its window_session.sh default TAI_WS_DIR/trace.json.
+In W1/W2 the trace must hold one `commit` (for /b) and a
+`stale_completion_dropped` instant (reason superseded) for the A page's task,
+with every `Task: Tab.load` carrying url, tab and generation args; the W3
+trace must close as valid JSON with no `commit` for /slow-a.
+
 Ordering comes from the gates; only "nothing changes after the late response"
 is a fixed 0.5 s wait. Every session ends with a browser log free of errors
 and failures: a superseded navigation that the tab accepted anyway logs
@@ -51,6 +57,7 @@ EXIT_TIMEOUT = 5.0
 sys.path.insert(0, str(ROOT / "tests"))
 import e2e_window_integration as e2e  # noqa: E402
 import stale_fixture  # noqa: E402
+import trace_check  # noqa: E402
 import trace_window_integration  # noqa: E402
 
 
@@ -149,6 +156,39 @@ class Run:
         assert not errors, "{}: browser log errors:\n{}".format(
             name, "\n".join(errors[-10:]))
 
+    def trace(self, name):
+        """The session's trace events, checked; Tab.load always has args."""
+        events = trace_check.load(self.root / name / "trace.json")
+        trace_check.check(events)
+        for event in events:
+            if event["name"] == "Task: Tab.load" and event["ph"] == "B":
+                args = event.get("args", {})
+                assert (isinstance(args.get("url"), str)
+                        and isinstance(args.get("tab"), int)
+                        and isinstance(args.get("generation"), int)), (
+                    "{}: Tab.load args {}".format(name, args))
+        return events
+
+    def check_trace_late(self, name, page):
+        events = self.trace(name)
+        loads = {event["args"]["url"]: event["args"] for event in events
+                 if event["name"] == "Task: Tab.load" and event["ph"] == "B"}
+        old, new = loads.get(self.server.url(page)), loads.get(self.server.url("/b"))
+        assert old and new and old["tab"] == new["tab"], (
+            "{}: Tab.load args {}".format(name, loads))
+        commits = [event["args"] for event in events
+                   if event["name"] == "commit" and event["ph"] == "B"]
+        assert commits == [{"tab": new["tab"], "generation": new["generation"],
+                            "url": self.server.url("/b")}], (
+            "{}: commits {}".format(name, commits))
+        dropped = [event["args"] for event in events
+                   if event["name"] == "stale_completion_dropped"]
+        assert dropped == [{"tab": old["tab"], "generation": old["generation"],
+                            "current_generation": new["generation"],
+                            "url": self.server.url(page),
+                            "reason": "superseded"}], (
+            "{}: dropped {}".format(name, dropped))
+
     def subresource_late(self, name, page, gated):
         """W1/W2: a newer navigation commits while the old page's
         subresource is held; the late subresource changes nothing."""
@@ -172,6 +212,7 @@ class Run:
         assert re.search(r"windowid=0:0\b", events), events
         self.session.stop()
         self.check_log(name)
+        self.check_trace_late(name, page)
 
     def close_while_loading(self, name, page):
         """W3: closing the window while the only load is held."""
@@ -195,6 +236,13 @@ class Run:
             "{}: exit {} ({}{})".format(name, status, result.stdout,
                                         result.stderr))
         self.check_log(name)
+        events = self.trace(name)
+        loads = [event for event in events
+                 if event["name"] == "Task: Tab.load"
+                 and event.get("args", {}).get("url") == self.server.url(page)]
+        assert loads, "{}: no traced load of {}".format(name, page)
+        commits = [event for event in events if event["name"] == "commit"]
+        assert not commits, "{}: commits {}".format(name, commits)
         return exited
 
 

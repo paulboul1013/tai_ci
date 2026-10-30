@@ -8,8 +8,9 @@ page's timers, asynchronous XHR and animation frames run until it requests
 window ends the browser. The trace must pass tests/trace_check.py, use only
 the two native threads, use only names that test_trace --vocabulary lists and
 that the frozen oracle trace (tests/fixtures/trace_oracle.json) emits, and
-nest JavaScript inside the tasks that run it. Without BROWSER_TRACE_FILE, or
-with it empty, no file appears; an unwritable path exits 1.
+nest JavaScript inside the tasks that run it. With BROWSER_TRACE_FILE empty no
+file appears; unset, window_session.sh writes TAI_WS_DIR/trace.json and the
+working directory stays empty; an unwritable path exits 1.
 
 Cancelled requests must still close their async slices. A local server
 leaves /hang* requests unanswered until the browser has exited, so their `e`
@@ -62,6 +63,7 @@ REQUIRED = {
         "Task: JSContext.dispatch_setinterval",
         "Task: JSContext.dispatch_xhr_onload", "Task: Tab.click",
         "Network I/O: synchronous XHR", "raster_and_draw", "sdl_present",
+        "commit",
     },
 }
 # Each outer span must directly or indirectly contain the inner one.
@@ -235,7 +237,7 @@ def check_trace(path, test_trace):
     events = trace_check.load(path)
     names = trace_check.check(events)
     assert sorted(names.values()) == ["Browser thread", "Loader thread"], names
-    spans, fetches = trace_check.vocabulary(test_trace)
+    vocab = trace_check.vocabulary(test_trace)
     oracle = {name for thread in json.loads(ORACLE.read_text())["threads"].values()
               for name in thread}
     seen = {}
@@ -243,11 +245,8 @@ def check_trace(path, test_trace):
         if event["ph"] == "M":
             continue
         name = event["name"]
-        if event["ph"] in "BE":
-            assert name in spans, "span outside the vocabulary: " + name
-        else:
-            assert any(p.match(name) for p in fetches), "fetch outside the vocabulary: " + name
-        assert name in oracle, "name the oracle never emits: " + name
+        assert trace_check.name_allowed(event, *vocab), "outside the vocabulary: " + name
+        assert name in oracle or event["ph"] == "i", "name the oracle never emits: " + name
         seen.setdefault(names[event["tid"]], set()).add(name)
     for thread, required in REQUIRED.items():
         missing = required - seen.get(thread, set())
@@ -325,7 +324,8 @@ def cancel_runs(browser, root, env):
 
 
 def untraced_run(browser, root, env, label, value):
-    """The browser runs in an empty directory and must leave it empty."""
+    """The browser runs in an empty directory and must leave it empty. Only
+    an unset BROWSER_TRACE_FILE gets window_session.sh's default trace."""
     directory = root / label
     cwd = root / (label + "-cwd")
     directory.mkdir()
@@ -339,6 +339,36 @@ def untraced_run(browser, root, env, label, value):
         session.abandon()
     leftovers = sorted(path.name for path in cwd.iterdir())
     assert not leftovers, "{} run wrote {}".format(label, leftovers)
+    default = directory / "trace.json"
+    if value is None:
+        trace_check.check(trace_check.load(default))
+    else:
+        assert not default.exists(), "{} run wrote {}".format(label, default)
+
+
+def unset_direct_run(browser, root, env):
+    """D-T1 at the browser itself: window_session.sh always passes a trace
+    path, so start the binary directly with the variable removed (dummy SDL
+    video) and require that it writes nothing."""
+    cwd = root / "unset-direct"
+    cwd.mkdir()
+    child_env = dict(os.environ, **env, SDL_VIDEO_DRIVER="dummy")
+    child_env.pop("BROWSER_TRACE_FILE", None)
+    process = subprocess.Popen(
+        [str(browser), "--window", "about:blank"], cwd=cwd, env=child_env,
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    try:
+        time.sleep(2)
+        assert process.poll() is None, process.stderr.read()
+        process.terminate()
+        stderr = process.communicate(timeout=20)[1]
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+    assert process.returncode == 0, (process.returncode, stderr)
+    leftovers = sorted(path.name for path in cwd.iterdir())
+    assert not leftovers, "unset direct run wrote {}".format(leftovers)
 
 
 def unwritable_run(browser, env):
@@ -361,6 +391,7 @@ def main(argv):
         cancel_runs(browser, root, env)
         untraced_run(browser, root, env, "unset", None)
         untraced_run(browser, root, env, "empty", "")
+        unset_direct_run(browser, root, env)
         unwritable_run(browser, env)
     print("trace_window_integration passed: {} events".format(count))
 

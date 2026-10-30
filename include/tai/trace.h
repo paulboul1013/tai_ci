@@ -42,13 +42,38 @@ typedef enum {
     TAI_SPAN_SYNC_XHR,
     TAI_SPAN_RASTER_AND_DRAW,
     TAI_SPAN_SDL_PRESENT,
+    TAI_SPAN_COMMIT,
     TAI_SPAN_COUNT
 } TaiTraceSpan;
 
+/* One Chrome-trace "args" entry. Every pointer is borrowed for the call only,
+ * so callers pass fields they already hold and build nothing when tracing is
+ * off. key is a static name without JSON metacharacters; string goes through
+ * tai_json_string, and a NULL string is written as null. */
+typedef enum { TAI_TRACE_NULL, TAI_TRACE_STRING, TAI_TRACE_UINT } TaiTraceArgKind;
+typedef struct {
+    const char *key;
+    TaiTraceArgKind kind;
+    const char *string;
+    uint64_t number;
+} TaiTraceArg;
+
 /* ph "B"/"E" on the calling thread. Pair them in a thin wrapper around an
- * untraced body, never across early returns, so spans always nest. */
+ * untraced body, never across early returns, so spans always nest. The args
+ * variant puts args (count entries, may be 0) on the "B" event. */
 void tai_trace_begin(TaiTraceSpan span);
+void tai_trace_begin_args(TaiTraceSpan span, const TaiTraceArg *args,
+                          size_t count);
 void tai_trace_end(TaiTraceSpan span);
+
+/* Native-only thread-scoped instants (ph "i", s "t"). The oracle has no
+ * event for this work; tests/trace_oracle_probe.py allows exactly these. */
+typedef enum {
+    TAI_INSTANT_STALE_COMPLETION_DROPPED,
+    TAI_INSTANT_COUNT
+} TaiTraceInstant;
+void tai_trace_instant(TaiTraceInstant instant, const TaiTraceArg *args,
+                       size_t count);
 
 /* Requests multiplexed on the loader's one libcurl multi overlap on one
  * thread, so they are async ph "b"/"e" slices keyed by id instead of B/E. */
@@ -68,14 +93,17 @@ typedef struct {
     size_t index;
 } TaiTraceFetch;
 
-/* index is the Python resource index for script/style and ignored otherwise. */
-TaiTraceFetch tai_trace_fetch_begin(TaiTraceFetchKind kind, size_t index);
+/* index is the Python resource index for script/style and ignored otherwise.
+ * A non-NULL url (borrowed) becomes the "b" event's url arg. */
+TaiTraceFetch tai_trace_fetch_begin(TaiTraceFetchKind kind, size_t index,
+                                    const char *url);
 /* Emits the matching "e" and zeroes *fetch, so a second call emits nothing. */
 void tai_trace_fetch_end(TaiTraceFetch *fetch);
 
-/* The vocabulary, for tests: span names, and fetch names where script/style
- * carry a "%zu" for the resource index. */
+/* The vocabulary, for tests: span names, fetch names where script/style
+ * carry a "%zu" for the resource index, and instant names. */
 const char *tai_trace_span_name(TaiTraceSpan span);
 const char *tai_trace_fetch_format(TaiTraceFetchKind kind);
+const char *tai_trace_instant_name(TaiTraceInstant instant);
 
 #endif

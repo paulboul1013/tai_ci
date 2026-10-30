@@ -7,6 +7,8 @@
 #   shot NAME [--crop WxH+X+Y] | events [PATTERN] | requests | status | stop
 #   windows | await N | select N|WID | close   (Ctrl+N multi-window sessions)
 #   title                                      (selected window's title)
+# start traces to D/trace.json (Chrome JSON, valid once the browser exits)
+# unless BROWSER_TRACE_FILE is set; an empty value turns tracing off.
 # Only processes started by `start` are ever signalled; windows are found by
 # the browser PID (titles follow the page), and every action re-checks that
 # the selected window id still belongs to that PID. `select` picks the Nth of
@@ -95,11 +97,13 @@ cmd_start() {
 
   [[ -n $data ]] || { data=$DIR/data; rm -rf "$data"; }
   mkdir -p "$data"; put url "$url"
+  local trace=${BROWSER_TRACE_FILE-$DIR/trace.json}
   # Wrapper keeps the real browser as its child: $! inside is the exec'd
   # tai-browser (env execs), and the wrapper records the exit code.
   setsid bash -c 'env "$@" & echo $! > "$0/pid.tmp"; mv "$0/pid.tmp" "$0/pid"; wait $!; echo $? > "$0/rc"' \
     "$DIR" SDL_EVENT_LOGGING=1 SDL_VIDEO_X11_XINPUT2=0 SDL_VIDEO_DRIVER=x11 \
-    DISPLAY="$display" XDG_DATA_HOME="$data" "$bin" --window "$url" \
+    DISPLAY="$display" XDG_DATA_HOME="$data" BROWSER_TRACE_FILE="$trace" \
+    "$bin" --window "$url" \
     </dev/null >"$DIR/browser.log" 2>&1 &
   for _ in $(seq 50); do [[ -f $DIR/pid ]] && break; sleep 0.1; done
   local pid; pid=$(get pid); [[ -n $pid ]] || die "browser did not start"
@@ -115,7 +119,7 @@ cmd_start() {
   put wid "$wid"
   if [[ -n $size ]]; then xdotool windowsize "$wid" "${size%x*}" "${size#*x}"; fi
   sleep 1
-  echo "started dir=$DIR display=$display pid=$pid wid=$wid${port:+ port=$port} data=$data"
+  echo "started dir=$DIR display=$display pid=$pid wid=$wid${port:+ port=$port} data=$data${trace:+ trace=$trace}"
   [[ $display == :0 ]] && echo "note: WSLg :0 drops synthetic key focus; use --xvfb for keyboard" || true
 }
 
@@ -274,6 +278,6 @@ cmd_stop() {
 
 case $CMD in
   start|click|key|type|wheel|resize|shot|events|requests|status|stop|windows|await|select|close|title) "cmd_$CMD" "$@";;
-  -h|--help|help) sed -n '2,14p' "$0";;
+  -h|--help|help) sed -n '2,16p' "$0";;
   *) die "unknown command $CMD";;
 esac

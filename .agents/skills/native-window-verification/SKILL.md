@@ -29,8 +29,9 @@ did pass.
    the relevant `tests/*_oracle_probe.py --check`. If another agent owns
    `build/`, copy `build/tai-browser` and `build/assets/` to a scratch dir and
    pass `--bin` (CSS is found at `assets/browser.css` next to the binary).
-2. Drive the window with the script. Session state, PNGs, the SDL event log
-   and the server log live in `$TAI_WS_DIR` (default `/tmp/tai-ws-$UID`).
+2. Drive the window with the script. Session state, PNGs, the SDL event log,
+   the server log and the trace live in `$TAI_WS_DIR` (default
+   `/tmp/tai-ws-$UID`).
 
 ```bash
 export TAI_WS_DIR=$(mktemp -d)            # one dir per parallel session
@@ -63,6 +64,12 @@ Also: `events PATTERN`; `start --size WxH --data-home DIR --display :0`. Then op
 - Fresh private `XDG_DATA_HOME` per session, so real bookmarks are untouched;
   free display/port picked when omitted. Parallel sessions need distinct
   `TAI_WS_DIR`, display and port.
+- Chrome trace at `$TAI_WS_DIR/trace.json` when `BROWSER_TRACE_FILE` is
+  unset (a set value wins; empty turns tracing off). The file is valid JSON
+  only after the browser exits; open it in Perfetto or load it with
+  `tests/trace_check.py`. `Task: Tab.load`, `commit` and
+  `stale_completion_dropped` carry `url`/`tab`/`generation` args; the fetch
+  slices (document, script, style, async XHR) carry `url`.
 - Xvfb autorepeat off (`xset r off`); keys and typing use 80ms delay.
 - `stop` sends SIGTERM (SDL quit). Never `xdotool windowclose` on Xvfb: with
   no window manager it destroys the window and SDL exits 1 with BadWindow.

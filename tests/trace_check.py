@@ -94,21 +94,29 @@ def check(events, async_ok=True):
 
 
 def vocabulary(test_trace):
-    """Return (span names, fetch name regexes) from `test_trace --vocabulary`."""
+    """Return (span names, fetch name regexes, instant names) from
+    `test_trace --vocabulary`."""
     output = subprocess.run([str(test_trace), "--vocabulary"], check=True,
                             capture_output=True, text=True).stdout
-    spans, fetches = set(), []
+    spans, fetches, instants = set(), [], set()
     for line in output.splitlines():
         phase, name = line.split("\t", 1)
         if phase == "B":
             spans.add(name)
+        elif phase == "i":
+            instants.add(name)
         else:
             fetches.append(re.compile(re.escape(name).replace("%zu", r"\d+") + "$"))
-    return spans, fetches
+    return spans, fetches, instants
 
 
-def name_allowed(name, spans, fetches):
-    return name in spans or any(pattern.match(name) for pattern in fetches)
+def name_allowed(event, spans, fetches, instants):
+    name = event["name"]
+    if event["ph"] in "BE":
+        return name in spans
+    if event["ph"] == "i":
+        return name in instants
+    return any(pattern.match(name) for pattern in fetches)
 
 
 def rejects(events, label):
@@ -128,13 +136,26 @@ def format_test(test_trace):
         require(len(names) == 5, "expected 5 named threads, got {}".format(names))
         require(sorted(names.values()).count("Browser thread") == 1,
                 "main thread must be named Browser thread")
-        spans, fetches = vocabulary(test_trace)
+        vocab = vocabulary(test_trace)
         for event in events[1:]:
             if event["ph"] != "M":
-                require(name_allowed(event["name"], spans, fetches),
+                require(name_allowed(event, *vocab),
                         "name outside the vocabulary: " + event["name"])
         durations = sum(1 for event in events if event["ph"] in "BE")
-        require(durations == 5 * 10000 * 4, "lost events: {}".format(durations))
+        # 4 from the args events (Tab.load and commit) before the workers.
+        require(durations == 5 * 10000 * 4 + 4, "lost events: {}".format(durations))
+        hostile = 'http://h/"q"\\b\n\t\x01end'
+        tab_load = next(e for e in events if e["name"] == "Task: Tab.load")
+        require(tab_load["args"] == {"url": hostile, "tab": 3,
+                                 "generation": 2 ** 64 - 1},
+                "Tab.load args: {}".format(tab_load.get("args")))
+        document = next(e for e in events if e["ph"] == "b"
+                        and e["name"] == "Network I/O: document")
+        require(document["args"] == {"url": hostile},
+                "fetch args: {}".format(document.get("args")))
+        dropped = next(e for e in events if e["ph"] == "i")
+        require(dropped["args"] == {"current_generation": None, "reason": None},
+                "instant args: {}".format(dropped.get("args")))
 
         b_index = next(i for i, e in enumerate(events) if e.get("ph") == "B")
         rejects(events[:b_index + 1], "unclosed B")

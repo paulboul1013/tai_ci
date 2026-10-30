@@ -831,7 +831,7 @@ static bool page_load_submit_resource(TaiPageLoad *load, size_t index) {
     Resource *resource = &load->resources[index];
     request->trace = tai_trace_fetch_begin(
         resource->kind == RESOURCE_SCRIPT ? TAI_FETCH_SCRIPT : TAI_FETCH_STYLE,
-        python_resource_index(load, index));
+        python_resource_index(load, index), tai_url_string(resource->url));
     request->request = tai_network_submit(
         load->network, resource->url, load->url, NULL, NULL, NULL,
         page_load_request_done, request);
@@ -983,7 +983,8 @@ TaiPageLoad *tai_page_load_async(TaiNetwork *network, const TaiUrl *url,
     }
     request->load = load;
     request->document = true;
-    request->trace = tai_trace_fetch_begin(TAI_FETCH_DOCUMENT, 0);
+    request->trace = tai_trace_fetch_begin(TAI_FETCH_DOCUMENT, 0,
+                                           tai_url_string(load->url));
     request->request = tai_network_submit(
         network, load->url, load->referrer, load->payload, NULL, NULL,
         page_load_request_done, request);

@@ -25,12 +25,16 @@ static const char *const span_names[TAI_SPAN_COUNT] = {
     [TAI_SPAN_SYNC_XHR] = "Network I/O: synchronous XHR",
     [TAI_SPAN_RASTER_AND_DRAW] = "raster_and_draw",
     [TAI_SPAN_SDL_PRESENT] = "sdl_present",
+    [TAI_SPAN_COMMIT] = "commit",
 };
 static const char *const fetch_formats[TAI_FETCH_COUNT] = {
     [TAI_FETCH_DOCUMENT] = "Network I/O: document",
     [TAI_FETCH_ASYNC_XHR] = "Network I/O: asynchronous XHR",
     [TAI_FETCH_SCRIPT] = "resource_fetch[%zu]: script",
     [TAI_FETCH_STYLE] = "resource_fetch[%zu]: style",
+};
+static const char *const instant_names[TAI_INSTANT_COUNT] = {
+    [TAI_INSTANT_STALE_COMPLETION_DROPPED] = "stale_completion_dropped",
 };
 
 /* One output array is the shared invariant Perfetto needs, so writers are
@@ -51,6 +55,9 @@ const char *tai_trace_span_name(TaiTraceSpan span) {
 }
 const char *tai_trace_fetch_format(TaiTraceFetchKind kind) {
     return (unsigned)kind < TAI_FETCH_COUNT ? fetch_formats[kind] : NULL;
+}
+const char *tai_trace_instant_name(TaiTraceInstant instant) {
+    return (unsigned)instant < TAI_INSTANT_COUNT ? instant_names[instant] : NULL;
 }
 
 static bool tracing(void) {
@@ -80,19 +87,36 @@ static void name_thread_locked(const char *name) {
     fflush(trace.file);
 }
 
-/* Caller holds the mutex and the file is open. Names come from the static
- * tables, which hold no JSON metacharacters. */
-static void write_event_locked(const char *ph, const char *name, uint64_t id) {
+/* Caller holds the mutex and the file is open. Names and arg keys come from
+ * static strings, which hold no JSON metacharacters. */
+static void write_args_locked(const TaiTraceArg *args, size_t count) {
+    fputs(",\"args\":{", trace.file);
+    for (size_t i = 0; i < count; i++) {
+        fprintf(trace.file, "%s\"%s\":", i ? "," : "", args[i].key);
+        if (args[i].kind == TAI_TRACE_UINT)
+            fprintf(trace.file, "%" PRIu64, args[i].number);
+        else if (args[i].kind == TAI_TRACE_STRING && args[i].string)
+            tai_json_string(trace.file, args[i].string);
+        else
+            fputs("null", trace.file);
+    }
+    fputc('}', trace.file);
+}
+static void write_event_locked(const char *ph, const char *name, uint64_t id,
+                               const TaiTraceArg *args, size_t count) {
     name_thread_locked(NULL);
     fprintf(trace.file, ",{\"ph\":\"%s\",\"cat\":\"_\",\"name\":\"%s\"", ph, name);
     if (id) fprintf(trace.file, ",\"id\":%" PRIu64, id);
+    if (!strcmp(ph, "i")) fputs(",\"s\":\"t\"", trace.file);
+    if (count) write_args_locked(args, count);
     fprintf(trace.file, ",\"ts\":%" PRIu64 ",\"pid\":1,\"tid\":%u}", now_us(),
         self_tid());
     fflush(trace.file);
 }
-static void write_event(const char *ph, const char *name, uint64_t id) {
+static void write_event(const char *ph, const char *name, uint64_t id,
+                        const TaiTraceArg *args, size_t count) {
     pthread_mutex_lock(&trace.mutex);
-    if (trace.file) write_event_locked(ph, name, id);
+    if (trace.file) write_event_locked(ph, name, id, args, count);
     pthread_mutex_unlock(&trace.mutex);
 }
 
@@ -140,17 +164,26 @@ void tai_trace_thread_name(const char *name) {
 }
 
 void tai_trace_begin(TaiTraceSpan span) {
-    if (tracing()) write_event("B", span_names[span], 0);
+    if (tracing()) write_event("B", span_names[span], 0, NULL, 0);
+}
+void tai_trace_begin_args(TaiTraceSpan span, const TaiTraceArg *args,
+                          size_t count) {
+    if (tracing()) write_event("B", span_names[span], 0, args, count);
 }
 void tai_trace_end(TaiTraceSpan span) {
-    if (tracing()) write_event("E", span_names[span], 0);
+    if (tracing()) write_event("E", span_names[span], 0, NULL, 0);
+}
+void tai_trace_instant(TaiTraceInstant instant, const TaiTraceArg *args,
+                       size_t count) {
+    if (tracing()) write_event("i", instant_names[instant], 0, args, count);
 }
 
 static void fetch_name(const TaiTraceFetch *fetch, char *buffer, size_t size) {
     snprintf(buffer, size, fetch_formats[fetch->kind], fetch->index);
 }
 
-TaiTraceFetch tai_trace_fetch_begin(TaiTraceFetchKind kind, size_t index) {
+TaiTraceFetch tai_trace_fetch_begin(TaiTraceFetchKind kind, size_t index,
+                                    const char *url) {
     TaiTraceFetch fetch = {0};
     if (!tracing()) return fetch;
     fetch.kind = kind;
@@ -160,7 +193,8 @@ TaiTraceFetch tai_trace_fetch_begin(TaiTraceFetchKind kind, size_t index) {
     pthread_mutex_lock(&trace.mutex);
     if (trace.file) {
         fetch.id = ++trace.next_fetch_id;
-        write_event_locked("b", name, fetch.id);
+        TaiTraceArg arg = {"url", TAI_TRACE_STRING, url, 0};
+        write_event_locked("b", name, fetch.id, &arg, url ? 1 : 0);
     }
     pthread_mutex_unlock(&trace.mutex);
     return fetch;
@@ -170,6 +204,6 @@ void tai_trace_fetch_end(TaiTraceFetch *fetch) {
     if (!fetch || !fetch->id) return;
     char name[64];
     fetch_name(fetch, name, sizeof name);
-    write_event("e", name, fetch->id);
+    write_event("e", name, fetch->id, NULL, 0);
     *fetch = (TaiTraceFetch){0};
 }

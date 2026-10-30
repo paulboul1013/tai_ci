@@ -321,7 +321,8 @@ static void async_submit(Loader *loader, AsyncJob *job) {
     }
     const TaiPageFetchRequest *request = tai_page_fetch_request(job->fetch);
     job->loader = loader;
-    job->trace = tai_trace_fetch_begin(TAI_FETCH_ASYNC_XHR, 0);
+    job->trace = tai_trace_fetch_begin(TAI_FETCH_ASYNC_XHR, 0,
+                                       tai_url_string(request->url));
     job->request = tai_network_submit(loader->network, request->url,
         request->referrer, request->payload, request->origin,
         request->referrer_policy, async_done, job);
@@ -552,7 +553,12 @@ static void load_task_start(Loader *loader, LoadTask *task) {
                       .start = loader_start,
                       .cookies = app->cookies, .visited = task->visited,
                       .userdata = task};
-    tai_trace_begin(TAI_SPAN_TASK_LOAD);
+    TaiTraceArg args[] = {
+        {"url", TAI_TRACE_STRING, task->url, 0},
+        {"tab", TAI_TRACE_UINT, NULL, task->tab_id},
+        {"generation", TAI_TRACE_UINT, NULL, task->generation},
+    };
+    tai_trace_begin_args(TAI_SPAN_TASK_LOAD, args, sizeof args / sizeof *args);
     TaiPageLoad *load = task->internal_markup
         ? tai_page_load_async_markup(network, url, task->internal_markup,
             app->default_css, task->width, task->height, app->rtl, &net,
@@ -1318,6 +1324,13 @@ bool tai_tabset_pump(TaiTabSet *tabs, bool *changed, char **error) {
         TabSlot *slot = slot_by_id(tabs, task->tab_id);
         if (slot && slot->generation == task->generation &&
             slot->active_task == task) {
+            TaiTraceArg args[] = {
+                {"tab", TAI_TRACE_UINT, NULL, task->tab_id},
+                {"generation", TAI_TRACE_UINT, NULL, task->generation},
+                {"url", TAI_TRACE_STRING, task->url, 0},
+            };
+            tai_trace_begin_args(TAI_SPAN_COMMIT, args,
+                                 sizeof args / sizeof *args);
             slot->active_task = NULL;
             *changed = true;
             /* A transport or certificate failure still yields an error page;
@@ -1365,6 +1378,21 @@ bool tai_tabset_pump(TaiTabSet *tabs, bool *changed, char **error) {
             tai_page_destroy(candidate);
             if (items->error && !items->network_failure)
                 fprintf(stderr, "tab navigation failed: %s\n", items->error);
+            tai_trace_end(TAI_SPAN_COMMIT);
+        } else {
+            TaiTraceArg args[] = {
+                {"tab", TAI_TRACE_UINT, NULL, task->tab_id},
+                {"generation", TAI_TRACE_UINT, NULL, task->generation},
+                {"current_generation", slot ? TAI_TRACE_UINT : TAI_TRACE_NULL,
+                 NULL, slot ? slot->generation : 0},
+                {"url", TAI_TRACE_STRING, task->url, 0},
+                {"reason", TAI_TRACE_STRING,
+                 !slot ? "tab_gone"
+                     : slot->generation != task->generation ? "superseded"
+                     : "not_active", 0},
+            };
+            tai_trace_instant(TAI_INSTANT_STALE_COMPLETION_DROPPED, args,
+                              sizeof args / sizeof *args);
         }
         tai_page_destroy(items->page);
         free(items->error);
