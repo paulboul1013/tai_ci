@@ -335,6 +335,19 @@ atomic load.
   `generation`, `current_generation` (null when the tab is gone), `url` and
   `reason` (`superseded`, `tab_gone`, `not_active`). The loader never reads
   these values from the slot; the pump reads them on its own thread.
+- Page events carry a tab, composite events carry a window, and one instant
+  joins them (D-T11). `render` carries `tab` from `TaiPageNet.trace_tab`
+  (0 omits it): the loader fills it from the immutable `task->tab_id`, so
+  the loader's first frame has it, and the pump copies `event_net` with the
+  same tab into the committed page. `tai_page_set_net` copies the struct, so
+  only the page's current owner writes the field. `raster_and_draw` and
+  `sdl_present` carry `window`, the SDL window ID of the drawn window. The
+  native-only instant `tab_window` (`tab`, `window`, Browser thread) is
+  emitted once per tab by `window_frame` in the same loop turn that adds the
+  tab (first tab, New Tab, middle click, Ctrl+N window). Tabs only append,
+  so each window keeps a count of announced tabs. A page event reaches its
+  window only through this join table. A window's first frame can precede
+  its `tab_window`, so consumers join by tab ID, not by time order.
 - `tests/tools/window_session.sh start` writes `$TAI_WS_DIR/trace.json`
   unless `BROWSER_TRACE_FILE` is set.
 

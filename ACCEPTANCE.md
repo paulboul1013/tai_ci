@@ -28,6 +28,7 @@ Pixel-perfect 只在字型、版本、backend 與環境固定時使用；優先�
 
 | Slice | Date | State | Summary (proven / main gap) | Detail |
 | --- | --- | --- | --- | --- |
+| Trace 多視窗（D-T11） | 2026-10-30 | VALIDATING | `render` 帶 `tab`、`raster_and_draw`／`sdl_present` 帶 `window`，native-only `tab_window` 是對應表；`--window --home URL` 設定 New Tab／Ctrl+N 頁；Xvfb 兩個視窗：commit 落在正確視窗的 tab、window 2 關閉後不再繪製、每個 render 都對到視窗、請求不離開 127.0.0.1；兩個突變都變紅；CTest 76/76；ASan 版停止時的結束競態已在 `window_session.sh` 修正，之後連跑 3 次通過，log 沒有 sanitizer 報告／`traced_run` 並行時偶發 `exit=143` 未查明 | [detail](docs/acceptance/2026-10-30-trace-multiwindow.md) |
 | 慢速網路與 stale callback | 2026-10-30 | VALIDATING | CSS／JS 晚到、亂序回應都不被接受，晚到的 JS 不執行，B 不等 A 的 CSS；11 個檢查點與凍結 oracle 相符（取代 pending 的 history 為決定差異）；兩個突變都變紅；ASan-UBSan-LSan 下連跑 20 次通過；已造訪快照只在 commit 當下有效，之後重新 style 會更新；Xvfb 真實視窗 CSS／JS 晚到與載入中關閉視窗通過 | [detail](docs/acceptance/2026-10-30-stale-callback.md) |
 | 完整管線 E2E | 2026-10-29 | VALIDATING | 本機網站經 302／gzip／chunked 載入外部 CSS 與 JS，7 個檢查點（DOM、layout、display、history、scroll、inputs、requests）與凍結 oracle 逐點相符；Xvfb 真實視窗截圖區域、請求與標題檢查，含 native-only inline script；CTest 73/73、ASan-UBSan-LSan 10/10；不含 view-source／resize／多 tab | [detail](docs/acceptance/2026-10-29-e2e.md) |
 | 已造訪連結 `:visited` | 2026-10-29 | VALIDATING | app 共用的 `TaiVisited`，commit 與 fragment 時記錄、loader 拿快照；E2E 由紅轉綠、突變檢查會變紅；單元測試含配置故障、dummy SDL 跨分頁與新視窗；載入失敗不記錄為刻意差異 | [detail](docs/acceptance/2026-10-29-visited.md) |
