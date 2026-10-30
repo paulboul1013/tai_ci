@@ -28,6 +28,7 @@ Pixel-perfect 只在字型、版本、backend 與環境固定時使用；優先�
 
 | Slice | Date | State | Summary (proven / main gap) | Detail |
 | --- | --- | --- | --- | --- |
+| 慢速網路與 stale callback | 2026-10-30 | VALIDATING | CSS／JS 晚到、亂序回應都不被接受，晚到的 JS 不執行，B 不等 A 的 CSS；11 個檢查點與凍結 oracle 相符（取代 pending 的 history 為決定差異）；兩個突變都變紅；ASan-UBSan-LSan 下連跑 20 次通過；已造訪快照只在 commit 當下有效，之後重新 style 會更新 | [detail](docs/acceptance/2026-10-30-stale-callback.md) |
 | 完整管線 E2E | 2026-10-29 | VALIDATING | 本機網站經 302／gzip／chunked 載入外部 CSS 與 JS，7 個檢查點（DOM、layout、display、history、scroll、inputs、requests）與凍結 oracle 逐點相符；Xvfb 真實視窗截圖區域、請求與標題檢查，含 native-only inline script；CTest 73/73、ASan-UBSan-LSan 10/10；不含 view-source／resize／多 tab | [detail](docs/acceptance/2026-10-29-e2e.md) |
 | 已造訪連結 `:visited` | 2026-10-29 | VALIDATING | app 共用的 `TaiVisited`，commit 與 fragment 時記錄、loader 拿快照；E2E 由紅轉綠、突變檢查會變紅；單元測試含配置故障、dummy SDL 跨分頁與新視窗；載入失敗不記錄為刻意差異 | [detail](docs/acceptance/2026-10-29-visited.md) |
 | Layout／paint oracle 規則補齊 | 2026-10-28 | VALIDATING | `sup`、button 內容、`abbr` small caps、`h6`＋`p`、`nav#toc`／`nav.links`、`li`、input 文字寬度、不自繪的 wrapper、控制項 `overflow` 裁切比照 oracle；新閘門 `layout_rule_coverage` 要求 74 條 oracle 規則各有案例（變異測試會變紅）；layout 71＋2、display 新增 23 個案例相符；`layout_oom` 876 次注入；CTest 68/68、ASan-UBSan-LSan 66/68（2 個與本修正無關的計時測試在負載下失敗，單獨通過）、Xvfb 真實視窗、三軸審查通過 | [detail](docs/acceptance/2026-10-28-layout-oracle-rules.md) |

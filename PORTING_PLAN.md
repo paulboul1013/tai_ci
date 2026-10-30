@@ -11,7 +11,8 @@
 其後的中鍵開新分頁已實作並驗收（2026-10-28），`VALIDATING`，見下方第 9 項。
 其後的 overflow 容器捲動已實作並驗收（2026-10-28），`VALIDATING`，見下方第 10 項。
 其後的 layout／paint oracle 規則補齊已實作並驗收（2026-10-28），`VALIDATING`，見下方第 11 項。
-其後的完整管線 E2E 與它找到的 `:visited` 標記已實作並驗收（2026-10-29），`VALIDATING`，見下方第 12、13 項。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+其後的完整管線 E2E 與它找到的 `:visited` 標記已實作並驗收（2026-10-29），`VALIDATING`，見下方第 12、13 項。
+其後的慢速網路與 stale callback 驗證已實作並驗收（2026-10-30），`VALIDATING`，見下方第 14 項。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 下一個垂直切片
 
@@ -77,14 +78,20 @@
    `TaiNode.visited`。依 [計畫](docs/visited-plan.md) 新增 app 共用的 `TaiVisited`：commit 與 fragment
    時記錄、loader 拿快照、每次 style 前標記連結；刻意差異見下表「已造訪連結」列。證據見
    [ACCEPTANCE.md](ACCEPTANCE.md)。
+14. **慢速網路與 stale callback：已實作，`VALIDATING`（2026-10-30）。** 依 [計畫](docs/stale-callback-plan.md)
+   補上 CSS 晚到、JS 晚到、三個文件亂序回應與已造訪快照四種情境（既有的取代、Back、關閉情境列在計畫的
+   覆蓋矩陣）。`tests/stale_oracle_probe.py` 凍結 Python 11 個檢查點，`tests/stale_integration.py` 以
+   `test_tabset_stale` 逐點比對；兩個一次性突變（拿掉 pump 的 generation 檢查、不取消被取代的 task）都讓
+   測試變紅。刻意差異見下表「取代 pending 導覽」列。證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 已知差異與範圍
 
 | 項目 | 目前 native 行為與移植影響 |
 |---|---|
 | Tabs 上限與呈現 | 使用者指定最多 25 個 tabs；超寬時用等寬編號格。Python 無上限且讓文字換行。極窄格的可讀性仍待改善。達上限時中鍵點連結不開分頁，只在 stderr 印 `link navigation failed: maximum of 25 tabs reached`（使用者 2026-10-28 決定維持上限；Python 照樣開新分頁）；中鍵 mailto 不佔分頁，達上限仍外部開啟。；達上限時點「+」整個不動作，也不 blur 頁面，所以先前點過的 overflow 容器仍保有捲動焦點（Python 每次 chrome 點擊都 blur） |
-| 載入失敗與 pending | 載入失敗（首次或之後、網路或憑證）兩者都在請求 URL 顯示錯誤頁：一般導覽截斷 forward 項目，Back/Forward 停在目標 index（使用者 2026-09-26 決定，取代原回滾策略）。Pending 期間 native 仍顯示舊 page 與其 scroll；Python 開始導覽時 scroll 已歸零。可見 URL、history 與按鈕狀態在 pending 期間兩者相同。 |
+| 載入失敗與 pending | 載入失敗（首次或之後、網路或憑證）兩者都在請求 URL 顯示錯誤頁：一般導覽截斷 forward 項目，Back/Forward 停在目標 index（使用者 2026-09-26 決定，取代原回滾策略）。Pending 期間 native 仍顯示舊 page 與其 scroll；Python 開始導覽時 scroll 已歸零。可見 URL 與按鈕狀態在 pending 期間兩者相同；history 在 pending 導覽被取代時不同，見「取代 pending 導覽」列。 |
 | Pending 時按 Back | Python 已把 pending URL 寫入 history，Back 後它成為 forward 項目；native 取消尚未提交的導覽並丟掉該項目，Forward 不可用（使用者 2026-09-26 決定維持）。`tests/history_integration.py` 只對這兩個欄位套用此差異。 |
+| 取代 pending 導覽 | Pending 導覽被新導覽取代時，Python 把被取代的 URL 留在 history（例如 `[start, A, B]`）；native 的新導覽佔用同一格，被取代的頁面沒有 commit，所以不進 history（`[start, B]`），比照真實瀏覽器，也和「Pending 時按 Back」一致（使用者 2026-10-30 決定）。`tests/stale_integration.py` 只對 `history`、`history_index` 套用此差異。 |
 | 地址與外部開啟 | Native 拒絕 malformed/unsupported 直接網址；一般文字仍轉為 DuckDuckGo 查詢。`mailto:` 的開啟時機、URL 與 history 行為與 Python 相同（`tests/mailto_integration.py`）。使用者 2026-10-21 決定：只用 `xdg-open`（Python `webbrowser` 先看 `$BROWSER` 再依序嘗試多個瀏覽器）、點擊不先詢問（同 Python）。診斷 `open external URL: <url>` 寫到 stderr（Python stdout，同 D1）；Python 的第二行 `webbrowser.open returned: …` 不輸出，啟動失敗時改印 `link navigation failed: could not start xdg-open: …`（地址列為 `address navigation failed: …`）。開啟器不經 shell、在新 session 執行，stdin／stdout 接 `/dev/null`；`xdg-open` 自身的結束狀態兩邊都不觀察。中鍵點 mailto 連結兩者都外部開啟（`tests/middle_click_integration.py`）。 |
 | 快捷鍵與 wheel | Native 在地址欄未聚焦時支援 Alt+Left/Alt+Right（Python 沒有 history 快捷鍵）；Ctrl+N 見下列「新視窗」；尚無 Escape 專用操作。未知 wheel direction 或非有限 y 為 no-op，與 frozen Python 不同。PageUp/PageDown 是 native 才有的捲動鍵（Python 只有 ↑/↓ 與 wheel），比照 ↑/↓ 先捲點擊選中的 overflow 容器、到底時頁面不接手（使用者 2026-10-28 決定；`tests/test_overflow_scroll_window.c` 的 `pagekeys` 情境）。 |
 | 視覺效果像素 | 使用者 2026-10-14 決定不做 Python（Skia）與 native（Cairo）的逐像素 raster 比對：兩邊的 raster 函式庫不同，混色精度、反鋸齒與 blur 演算法本就不會逐像素相同。Opacity、`#rrggbbaa`、`mix-blend-mode`、`overflow` 圓角裁切、blur 與效果順序以 display-list 結構 oracle（`display_differential`、`hit_differential`、`blur_oracle_probe`）加 native key-pixel 測試（`tests/test_render.c`）驗證，見 [raster 契約](docs/reference-display-raster.md)。 |
