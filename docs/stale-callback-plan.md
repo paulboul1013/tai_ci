@@ -51,8 +51,9 @@
 | G3a | 三個文件都擋住；先放 a、b，再放 c | `out_of_order_oldest_first` | 通過 |
 | G3b | 先放 c，再放 a、b | `out_of_order_newest_first` | 通過 |
 | G4 | 已造訪快照：請求送出時取快照 | `visited_snapshot`（native only） | 通過 |
-| G5 | 一次性 mutation：M1 拿掉 pump 的 generation 檢查、M2 不取消被取代的 task，確認測試失敗 | 見「結果」M1、M2 | 通過（變紅） |
-| G6 | ASan 建置，`stale` 測試重複 20 次 | 見「結果」 | 通過 |
+| G5 | 一次性 mutation：M1 拿掉 pump 的 generation 檢查、M2 不取消被取代的 task，確認測試失敗 | 見驗收紀錄 | 通過（變紅） |
+| G6 | ASan 建置，`stale` 測試重複 20 次 | 見驗收紀錄 | 通過 |
+| W1–W3 | 真實視窗（Xvfb）：CSS 晚到、JS 晚到、載入中關閉視窗 | `tests/stale_window_integration.py` | 通過 |
 
 ## 每個情境檢查什麼
 
@@ -71,6 +72,7 @@
 | S1 | 範圍 | 方案 A：盤點矩陣，只補 G1–G6 | 新程式碼最少，既有證據不搬動 | 證據分散，要靠本矩陣串起來 |
 | S2 | 反向測試 | 只做一次，記在驗收檔，不做成 CTest | 建置不變慢 | 之後的改動不會自動重驗 |
 | S3 | 已造訪快照 | 請求送出時取快照（[visited 計畫](visited-plan.md) V2），只記錄不修改 | 不改 `src/` | commit 後重新 style 才會更新 |
+| S5 | 勾選前補真實視窗 | W1–W3 用 Xvfb 與真實 X11 輸入；只比顏色與標題，不逐像素比對（同 E2E 決定 E2） | 證明 SDL 迴圈 → pump → 畫面整條路徑 | 每次約 44 秒；亂序與快照不在視窗層重驗 |
 | S4 | 取代 pending 導覽的 history | 記為刻意差異：沒有 commit 的頁面不進 history | 比照真實瀏覽器，和「Pending 時按 Back」一致，不改 `src/` | 和 Python 多一條差異 |
 
 結果與證據只記在 [驗收紀錄](acceptance/2026-10-30-stale-callback.md)。
