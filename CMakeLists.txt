@@ -382,6 +382,10 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/stale_integration.py"
     $<TARGET_FILE:test_tabset_stale>
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/reference/browser.css")
+  add_test(NAME stale_window_integration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/stale_window_integration.py"
+    $<TARGET_FILE:tai-browser>)
+  set_tests_properties(stale_window_integration PROPERTIES SKIP_RETURN_CODE 77)
   add_executable(test_tabset_secure tests/test_tabset_secure.c)
   target_link_libraries(test_tabset_secure PRIVATE tai_core)
   target_compile_options(test_tabset_secure PRIVATE -Wall -Wextra -Wpedantic -Werror)

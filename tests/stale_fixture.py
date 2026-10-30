@@ -4,8 +4,9 @@ native test (docs/stale-callback-plan.md).
 Every document has a unique <h1>. A gated path holds its response until the
 test releases it, so a test can order "request sent", "newer navigation
 committed" and "late response arrives" without sleeping. ``wait_served``
-returns once the server finished handling a path (response written, or the
-client already gone), so "the late response arrived" is an observable event.
+returns once the server answered a released path (response written, or the
+client already gone); an expired gate never counts, so "the late response
+arrived" is an observable event.
 """
 
 import re
@@ -34,13 +35,26 @@ STALE_SCRIPT = (
     "request.send();\n"
     "document.querySelectorAll('h1')[0].innerHTML = 'stale-script-ran';\n")
 
+# Banner colours let a screenshot tell the pages apart
+# (tests/stale_window_integration.py); the DOM probes ignore them.
+B_BANNER = 0x00aa55ff
+A_BANNER = 0xffcc00ff
+
+
+def banner(rgba):
+    return '<div style="background-color:#{:06x}">banner</div>'.format(
+        rgba >> 8)
+
+
 RESOURCES = {
     "/start": (HTML, page("start")),
-    "/b": (HTML, page("page-b")),
+    "/b": (HTML, page("page-b", body=banner(B_BANNER))),
     "/x": (HTML, page("page-x")),
     "/css-a": (HTML, page("css-a",
-                          head='<link rel="stylesheet" href="/slow.css">')),
-    "/js-a": (HTML, page("js-a", body='<script src="/slow.js"></script>')),
+                          head='<link rel="stylesheet" href="/slow.css">',
+                          body=banner(A_BANNER))),
+    "/js-a": (HTML, page("js-a", body=banner(A_BANNER)
+                         + '<script src="/slow.js"></script>')),
     "/slow-a": (HTML, page("slow-a")),
     "/slow-b": (HTML, page("slow-b")),
     "/slow-c": (HTML, page("slow-c")),
@@ -69,16 +83,16 @@ class StaleServer:
                 with owner.lock:
                     owner.requests.append(self.path)
                     owner.lock.notify_all()
-                try:
-                    self.respond(path)
-                finally:
+                if self.respond(path):
                     with owner.lock:
                         owner.served.append(self.path)
                         owner.lock.notify_all()
 
             def respond(self, path):
+                """Answer once the gate opens; False when the gate expired
+                or the path is unknown, so wait_served never matches it."""
                 gate = owner.gates.get(path)
-                failed = gate is not None and not gate.wait(timeout=15)
+                failed = gate is not None and not gate.wait(timeout=60)
                 if failed or path not in RESOURCES:
                     self.close_connection = True
                     try:
@@ -86,7 +100,7 @@ class StaleServer:
                     except OSError:
                         pass
                     self.connection.close()
-                    return
+                    return False
                 content_type, text = RESOURCES[path]
                 payload = text.encode()
                 try:
@@ -99,6 +113,7 @@ class StaleServer:
                 except (BrokenPipeError, ConnectionResetError):
                     pass
                 self.close_connection = True
+                return True
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.daemon_threads = True
