@@ -12,6 +12,12 @@ nest JavaScript inside the tasks that run it. With BROWSER_TRACE_FILE empty no
 file appears; unset, window_session.sh writes TAI_WS_DIR/trace.json and the
 working directory stays empty; an unwritable path exits 1.
 
+A second traced session bookmarks a page with the address-bar star, opens
+about:bookmarks with the list button, follows its link back and types
+about:blank (D-T10): about:bookmarks is built in memory, so it has a
+Task: Tab.load and a commit but no document fetch and no
+_finish_document_load; about:blank takes the document path.
+
 Cancelled requests must still close their async slices. A local server
 leaves /hang* requests unanswered until the browser has exited, so their `e`
 events can only come from the cancel and close paths: navigating away from a
@@ -41,10 +47,15 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SESSION = ROOT / "tests" / "tools" / "window_session.sh"
 PAGE = ROOT / "tests" / "fixtures" / "trace_window"
+BOOKMARK_PAGE = ROOT / "tests" / "fixtures" / "bookmarks_window"
 ORACLE = ROOT / "tests" / "fixtures" / "trace_oracle.json"
 # Window coordinates of the heading's text in the 800x600 window.
 HEADING = (100, 101)
 ADDRESS = (400, 63)
+STAR = (769, 63)
+BOOKMARKS_BUTTON = (110, 54)
+# The first link on about:bookmarks.
+FIRST_BOOKMARK = (120, 121)
 
 sys.path.insert(0, str(ROOT / "tests"))
 import trace_check  # noqa: E402
@@ -104,16 +115,18 @@ class Session:
                 " ".join(args), result.stdout, result.stderr))
         return result.stdout if check else result
 
-    def start(self, url=None):
-        """Serve PAGE and open its index.html, or open url from another server."""
+    def start(self, url=None, fixture=PAGE):
+        """Serve fixture and open its index.html, or open url from another
+        server. Return the index.html URL."""
         self.started = True
         if url:
             self.run("start", "--xvfb", "--bin", str(self.browser), "--url", url)
-            return
+            return url
         port = free_port()
-        self.run("start", "--xvfb", "--port", str(port), "--fixture", str(PAGE),
-                 "--bin", str(self.browser),
-                 "--url", "http://127.0.0.1:{}/index.html".format(port))
+        url = "http://127.0.0.1:{}/index.html".format(port)
+        self.run("start", "--xvfb", "--port", str(port), "--fixture", str(fixture),
+                 "--bin", str(self.browser), "--url", url)
+        return url
 
     def navigate(self, url):
         self.run("click", *map(str, ADDRESS))
@@ -121,13 +134,21 @@ class Session:
         self.run("type", url)
         self.run("key", "Return")
 
-    def wait_request(self, path, timeout=60):
+    def wait_request(self, path, timeout=60, count=1):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if '"GET {}" 200'.format(path) in self.run("requests"):
+            if self.run("requests").count('"GET {}" 200'.format(path)) >= count:
                 return
             time.sleep(0.2)
-        raise AssertionError("browser never requested " + path)
+        raise AssertionError("browser never requested {} {} times".format(path, count))
+
+    def wait_title(self, title, timeout=60):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if "'{}'".format(title) in self.run("title"):
+                return
+            time.sleep(0.2)
+        raise AssertionError("window title never became " + title)
 
     def stop(self):
         """Close the only window, then collect the exit status."""
@@ -273,6 +294,98 @@ def traced_run(browser, test_trace, root, env):
     return check_trace(trace, test_trace)
 
 
+def loads_of(events, url):
+    """The Task: Tab.load B events for url."""
+    return [event for event in events if event["ph"] == "B"
+            and event["name"] == "Task: Tab.load" and event["args"]["url"] == url]
+
+
+def commit_after(events, load, label):
+    """The first commit B for load's tab and generation that starts after it."""
+    for event in events:
+        if (event["ph"] == "B" and event["name"] == "commit" and event["ts"] >= load["ts"]
+                and event["args"]["tab"] == load["args"]["tab"]
+                and event["args"]["generation"] == load["args"]["generation"]):
+            return event
+    raise AssertionError("{}: no commit for {} generation {}".format(
+        label, load["args"]["url"], load["args"]["generation"]))
+
+
+def document_fetches(events, url):
+    return [event for event in events if event["ph"] == "b"
+            and event["name"] == "Network I/O: document"
+            and event.get("args", {}).get("url") == url]
+
+
+def check_about_trace(path, test_trace, page):
+    """B1 about:bookmarks is built in memory: Tab.load and commit but no
+    document fetch and no _finish_document_load. B2 its link really
+    navigates back to page. B3 about:blank takes the document path."""
+    events = trace_check.load(path)
+    names = trace_check.check(events)
+    vocab = trace_check.vocabulary(test_trace)
+    for event in events[1:]:
+        if event["ph"] != "M":
+            assert trace_check.name_allowed(event, *vocab), \
+                "outside the vocabulary: " + event["name"]
+    loader = next(tid for tid, name in names.items() if name == "Loader thread")
+
+    bookmarks = loads_of(events, "about:bookmarks")
+    assert len(bookmarks) == 1, "B1: {} Tab.load for about:bookmarks".format(len(bookmarks))
+    bookmarks = bookmarks[0]
+    commit = commit_after(events, bookmarks, "B1")
+    assert not document_fetches(events, "about:bookmarks"), \
+        "B1: about:bookmarks has a Network I/O: document slice"
+    finished = [event for event in events if event["ph"] == "B"
+                and event["name"] == "Task: Tab._finish_document_load"
+                and event["tid"] == loader
+                and bookmarks["ts"] <= event["ts"] <= commit["ts"]]
+    assert not finished, "B1: about:bookmarks ran Task: Tab._finish_document_load"
+
+    back = [load for load in loads_of(events, page)
+            if load["args"]["generation"] > bookmarks["args"]["generation"]]
+    assert back, "B2: no Tab.load for {} after about:bookmarks".format(page)
+    back_commit = commit_after(events, back[0], "B2")
+    assert any(back[0]["ts"] <= fetch["ts"] <= back_commit["ts"]
+               for fetch in document_fetches(events, page)), \
+        "B2: no Network I/O: document for {} after about:bookmarks".format(page)
+
+    blank = loads_of(events, "about:blank")
+    assert len(blank) == 1, "B3: {} Tab.load for about:blank".format(len(blank))
+    blank_commit = commit_after(events, blank[0], "B3")
+    assert document_fetches(events, "about:blank"), \
+        "B3: about:blank has no Network I/O: document slice"
+    assert any(event["ph"] == "B" and event["name"] == "Task: Tab._finish_document_load"
+               and blank[0]["ts"] <= event["ts"] <= blank_commit["ts"]
+               for event in events), \
+        "B3: about:blank never ran Task: Tab._finish_document_load"
+
+
+def about_run(browser, test_trace, root, env):
+    """Bookmark a page with the star, open about:bookmarks with the list
+    button, follow its link back, then type about:blank."""
+    directory = root / "about"
+    directory.mkdir()
+    trace = directory / "t.json"
+    session = Session(browser, directory, root, dict(env, BROWSER_TRACE_FILE=str(trace)))
+    try:
+        page = session.start(fixture=BOOKMARK_PAGE)
+        session.wait_title("Bookmark Home")
+        session.run("click", *map(str, STAR))
+        session.run("click", *map(str, BOOKMARKS_BUTTON))
+        session.wait_title("Bookmarks")
+        session.run("click", *map(str, FIRST_BOOKMARK))
+        session.wait_request("/index.html", count=2)
+        session.wait_title("Bookmark Home")
+        session.navigate("about:blank")
+        # about:blank has no <title>, so the window shows the browser name.
+        session.wait_title("Tai Ci")
+        session.stop()
+    finally:
+        session.abandon()
+    check_about_trace(trace, test_trace, page)
+
+
 def async_pairs(path):
     """Validate the trace; return {async name: number of b/e pairs}."""
     events = trace_check.load(path)
@@ -388,6 +501,7 @@ def main(argv):
         root = pathlib.Path(name)
         env = sanitizer_env(root)
         count = traced_run(browser, test_trace, root, env)
+        about_run(browser, test_trace, root, env)
         cancel_runs(browser, root, env)
         untraced_run(browser, root, env, "unset", None)
         untraced_run(browser, root, env, "empty", "")
