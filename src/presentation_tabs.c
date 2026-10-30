@@ -1,4 +1,5 @@
 #include "presentation_internal.h"
+#include "tai/trace.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -25,6 +26,9 @@ typedef struct {
   bool focused;
   bool text_input_started;
   bool close_requested;
+  /* Tabs only ever append, so tabs below this index have had their
+   * tab_window trace instant. */
+  size_t announced_tabs;
   bool page_changed;
   bool chrome_changed;
   bool force_present;
@@ -160,7 +164,8 @@ static PresWindow *window_open(TaiTabSet *tabs, bool owns_tabs,
     set_error(error, "address URL snapshot allocation failed");
     ok = false;
   }
-  if (ok && !tai_pres_repaint_tabs_scene(w->renderer, &w->page_texture,
+  if (ok && !tai_pres_repaint_tabs_scene(w->renderer, w->id,
+                                         &w->page_texture,
                                          &w->chrome_texture, &view,
                                          w->pixel_width, w->pixel_height,
                                          true, true, &w->editor, error))
@@ -392,6 +397,19 @@ static bool window_animation_frame(PresWindow *w, TaiPage *page,
   return true;
 }
 
+/* The trace's join from page events (tab arg) to window events (window arg),
+ * once per tab, for every way a tab joins a window. */
+static void window_announce_tabs(PresWindow *w, size_t tab_count) {
+  for (; w->announced_tabs < tab_count; w->announced_tabs++) {
+    TaiTraceArg args[] = {
+        {"tab", TAI_TRACE_UINT, NULL,
+         tai_tabset_tab_id(w->tabs, w->announced_tabs)},
+        {"window", TAI_TRACE_UINT, NULL, w->id},
+    };
+    tai_trace_instant(TAI_INSTANT_TAB_WINDOW, args, sizeof args / sizeof *args);
+  }
+}
+
 /* Commits completed loads, applies the draft rule and repaints if needed. */
 static bool window_frame(PresWindow *w, char **error) {
   TaiTabSet *tabs = w->tabs;
@@ -413,6 +431,7 @@ static bool window_frame(PresWindow *w, char **error) {
     set_error(error, "active tab snapshot unavailable");
     return false;
   }
+  window_announce_tabs(w, view.tab_count);
   /* One place applies Python's draft discard for every URL change made by
    * this event or by completed loads. */
   if (!tai_pres_address_follow_view(&w->address_watch, &view, &w->editor,
@@ -441,7 +460,7 @@ static bool window_frame(PresWindow *w, char **error) {
   }
   if (w->page_changed || w->chrome_changed || w->force_present) {
     if (!tai_tabset_view(tabs, &view) ||
-        !tai_pres_repaint_tabs_scene(w->renderer, &w->page_texture,
+        !tai_pres_repaint_tabs_scene(w->renderer, w->id, &w->page_texture,
                                      &w->chrome_texture, &view,
                                      w->pixel_width, w->pixel_height,
                                      w->page_changed, w->chrome_changed,

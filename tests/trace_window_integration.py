@@ -18,6 +18,13 @@ about:blank (D-T10): about:bookmarks is built in memory, so it has a
 Task: Tab.load and a commit but no document fetch and no
 _finish_document_load; about:blank takes the document path.
 
+A multi-window session (D-T11) starts with --home pointing at a page of the
+same 127.0.0.1 fixture server: window 1 opens /a.html, Ctrl+N opens window 2
+on the home page, window 2 navigates to /b.html and closes, and window 1 then
+navigates to /c.html. The tab_window instants join each commit and render
+(tab arg) to the raster_and_draw/sdl_present spans of its window (window
+arg); no window-2 frame follows its close, and no request leaves 127.0.0.1.
+
 Cancelled requests must still close their async slices. A local server
 leaves /hang* requests unanswered until the browser has exited, so their `e`
 events can only come from the cancel and close paths: navigating away from a
@@ -115,17 +122,19 @@ class Session:
                 " ".join(args), result.stdout, result.stderr))
         return result.stdout if check else result
 
-    def start(self, url=None, fixture=PAGE):
-        """Serve fixture and open its index.html, or open url from another
-        server. Return the index.html URL."""
+    def start(self, url=None, fixture=PAGE, page="index.html", home=None):
+        """Serve fixture and open its page, or open url from another server.
+        home names a fixture page for --home. Return the opened URL."""
         self.started = True
         if url:
             self.run("start", "--xvfb", "--bin", str(self.browser), "--url", url)
             return url
         port = free_port()
-        url = "http://127.0.0.1:{}/index.html".format(port)
+        base = "http://127.0.0.1:{}/".format(port)
+        url = base + page
+        home_args = ["--home", base + home] if home else []
         self.run("start", "--xvfb", "--port", str(port), "--fixture", str(fixture),
-                 "--bin", str(self.browser), "--url", url)
+                 "--bin", str(self.browser), "--url", url, *home_args)
         return url
 
     def navigate(self, url):
@@ -386,6 +395,121 @@ def about_run(browser, test_trace, root, env):
     check_about_trace(trace, test_trace, page)
 
 
+MULTIWINDOW_PAGES = {"a": "Page A", "b": "Page B", "c": "Page C",
+                     "home": "Home Page"}
+
+
+def begins(events, name):
+    return [event for event in events if event["ph"] == "B" and event["name"] == name]
+
+
+def check_multiwindow_trace(path, test_trace, base):
+    """M1 commits land on the tab of the expected window, M2 frames carry
+    two distinct window IDs, M3 window 2 draws nothing once /c (typed
+    after window 2 closed) starts loading while window 1 draws /c, M4 every render joins a window."""
+    events = trace_check.load(path)
+    trace_check.check(events)
+    vocab = trace_check.vocabulary(test_trace)
+    for event in events[1:]:
+        if event["ph"] != "M":
+            assert trace_check.name_allowed(event, *vocab), \
+                "outside the vocabulary: " + event["name"]
+    joins = [event["args"] for event in events
+             if event["ph"] == "i" and event["name"] == "tab_window"]
+    tab_window = {join["tab"]: join["window"] for join in joins}
+    assert len(tab_window) == len(joins), "tab announced twice: {}".format(joins)
+    window_tabs = {}
+    for tab, window in tab_window.items():
+        window_tabs.setdefault(window, []).append(tab)
+
+    commits = {}
+    for event in begins(events, "commit"):
+        commits.setdefault(event["args"]["url"], []).append(event)
+    url = {name: base + name + ".html" for name in MULTIWINDOW_PAGES}
+    for name in MULTIWINDOW_PAGES:
+        assert len(commits.get(url[name], [])) == 1, \
+            "M1: commits of {}: {}".format(url[name], commits.get(url[name]))
+    tab = {name: commits[url[name]][0]["args"]["tab"] for name in MULTIWINDOW_PAGES}
+    for name in MULTIWINDOW_PAGES:
+        assert tab[name] in tab_window, \
+            "M1: tab {} of {} has no tab_window".format(tab[name], url[name])
+    window1, window2 = tab_window[tab["a"]], tab_window[tab["home"]]
+    assert window1 != window2, "M1: home opened in window 1"
+    assert tab["c"] == tab["a"] and tab["b"] == tab["home"], \
+        "M1: commits on tabs {}".format(tab)
+    assert sorted(window_tabs) == sorted([window1, window2]) and all(
+        len(tabs) == 1 for tabs in window_tabs.values()), \
+        "M1: join table {}".format(tab_window)
+
+    frames = begins(events, "raster_and_draw") + begins(events, "sdl_present")
+    missing = [event["name"] for event in frames if "window" not in event.get("args", {})]
+    assert not missing, "M2: {} frame spans without a window arg".format(len(missing))
+    assert {event["args"]["window"] for event in frames} == {window1, window2}, \
+        "M2: frame windows {}".format({event["args"]["window"] for event in frames})
+
+    # /c.html is typed only after window 2 has gone, so its load marks the close.
+    load_c = [event for event in begins(events, "Task: Tab.load")
+              if event["args"]["url"] == url["c"]]
+    assert len(load_c) == 1, "M3: {} loads of {}".format(len(load_c), url["c"])
+    late = [event for event in frames if event["args"]["window"] == window2
+            and event["ts"] >= load_c[0]["ts"]]
+    assert not late, "M3: {} window-2 frames after its close".format(len(late))
+    commit_c = commits[url["c"]][0]
+    assert any(event["args"]["window"] == window1 and event["ts"] > commit_c["ts"]
+               for event in begins(events, "sdl_present")), \
+        "M3: window 1 never presented after committing /c.html"
+
+    renders = begins(events, "render")
+    untagged = [event for event in renders if "tab" not in event.get("args", {})]
+    assert not untagged, "M4: {} render spans without a tab arg".format(len(untagged))
+    unjoined = sorted({event["args"]["tab"] for event in renders} - set(tab_window))
+    assert not unjoined, "M4: render tabs {} join no window".format(unjoined)
+    assert {event["args"]["tab"] for event in renders} == set(tab_window), \
+        "M4: not every tab rendered"
+
+    fetched = [event["args"]["url"] for event in events
+               if event["ph"] == "b" and "url" in event.get("args", {})]
+    outside = [address for address in fetched if not address.startswith(base)]
+    assert fetched and not outside, "requests left 127.0.0.1: {}".format(outside)
+
+
+def multiwindow_run(browser, test_trace, root, env):
+    """Window 1 opens /a.html; Ctrl+N opens window 2 on --home; window 2
+    goes to /b.html and closes; window 1 goes to /c.html."""
+    directory = root / "multiwindow"
+    fixture = root / "multiwindow-pages"
+    directory.mkdir()
+    fixture.mkdir()
+    for name, title in MULTIWINDOW_PAGES.items():
+        (fixture / (name + ".html")).write_text(
+            "<title>{0}</title><p>{0}</p>".format(title))
+    trace = directory / "t.json"
+    session = Session(browser, directory, root, dict(env, BROWSER_TRACE_FILE=str(trace)))
+    try:
+        first = session.start(fixture=fixture, page="a.html", home="home.html")
+        base = first[:-len("a.html")]
+        session.wait_title(MULTIWINDOW_PAGES["a"])
+        session.run("key", "ctrl+n")
+        session.run("await", "2")
+        session.run("select", "2")
+        session.wait_title(MULTIWINDOW_PAGES["home"])
+        session.navigate(base + "b.html")
+        session.wait_title(MULTIWINDOW_PAGES["b"])
+        session.run("close")
+        session.run("await", "1")
+        session.run("select", "1")
+        session.navigate(base + "c.html")
+        session.wait_title(MULTIWINDOW_PAGES["c"])
+        requests = session.run("requests")
+        session.stop()
+    finally:
+        session.abandon()
+    for name in MULTIWINDOW_PAGES:
+        assert '"GET /{}.html" 200'.format(name) in requests, \
+            "fixture server never served /{}.html:\n{}".format(name, requests)
+    check_multiwindow_trace(trace, test_trace, base)
+
+
 def async_pairs(path):
     """Validate the trace; return {async name: number of b/e pairs}."""
     events = trace_check.load(path)
@@ -502,6 +626,7 @@ def main(argv):
         env = sanitizer_env(root)
         count = traced_run(browser, test_trace, root, env)
         about_run(browser, test_trace, root, env)
+        multiwindow_run(browser, test_trace, root, env)
         cancel_runs(browser, root, env)
         untraced_run(browser, root, env, "unset", None)
         untraced_run(browser, root, env, "empty", "")

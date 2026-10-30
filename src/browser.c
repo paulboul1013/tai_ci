@@ -477,6 +477,11 @@ void tai_page_set_net(TaiPage *page, const TaiPageNet *net) {
     page->net = net ? *net : (TaiPageNet){0};
 }
 
+static void trace_render_begin(const TaiPage *page) {
+    TaiTraceArg tab = {"tab", TAI_TRACE_UINT, NULL, page->net.trace_tab};
+    tai_trace_begin_args(TAI_SPAN_RENDER, &tab, page->net.trace_tab ? 1 : 0);
+}
+
 static void title_strip(char *text);
 
 /* Python normalize_referrer_policy: strip, casefold, keep two values. */
@@ -660,7 +665,7 @@ static bool page_finish_visual(TaiPage *page, char **error) {
     if (!page_checkpoint(page, error)) return false;
     /* Load-time scripts have finished; the first frame below includes them. */
     page->dirty = false;
-    tai_trace_begin(TAI_SPAN_RENDER);
+    trace_render_begin(page);
     bool ok = page_first_frame(page, error);
     tai_trace_end(TAI_SPAN_RENDER);
     return ok;
@@ -1349,7 +1354,7 @@ static bool rebuild_dirty_page_body(TaiPage *page, char **error) {
 }
 
 static bool rebuild_dirty_page(TaiPage *page, char **error) {
-    tai_trace_begin(TAI_SPAN_RENDER);
+    trace_render_begin(page);
     bool ok = rebuild_dirty_page_body(page, error);
     tai_trace_end(TAI_SPAN_RENDER);
     return ok;

@@ -76,6 +76,25 @@ int main(int argc, char **argv) {
   char *incompatible_options[] = {(char *)browser, "--window",
                                   "--screenshot", (char *)output, NULL};
   assert(run(browser, incompatible_options) == 2);
+  /* --home sets the New Tab URL of a window, so it needs --window and a
+   * non-empty value; each misuse fails before any window opens. These only
+   * guard against regressions: an unknown option also exits 2, and the
+   * accepted form is covered by trace_window_integration's multi-window run. */
+  char *home_without_window[] = {(char *)browser, "--home",
+                                 "http://127.0.0.1/", (char *)url, NULL};
+  assert(run(browser, home_without_window) == 2);
+  char *home_missing[] = {(char *)browser, "--window", "--home", NULL};
+  assert(run(browser, home_missing) == 2);
+  char *home_empty[] = {(char *)browser, "--window", "--home", "",
+                        (char *)url, NULL};
+  assert(run(browser, home_empty) == 2);
+  char *home_option[] = {(char *)browser, "--window", "--home", "--rtl",
+                         (char *)url, NULL};
+  assert(run(browser, home_option) == 2);
+  char *home_screenshot[] = {(char *)browser, "--home", "http://127.0.0.1/",
+                             "--screenshot", (char *)output, (char *)url,
+                             NULL};
+  assert(run(browser, home_screenshot) == 2);
 
   /* D11: headless output follows one animation frame. Its throwing callback
    * does not stop the batch (D10); the callback it queues does not run. */

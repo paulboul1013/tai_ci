@@ -20,7 +20,8 @@ enum { TAI_WINDOW_HEIGHT = 600 };
 
 static void usage(const char *program) {
     fprintf(stderr,
-            "usage: %s [--headless|--window] [--rtl] [--screenshot OUTPUT.png] URL\n",
+            "usage: %s [--headless|--window [--home URL]] [--rtl] "
+            "[--screenshot OUTPUT.png] URL\n",
             program);
 }
 
@@ -69,6 +70,7 @@ int main(int argc, char **argv) {
     bool window = false;
     const char *url_text = NULL;
     const char *screenshot_path = NULL;
+    const char *home_url = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--rtl")) rtl = true;
         else if (!strcmp(argv[i], "--headless")) continue;
@@ -80,6 +82,13 @@ int main(int argc, char **argv) {
             }
             screenshot_path = argv[i];
         }
+        else if (!strcmp(argv[i], "--home")) {
+            if (++i == argc || !*argv[i] || !strncmp(argv[i], "--", 2)) {
+                usage(argv[0]);
+                return 2;
+            }
+            home_url = argv[i];
+        }
         else if (!strncmp(argv[i], "--", 2)) {
             usage(argv[0]);
             return 2;
@@ -88,7 +97,10 @@ int main(int argc, char **argv) {
         else { usage(argv[0]); return 2; }
     }
     if (!url_text) url_text = "about:blank";
-    if (window && screenshot_path) { usage(argv[0]); return 2; }
+    if ((window && screenshot_path) || (home_url && !window)) {
+        usage(argv[0]);
+        return 2;
+    }
     size_t css_length = 0;
     char *css = read_default_css(argv[0], &css_length);
     (void)css_length;
@@ -107,7 +119,8 @@ int main(int argc, char **argv) {
             }
             tai_trace_thread_name("Browser thread");
         }
-        TaiBrowserApp *app = css ? tai_browser_app_create(css, rtl, &error)
+        TaiBrowserApp *app = css ? tai_browser_app_create(css, rtl, home_url,
+                                                        &error)
                                  : NULL;
         bool success = app && tai_present_browser(
             app, url_text, TAI_SCREENSHOT_WIDTH, TAI_WINDOW_HEIGHT, &error);

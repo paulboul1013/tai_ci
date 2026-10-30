@@ -19,7 +19,7 @@ events (scheduler and frame-clock diagnostics, timing-dependent) are dropped.
 With TEST_TRACE, --check also asserts that every native name printed by
 `test_trace --vocabulary` occurs in the frozen oracle trace with the same
 phase family, so one name never means two kinds of work. The only exception
-is the native-only instant set NATIVE_ONLY (PORTING_PLAN.md, D-T9).
+is the native-only instant set NATIVE_ONLY (PORTING_PLAN.md, D-T9, D-T11).
 """
 
 import argparse
@@ -251,8 +251,9 @@ def run_probe():
         return summarize(trace_check.load(trace_path))
 
 
-# Native-only instants, with no oracle event (D-T9, user decision 2026-10-30).
-NATIVE_ONLY = {"stale_completion_dropped"}
+# Native-only instants, with no oracle event (D-T9, D-T11, user decisions
+# 2026-10-30): the stale-load drop and the tab-to-window join table.
+NATIVE_ONLY = {"stale_completion_dropped", "tab_window"}
 
 
 def check_vocabulary(result, test_trace):

@@ -2,13 +2,14 @@
 # Drive one real `tai-browser --window` session with PID-checked X11 input.
 # Usage: window_session.sh [--dir D] CMD [ARGS]   (or TAI_WS_DIR=D)
 #   start --url URL [--fixture DIR] [--port N] [--display :N | --xvfb]
-#         [--data-home DIR] [--size WxH] [--bin PATH]
+#         [--data-home DIR] [--size WxH] [--bin PATH] [--home URL]
 #   click X Y [left|middle] | key KEYS...(NAME*N repeats) | type TEXT | wheel up|down [N] | resize W H
 #   shot NAME [--crop WxH+X+Y] | events [PATTERN] | requests | status | stop
 #   windows | await N | select N|WID | close   (Ctrl+N multi-window sessions)
 #   title                                      (selected window's title)
 # start traces to D/trace.json (Chrome JSON, valid once the browser exits)
 # unless BROWSER_TRACE_FILE is set; an empty value turns tracing off.
+# --home sets the New Tab / Ctrl+N URL (keep it on 127.0.0.1 in tests).
 # Only processes started by `start` are ever signalled; windows are found by
 # the browser PID (titles follow the page), and every action re-checks that
 # the selected window id still belongs to that PID. `select` picks the Nth of
@@ -60,12 +61,13 @@ for p in range(8765, 8900):
 }
 
 cmd_start() {
-  local url="" fixture="" port="" display="" xvfb=0 data="" size="" bin=${TAI_BROWSER:-$REPO/build/tai-browser}
+  local url="" fixture="" port="" display="" xvfb=0 data="" size="" home="" bin=${TAI_BROWSER:-$REPO/build/tai-browser}
   while (($#)); do case $1 in
     --url) url=$2; shift 2;; --fixture) fixture=$2; shift 2;;
     --port) port=$2; shift 2;; --display) display=$2; shift 2;;
     --xvfb) xvfb=1; shift;; --data-home) data=$2; shift 2;;
     --size) size=$2; shift 2;; --bin) bin=$2; shift 2;;
+    --home) home=$2; shift 2;;
     *) die "start: unknown arg $1";; esac; done
   [[ -n $url ]] || die "start: --url required"
   [[ -x $bin ]] || die "start: browser not executable: $bin"
@@ -98,12 +100,13 @@ cmd_start() {
   [[ -n $data ]] || { data=$DIR/data; rm -rf "$data"; }
   mkdir -p "$data"; put url "$url"
   local trace=${BROWSER_TRACE_FILE-$DIR/trace.json}
+  local home_args=(); [[ -n $home ]] && home_args=(--home "$home")
   # Wrapper keeps the real browser as its child: $! inside is the exec'd
   # tai-browser (env execs), and the wrapper records the exit code.
   setsid bash -c 'env "$@" & echo $! > "$0/pid.tmp"; mv "$0/pid.tmp" "$0/pid"; wait $!; echo $? > "$0/rc"' \
     "$DIR" SDL_EVENT_LOGGING=1 SDL_VIDEO_X11_XINPUT2=0 SDL_VIDEO_DRIVER=x11 \
     DISPLAY="$display" XDG_DATA_HOME="$data" BROWSER_TRACE_FILE="$trace" \
-    "$bin" --window "$url" \
+    "$bin" --window ${home_args[@]+"${home_args[@]}"} "$url" \
     </dev/null >"$DIR/browser.log" 2>&1 &
   for _ in $(seq 50); do [[ -f $DIR/pid ]] && break; sleep 0.1; done
   local pid; pid=$(get pid); [[ -n $pid ]] || die "browser did not start"
@@ -261,7 +264,12 @@ stop_pid() { # stop_pid FILE WORD
 
 cmd_stop() {
   load; local rc=""
-  if alive "$PID"; then
+  # A browser that closed its last window may still be exiting (slow under
+  # ASan): /proc/PID/exe is gone before the pid is reaped. Wait for its rc.
+  if alive "$PID" && [[ $(readlink "/proc/$PID/exe" 2>/dev/null) != *tai-browser ]]; then
+    for _ in $(seq 100); do [[ -f $DIR/rc ]] && break; sleep 0.1; done
+  fi
+  if [[ ! -f $DIR/rc ]] && alive "$PID"; then
     [[ $(readlink "/proc/$PID/exe" 2>/dev/null) == *tai-browser ]] || die "pid $PID is not tai-browser"
     # SIGTERM -> SDL_EVENT_QUIT. Not windowclose: on Xvfb without a WM it
     # destroys the window and SDL exits 1 with X BadWindow.
@@ -278,6 +286,6 @@ cmd_stop() {
 
 case $CMD in
   start|click|key|type|wheel|resize|shot|events|requests|status|stop|windows|await|select|close|title) "cmd_$CMD" "$@";;
-  -h|--help|help) sed -n '2,16p' "$0";;
+  -h|--help|help) sed -n '2,17p' "$0";;
   *) die "unknown command $CMD";;
 esac

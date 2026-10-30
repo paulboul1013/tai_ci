@@ -35,6 +35,7 @@ static const char *const fetch_formats[TAI_FETCH_COUNT] = {
 };
 static const char *const instant_names[TAI_INSTANT_COUNT] = {
     [TAI_INSTANT_STALE_COMPLETION_DROPPED] = "stale_completion_dropped",
+    [TAI_INSTANT_TAB_WINDOW] = "tab_window",
 };
 
 /* One output array is the shared invariant Perfetto needs, so writers are

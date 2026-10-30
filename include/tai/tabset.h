@@ -37,10 +37,12 @@ typedef struct {
  * loader thread, which creates, exclusively uses and destroys the shared
  * TaiNetwork. All app and tab-set operations except the loader's own work
  * run on the SDL/window owner thread. tai_browser_app_create opens the
- * persistent per-user bookmarks like tai_tabset_create; the other variants
- * keep bookmarks in memory and mirror the tab-set constructors below. */
+ * persistent per-user bookmarks like tai_tabset_create; its home_url (copied)
+ * is the New Tab URL, NULL meaning https://browser.engineering/. The other
+ * variants keep bookmarks in memory and mirror the tab-set constructors
+ * below. */
 TaiBrowserApp *tai_browser_app_create(const char *default_css, bool rtl,
-                                      char **error);
+                                      const char *home_url, char **error);
 TaiBrowserApp *tai_browser_app_create_with_home_url(const char *default_css,
                                                     bool rtl,
                                                     const char *home_url,
@@ -147,6 +149,9 @@ bool tai_tabset_pump(TaiTabSet *tabs, bool *changed, char **error);
 bool tai_tabset_run_tasks(TaiTabSet *tabs, double now, size_t budget,
                           bool *active_changed, double *next, char **error);
 bool tai_tabset_view(const TaiTabSet *tabs, TaiTabSetView *view);
+/* The app-unique ID of the tab at index (the "tab" trace arg), or 0 when
+ * index is out of range. */
+uint64_t tai_tabset_tab_id(const TaiTabSet *tabs, size_t index);
 /* Returns an owned URL of the active tab's history entry at index, counting
  * the provisional entry of an in-flight navigation like TaiTabSetView does,
  * or NULL when index is out of range or allocation fails. */

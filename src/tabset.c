@@ -552,7 +552,7 @@ static void load_task_start(Loader *loader, LoadTask *task) {
                       .cancelled = task_cancelled,
                       .start = loader_start,
                       .cookies = app->cookies, .visited = task->visited,
-                      .userdata = task};
+                      .userdata = task, .trace_tab = task->tab_id};
     TaiTraceArg args[] = {
         {"url", TAI_TRACE_STRING, task->url, 0},
         {"tab", TAI_TRACE_UINT, NULL, task->tab_id},
@@ -939,9 +939,9 @@ TaiBrowserApp *tai_browser_app_create_for_test(const char *default_css,
 }
 
 TaiBrowserApp *tai_browser_app_create(const char *default_css, bool rtl,
-                                      char **error) {
+                                      const char *home_url, char **error) {
     TaiBrowserApp *app = tai_browser_app_create_with_home_url(default_css, rtl,
-        "https://browser.engineering/", error);
+        home_url ? home_url : "https://browser.engineering/", error);
     if (!app) return NULL;
     /* An unusable bookmarks file must not keep the browser from starting.
      * The file is left untouched and this run keeps favorites in memory. */
@@ -1069,7 +1069,7 @@ TaiTabSet *tai_tabset_create_for_test(const char *default_css, bool rtl,
 }
 
 TaiTabSet *tai_tabset_create(const char *default_css, bool rtl, char **error) {
-    return tabset_create_owning(tai_browser_app_create(default_css, rtl,
+    return tabset_create_owning(tai_browser_app_create(default_css, rtl, NULL,
                                                        error), error);
 }
 
@@ -1339,7 +1339,9 @@ bool tai_tabset_pump(TaiTabSet *tabs, bool *changed, char **error) {
             items->page = NULL;
             /* The page's load-time net names the task freed below; from now
              * on its JS runs on this thread and queues XHR for the loader. */
-            if (candidate) tai_page_set_net(candidate, &tabs->app->event_net);
+            TaiPageNet event_net = tabs->app->event_net;
+            event_net.trace_tab = task->tab_id;
+            if (candidate) tai_page_set_net(candidate, &event_net);
             if (candidate) {
                 if ((tai_page_viewport_width(candidate) != tabs->width ||
                      tai_page_viewport_height(candidate) != tabs->height) &&
@@ -1440,6 +1442,10 @@ char *tai_tabset_history_url(const TaiTabSet *tabs, size_t index) {
         index == count - 1)
         return tai_strdup(slot->active_task->url);
     return tai_session_history_url(slot->session, index);
+}
+
+uint64_t tai_tabset_tab_id(const TaiTabSet *tabs, size_t index) {
+    return tabs && index < tabs->count ? tabs->slots[index].id : 0;
 }
 
 bool tai_tabset_view(const TaiTabSet *tabs, TaiTabSetView *view) {

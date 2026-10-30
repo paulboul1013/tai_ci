@@ -186,7 +186,7 @@ bool tai_pres_repaint_scene(SDL_Renderer *renderer,
                             const AddressEditor *editor,
                             const TaiPresentWindowCallbacks *callbacks,
                             char **error);
-bool tai_pres_repaint_tabs_scene(SDL_Renderer *renderer,
+bool tai_pres_repaint_tabs_scene(SDL_Renderer *renderer, SDL_WindowID window,
                                  SDL_Texture **page_texture,
                                  SDL_Texture **chrome_texture,
                                  const TaiTabSetView *view, int width,

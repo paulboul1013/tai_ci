@@ -67,9 +67,13 @@ void tai_trace_begin_args(TaiTraceSpan span, const TaiTraceArg *args,
 void tai_trace_end(TaiTraceSpan span);
 
 /* Native-only thread-scoped instants (ph "i", s "t"). The oracle has no
- * event for this work; tests/trace_oracle_probe.py allows exactly these. */
+ * event for this work; tests/trace_oracle_probe.py allows exactly these.
+ * TAI_INSTANT_TAB_WINDOW (args tab, window) is the join table between page
+ * events, which carry a tab arg, and raster_and_draw/sdl_present, which carry
+ * the SDL window ID as a window arg: one per tab when it joins a window. */
 typedef enum {
     TAI_INSTANT_STALE_COMPLETION_DROPPED,
+    TAI_INSTANT_TAB_WINDOW,
     TAI_INSTANT_COUNT
 } TaiTraceInstant;
 void tai_trace_instant(TaiTraceInstant instant, const TaiTraceArg *args,

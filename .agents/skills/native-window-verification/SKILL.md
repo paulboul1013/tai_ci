@@ -49,7 +49,10 @@ $W wheel down 3; $W resize 640 480; $W status
 $W stop                                   # browser exit=0, server + Xvfb stopped
 ```
 
-Also: `events PATTERN`; `start --size WxH --data-home DIR --display :0`. Then open the PNGs with the Read tool; exit status alone is not evidence.
+Also: `events PATTERN`; `start --size WxH --data-home DIR --display :0`;
+`start --home URL` sets the New Tab / Ctrl+N page (point it at the fixture
+server so no request leaves 127.0.0.1; the default is
+https://browser.engineering/). Then open the PNGs with the Read tool; exit status alone is not evidence.
 
 ## What the script already handles
 
@@ -69,7 +72,9 @@ Also: `events PATTERN`; `start --size WxH --data-home DIR --display :0`. Then op
   only after the browser exits; open it in Perfetto or load it with
   `tests/trace_check.py`. `Task: Tab.load`, `commit` and
   `stale_completion_dropped` carry `url`/`tab`/`generation` args; the fetch
-  slices (document, script, style, async XHR) carry `url`.
+  slices (document, script, style, async XHR) carry `url`; `render` carries
+  `tab`; `raster_and_draw`/`sdl_present` carry the SDL `window` ID; the
+  `tab_window` instant (`tab`, `window`) joins the two per tab.
 - Xvfb autorepeat off (`xset r off`); keys and typing use 80ms delay.
 - `stop` sends SIGTERM (SDL quit). Never `xdotool windowclose` on Xvfb: with
   no window manager it destroys the window and SDL exits 1 with BadWindow.

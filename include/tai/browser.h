@@ -63,7 +63,9 @@ void tai_page_fetch_finish(TaiPageFetch *fetch, TaiResponse *response,
  *   cookies     the shared jar; NULL makes document.cookie read ""
  *   visited     read at every restyle on the thread running the page: an
  *               <a href> whose resolved URL it contains matches :visited.
- *               NULL: no link is visited */
+ *               NULL: no link is visited
+ *   trace_tab   the tab ID the page's "render" trace spans carry as their
+ *               tab arg; 0 omits the arg */
 typedef struct {
     TaiResponse *(*request)(void *userdata, const TaiUrl *url,
                             const TaiUrl *referrer, const char *payload,
@@ -75,6 +77,7 @@ typedef struct {
     TaiCookieJar *cookies;
     const TaiVisited *visited;
     void *userdata;
+    uint64_t trace_tab;
 } TaiPageNet;
 /* Total time limit of one synchronous XMLHttpRequest, across redirects. */
 #define TAI_XHR_TIMEOUT_SECONDS 30.0
