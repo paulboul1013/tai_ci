@@ -24,6 +24,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PORT_TOKEN = "<PORT>"
 SPECIAL_PATH = '/alpha?x=1&y=2#frag"\'<tag>&'
 
+sys.path.insert(0, str(ROOT / "tests"))
+import oracle  # noqa: E402
+
 
 def wait_for(predicate, label, timeout=8):
     deadline = time.monotonic() + timeout
@@ -85,9 +88,6 @@ def normalize(value):
 
 
 def import_reference():
-    sys.path.insert(0, str(ROOT / "tests"))
-    import oracle
-
     oracle.verify_reference()
     os.environ["SDL_VIDEODRIVER"] = "dummy"
     os.environ["BROWSER_RENDER_BACKEND"] = "cpu"
@@ -160,6 +160,8 @@ def anchors(browser, tab):
 
 
 def click_anchor(browser, window, tab, anchor):
+    oracle.wait_layout(
+        lambda function: tab_call(browser, window, tab, function), tab)
     text_ids = {id(node) for node in browser.tree_to_list(anchor, [])
                 if isinstance(node, browser.Text)}
     fragments = [layout for layout in browser.tree_to_list(tab.document, [])

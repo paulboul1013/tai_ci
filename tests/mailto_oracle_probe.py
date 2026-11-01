@@ -29,6 +29,7 @@ FIXTURE = ROOT / "tests" / "fixtures" / "mailto_oracle.json"
 
 sys.path.insert(0, str(ROOT / "tests"))
 import mailto_fixture  # noqa: E402
+import oracle  # noqa: E402
 
 
 def wait_for(predicate, label, timeout=8):
@@ -41,8 +42,6 @@ def wait_for(predicate, label, timeout=8):
 
 
 def import_reference():
-    import oracle
-
     oracle.verify_reference()
     os.environ["SDL_VIDEODRIVER"] = "dummy"
     os.environ["BROWSER_RENDER_BACKEND"] = "cpu"
@@ -141,6 +140,9 @@ class Probe:
         self.window = self.app.new_window(
             self.browser.URL(self.server.url(path)))
         self.wait_heading(heading)
+        # Mark after the page's own resources (scripts, CSS) have loaded.
+        tab = self.tab
+        oracle.wait_layout(lambda function: self.tab_call(tab, function), tab)
         self.mark = self.server.mark()
 
     def set_draft(self, text):
@@ -156,8 +158,6 @@ class Probe:
         tab = self.tab
 
         def locate():
-            if tab.document is None:
-                tab.run_animation_frame()
             for obj in browser.tree_to_list(tab.document, []):
                 if getattr(obj, "width", None) is None or obj.width <= 0:
                     continue
@@ -170,6 +170,7 @@ class Probe:
                     ancestor = ancestor.parent
             return None
 
+        oracle.wait_layout(lambda function: self.tab_call(tab, function), tab)
         point = self.tab_call(tab, locate)
         if point is None:
             raise AssertionError("page element not found")

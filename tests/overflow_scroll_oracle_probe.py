@@ -30,6 +30,7 @@ FIXTURE = ROOT / "tests" / "fixtures" / "overflow_scroll_oracle.json"
 
 sys.path.insert(0, str(ROOT / "tests"))
 import overflow_scroll_fixture  # noqa: E402
+import oracle  # noqa: E402
 
 # Above the tab strip and the toolbar: a chrome click that hits nothing.
 CHROME_POINT = (400, 2)
@@ -46,8 +47,6 @@ def wait_for(predicate, label, timeout=8):
 
 
 def import_reference():
-    import oracle
-
     oracle.verify_reference()
     os.environ["SDL_VIDEODRIVER"] = "dummy"
     os.environ["BROWSER_RENDER_BACKEND"] = "cpu"
@@ -144,18 +143,6 @@ class Probe:
         self.window = self.app.new_window(
             self.browser.URL(self.server.url(path)))
         self.wait_heading(heading)
-        self.wait_layout()
-
-    def wait_layout(self):
-        """The heading exists once the HTML is parsed; the layout tree waits
-        for _finish_page_resources (CSS), which a busy machine delays."""
-        tab = self.tab
-
-        def laid_out():
-            tab.render()
-            return tab.document is not None
-
-        wait_for(lambda: self.tab_call(tab, laid_out), "document layout")
 
     def page_point(self, element_id):
         """Center of the last layout object under the element with an id.
@@ -166,8 +153,6 @@ class Probe:
         tab = self.tab
 
         def locate():
-            if tab.document is None:
-                tab.run_animation_frame()
             point = None
             for obj in browser.tree_to_list(tab.document, []):
                 if getattr(obj, "width", None) is None or obj.width <= 0:
@@ -182,6 +167,7 @@ class Probe:
                     ancestor = ancestor.parent
             return point
 
+        oracle.wait_layout(lambda function: self.tab_call(tab, function), tab)
         point = self.tab_call(tab, locate)
         if point is None:
             raise AssertionError("page element not found")

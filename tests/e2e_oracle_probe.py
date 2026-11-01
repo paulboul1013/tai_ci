@@ -34,6 +34,7 @@ FIXTURE = ROOT / "tests" / "fixtures" / "e2e_oracle.json"
 sys.path.insert(0, str(ROOT / "tests"))
 import e2e_fixture  # noqa: E402
 import e2e_shape  # noqa: E402
+import oracle  # noqa: E402
 
 
 def wait_for(predicate, label, timeout=8):
@@ -46,8 +47,6 @@ def wait_for(predicate, label, timeout=8):
 
 
 def import_reference():
-    import oracle
-
     oracle.verify_reference()
     os.environ["SDL_VIDEODRIVER"] = "dummy"
     os.environ["BROWSER_RENDER_BACKEND"] = "cpu"
@@ -158,8 +157,6 @@ class Probe:
         tab = self.tab
 
         def locate():
-            if tab.document is None:
-                tab.run_animation_frame()
             point = None
             for obj in browser.tree_to_list(tab.document, []):
                 if getattr(obj, "width", None) is None or obj.width <= 0:
@@ -174,6 +171,7 @@ class Probe:
                     ancestor = ancestor.parent
             return point
 
+        oracle.wait_layout(lambda function: self.tab_call(tab, function), tab)
         point = self.tab_call(tab, locate)
         if point is None:
             raise AssertionError("page element {} not found".format(

@@ -32,6 +32,7 @@ FIXTURE = ROOT / "tests" / "fixtures" / "new_window_oracle.json"
 
 sys.path.insert(0, str(ROOT / "tests"))
 import new_window_fixture  # noqa: E402
+import oracle  # noqa: E402
 
 
 def wait_for(predicate, label, timeout=8):
@@ -44,8 +45,6 @@ def wait_for(predicate, label, timeout=8):
 
 
 def import_reference():
-    import oracle
-
     oracle.verify_reference()
     os.environ["SDL_VIDEODRIVER"] = "dummy"
     os.environ["BROWSER_RENDER_BACKEND"] = "cpu"
@@ -241,6 +240,8 @@ class Probe:
                     ancestor = ancestor.parent
             return None
 
+        oracle.wait_layout(
+            lambda function: self.tab_call(window, tab, function), tab)
         point = self.tab_call(window, tab, locate)
         if point is None:
             raise AssertionError("page link {} not found".format(href))

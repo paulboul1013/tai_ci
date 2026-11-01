@@ -8,6 +8,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import time
 from pathlib import Path
 
 REFERENCE = Path(__file__).resolve().parent / 'reference'
@@ -28,6 +29,30 @@ def load_reference():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def wait_layout(run_on_tab, tab, timeout=8):
+    """Block until tab has a committed layout; call before tab.document walks.
+
+    The HTML is parsed before _finish_page_resources requests a render, so a
+    page can show its heading while tab.document is None, or still the
+    previous page's layout (Tab.load never clears it). Run that first frame
+    here, not only render: BrowserWindow hit tests (middle click) read the
+    committed display list. run_on_tab(fn) runs fn on the tab's main thread
+    and returns its result."""
+    def current():
+        return tab.document is not None and tab.document.node is tab.nodes
+
+    def laid_out():
+        if not current() and tab.needs_render:
+            tab.run_animation_frame()
+        return current()
+
+    deadline = time.monotonic() + timeout
+    while not run_on_tab(laid_out):
+        if time.monotonic() >= deadline:
+            raise AssertionError('timed out waiting for document layout')
+        time.sleep(0.01)
 
 
 def selector_value(selector):
