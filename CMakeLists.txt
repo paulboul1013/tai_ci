@@ -276,6 +276,11 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/mailto_oracle_probe.py" --check)
   add_test(NAME test_registration COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/tools/check_test_registration.py")
+  add_test(NAME xvfb_owner COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/tools/check_xvfb_owner.py")
+  add_test(NAME xvfb_concurrency COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/xvfb_concurrency.py")
+  set_tests_properties(xvfb_concurrency PROPERTIES SKIP_RETURN_CODE 77)
   add_test(NAME middle_click_oracle_probe COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/middle_click_oracle_probe.py" --check)
   add_test(NAME overflow_scroll_oracle_probe COMMAND "${Python3_EXECUTABLE}"
