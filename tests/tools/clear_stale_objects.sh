@@ -7,18 +7,18 @@
 #
 #   tests/tools/clear_stale_objects.sh [FILE...]
 #
-# Without FILE it uses every file changed since HEAD, untracked ones included.
-# Embedded JavaScript (src/js_*.js, tests/reference/runtime.js) also drops the
-# generated tai_js_sources.h. Run it before building after any edit.
+# Without FILE it compares every source's content hash with the one recorded
+# in each build directory (.tai_source_hashes) at its last run, so an edit
+# that was reverted, or any edit whose mtime lies, is still found; a build
+# directory without a record uses the files changed since HEAD. Embedded
+# JavaScript (src/js_*.js, tests/reference/runtime.js) also drops the
+# generated tai_js_sources.h. The fresh-build-before-test hook runs it before
+# every build and test command.
 set -u
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
-if (($# == 0)); then
-  mapfile -t files < <({ git diff --name-only HEAD
-                         git ls-files --others --exclude-standard; } | sort -u)
-else
-  files=("$@")
-fi
+hashes=$(git ls-files -co --exclude-standard -- src include 'tests/*.c' \
+           'tests/*.h' tests/reference/runtime.js | xargs -r sha1sum)
 
 removed=0
 drop() {
@@ -28,6 +28,18 @@ drop() {
 for dir in build*/; do
   dir=${dir%/}
   [ -f "$dir/build.ninja" ] || continue
+  record="$dir/.tai_source_hashes"
+  if (($#)); then
+    files=("$@")
+  elif [ -f "$record" ]; then
+    # Lines that differ in either direction name changed, new or removed files.
+    mapfile -t files < <(diff <(sort "$record") <(sort <<<"$hashes") |
+                         awk '/^[<>]/ { print $3 }' | sort -u)
+  else
+    mapfile -t files < <({ git diff --name-only HEAD
+                           git ls-files --others --exclude-standard; } | sort -u)
+  fi
+  (($#)) || printf '%s\n' "$hashes" >"$record"
   targets=()
   for file in "${files[@]}"; do
     file=${file#"$root"/}
