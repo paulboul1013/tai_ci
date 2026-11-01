@@ -144,6 +144,18 @@ class Probe:
         self.window = self.app.new_window(
             self.browser.URL(self.server.url(path)))
         self.wait_heading(heading)
+        self.wait_layout()
+
+    def wait_layout(self):
+        """The heading exists once the HTML is parsed; the layout tree waits
+        for _finish_page_resources (CSS), which a busy machine delays."""
+        tab = self.tab
+
+        def laid_out():
+            tab.render()
+            return tab.document is not None
+
+        wait_for(lambda: self.tab_call(tab, laid_out), "document layout")
 
     def page_point(self, element_id):
         """Center of the last layout object under the element with an id.
