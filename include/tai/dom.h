@@ -71,6 +71,21 @@ TaiDomStatus tai_node_remove_child(TaiNode *parent, TaiNode *child);
  * unless TAI_DOM_OK is returned. */
 TaiDomStatus tai_node_set_inner_html(TaiNode *node, const char *html,
     TaiNode ***removed, size_t *removed_count);
+/* D14: DOM textContent. Setting an element replaces its children with one
+ * text node (none for ""), reporting the old children like
+ * tai_node_set_inner_html; setting a text node replaces its text. Nothing
+ * changes unless TAI_DOM_OK is returned. */
+TaiDomStatus tai_node_set_text_content(TaiNode *node, const char *text,
+    TaiNode ***removed, size_t *removed_count);
+/* D14: the text of node and all its descendants in tree order (script and
+ * style text included). Returns an owned string, or NULL on allocation
+ * failure. */
+char *tai_node_text_content(const TaiNode *node);
+/* D14: getElementById. *found is the first element in tree order under root
+ * (root included) whose id attribute equals id, or NULL; "" matches nothing.
+ * Returns TAI_DOM_NO_MEMORY on allocation failure. */
+TaiDomStatus tai_node_find_by_id(TaiNode *root, const char *id,
+    TaiNode **found);
 /* Python JSContext.serialize_node: outerHTML when outer, else innerHTML (the
  * children only). Returns an owned string, or NULL on allocation failure. */
 char *tai_node_serialize(const TaiNode *node, bool outer);

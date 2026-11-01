@@ -241,6 +241,31 @@ static void record_removal(void *opaque, TaiNode *node) {
     log->last_removed = node;
 }
 
+static char *eval_text(TaiJsContext *js, const char *code) {
+    char *result = NULL, *error = NULL;
+    bool ok = tai_js_eval_value(js, "host.js", code, &result, &error);
+    if (!ok) {
+        fprintf(stderr, "unexpected failure of %s: %s\n", code, error);
+        abort();
+    }
+    free(error);
+    return result;
+}
+
+static void expect_text(TaiJsContext *js, const char *code, const char *want) {
+    char *got = eval_text(js, code);
+    if (strcmp(got, want)) {
+        fprintf(stderr, "%s: expected %s, got %s\n", code, want, got);
+        abort();
+    }
+    free(got);
+}
+
+#define XHR(body) "var x = new XMLHttpRequest(); x.open('GET', 'u', false);" \
+    " x.send(" body "); x.responseText"
+#define CAUGHT(code) "(function(){ try { " code "; return 'none'; }" \
+    " catch (e) { return e.name + ':' + e.message; } })()"
+
 static void test_mutation_callbacks(void) {
     char *error = NULL;
     TaiDocument *doc = tai_html_parse(
@@ -341,6 +366,96 @@ static void test_inner_html(void) {
     tai_document_destroy(doc);
 }
 
+/* D14: parentNode, parentElement, textContent, tagName, className, classList,
+ * getElementById and querySelector, which runtime.js lacks. They follow real
+ * browsers: <html>.parentNode is document, tagName is upper case, and
+ * textContent includes script and style text. */
+static void test_common_dom_api(void) {
+    char *error = NULL;
+    TaiDocument *doc = tai_html_parse(
+        "<div id=card class=\"a b\"><button id=btn>Open</button>"
+        "<p id=total>1</p><script>var s = 1;</script></div>"
+        "<b id=dup>first</b><b id=dup>second</b><i id=42>n</i>", &error);
+    assert(doc && !error);
+    MutationLog log = {0};
+    TaiJsHost host = {.invalidated = count_invalidation,
+                      .node_removed = record_removal, .userdata = &log};
+    TaiJsContext *js = tai_js_create(tai_document_root(doc), &host, &error);
+    assert(js && !error);
+
+    expect_text(js, "btn.parentNode.id + '|' + btn.parentElement.id", "card|card");
+    /* Wrappers are not unique, so compare tags, not objects. */
+    expect_text(js, "var html = document.querySelectorAll('html')[0];"
+                    " [html.parentNode === document, html.parentElement === null,"
+                    "  card.parentNode.tagName, card.parentNode.parentNode.tagName].join('|')",
+                "true|true|BODY|HTML");
+    expect_text(js, "var span = document.createElement('sPaN');"
+                    " [span.parentNode === null, span.tagName, btn.tagName].join('|')",
+                "true|SPAN|BUTTON");
+    expect_text(js, "card.appendChild(span); var was = span.parentNode.id;"
+                    " card.removeChild(span); was + '|' + (span.parentNode === null)",
+                "card|true");
+
+    expect_text(js, "card.textContent", "Open1var s = 1;");
+    TaiNode *total = find_element(tai_document_root(doc), "p");
+    TaiNode *old_text = total->children[0];
+    size_t invalidations = log.invalidations, removed = log.removed;
+    expect_text(js, "total.textContent = '<b>3</b>'; total.textContent", "<b>3</b>");
+    assert(total->child_count == 1 && total->children[0]->kind == TAI_TEXT &&
+           !strcmp(total->children[0]->text, "<b>3</b>"));
+    assert(log.invalidations == invalidations + 1 && log.removed == removed + 1 &&
+           log.last_removed == old_text && !old_text->parent);
+    /* null and undefined both clear, as WebIDL's DOMString? does. */
+    expect_text(js, "total.textContent = null; total.textContent", "");
+    assert(!total->child_count);
+    expect_text(js, "total.textContent = 'x'; total.textContent = undefined;"
+                    " total.textContent", "");
+    assert(!total->child_count);
+    expect_text(js, "total.textContent = 7; total.textContent", "7");
+    /* Removed elements drop their ID globals. */
+    expect_text(js, "total.innerHTML = '<em id=inner>x</em>'; var before = typeof inner;"
+                    " total.textContent = ''; before + '|' + typeof inner",
+                "object|undefined");
+
+    expect_text(js, "[card.className, card.classList.contains('a'),"
+                    " card.classList.contains('c')].join('|')", "a b|true|false");
+    expect_text(js, "card.classList.add('c', 'a'); card.classList.remove('b');"
+                    " card.className", "a c");
+    expect_text(js, "[card.classList.toggle('x'), card.className,"
+                    " card.classList.toggle('x'), card.className].join('|')",
+                "true|a c x|false|a c");
+    expect_text(js, "[btn.classList.toggle('t', true), btn.classList.toggle('t', true),"
+                    " btn.classList.toggle('t', false), btn.classList.contains('t')].join('|')",
+                "true|true|false|false");
+    expect_text(js, "btn.className = 'a a'; btn.classList.add('b'); btn.className", "a b");
+    /* Only ASCII whitespace separates tokens. */
+    expect_text(js, "btn.className = 'x\\u00a0y'; btn.classList.contains('x')", "false");
+    expect_text(js, "btn.className = 'primary'; btn.getAttribute('class') + '|' +"
+                    " btn.classList.contains('primary')", "primary|true");
+    /* An element without a class attribute keeps none. */
+    expect_text(js, "var plain = document.createElement('div');"
+                    " plain.classList.remove('x'); plain.classList.toggle('y', false);"
+                    " plain.outerHTML", "<div></div>");
+
+    expect_text(js, "document.querySelector('p').id + '|' + document.querySelector('em')",
+                "total|null");
+    expect_text(js, "var bad = " CAUGHT("document.querySelector('[')") ";"
+                    " bad !== 'none' && bad === " CAUGHT("document.querySelectorAll('[')"),
+                "true");
+    expect_text(js, "document.getElementById('total').tagName + '|' +"
+                    " document.getElementById('none') + '|' + document.getElementById('')",
+                "P|null|null");
+    expect_text(js, "document.getElementById('dup').textContent + '|' +"
+                    " document.getElementById(42).textContent", "first|n");
+    /* Only nodes in the document are found, as in real browsers. */
+    expect_text(js, "var lost = document.createElement('i');"
+                    " lost.setAttribute('id', 'lost'); document.getElementById('lost')",
+                "null");
+
+    tai_js_destroy(js);
+    tai_document_destroy(doc);
+}
+
 /* A bridge call that re-enters JS (the ID global resync) must not reset the
  * outer script's deadline. */
 static void test_nested_deadline(void) {
@@ -416,6 +531,9 @@ static void test_node_limit(void) {
     assert(!tai_js_eval(js, "over.js", "document.createElement('i')", &error));
     assert(error && strstr(error, "Document node limit reached"));
     free(error);
+    /* D14: the text node textContent would add counts too; nothing changes. */
+    expect_text(js, CAUGHT("last.textContent = 'x'") " + '|' + last.textContent",
+                "Error:Document node limit reached|");
     tai_js_destroy(js);
     tai_document_destroy(doc);
 }
@@ -435,6 +553,9 @@ static void test_depth_limit(void) {
     /* html, body and root take depths 0-2; 510 more reach the cap of 512. */
     assert(!strcmp(result, "510 Document depth limit reached"));
     free(result);
+    /* D14: so does the text node textContent would add under p. */
+    expect_text(js, CAUGHT("p.textContent = 'x'") " + '|' + p.textContent",
+                "Error:Document depth limit reached|");
     tai_js_destroy(js);
     tai_document_destroy(doc);
 }
@@ -520,31 +641,6 @@ static TaiJsHostStatus fake_xhr(void *opaque, const char *url,
 static bool fake_cancelled(void *opaque) {
     return ((FakeHost *)opaque)->cancelled;
 }
-
-static char *eval_text(TaiJsContext *js, const char *code) {
-    char *result = NULL, *error = NULL;
-    bool ok = tai_js_eval_value(js, "host.js", code, &result, &error);
-    if (!ok) {
-        fprintf(stderr, "unexpected failure of %s: %s\n", code, error);
-        abort();
-    }
-    free(error);
-    return result;
-}
-
-static void expect_text(TaiJsContext *js, const char *code, const char *want) {
-    char *got = eval_text(js, code);
-    if (strcmp(got, want)) {
-        fprintf(stderr, "%s: expected %s, got %s\n", code, want, got);
-        abort();
-    }
-    free(got);
-}
-
-#define XHR(body) "var x = new XMLHttpRequest(); x.open('GET', 'u', false);" \
-    " x.send(" body "); x.responseText"
-#define CAUGHT(code) "(function(){ try { " code "; return 'none'; }" \
-    " catch (e) { return e.name + ':' + e.message; } })()"
 
 static void test_host_callbacks(void) {
     char *error = NULL;
@@ -745,6 +841,7 @@ int main(int argc, char **argv) {
     test_host_callbacks();
     test_mutation_callbacks();
     test_inner_html();
+    test_common_dom_api();
     test_nested_deadline();
     test_node_limit();
     test_depth_limit();

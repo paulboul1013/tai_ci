@@ -650,6 +650,75 @@ static JSValue op_inner_html_set(TaiJsContext *js, int argc, JSValueConst *argv)
     return after_mutation(js, true);
 }
 
+/* D14: the parent's handle, -1 for the root element (its parent is document,
+ * which runtime.js does not model as a Node), or null when detached. */
+static JSValue op_parent_node(TaiJsContext *js, int argc, JSValueConst *argv) {
+    (void)argc;
+    TaiNode *node;
+    if (!node_arg(js, argv[0], &node)) return JS_EXCEPTION;
+    if (node->parent) return handle_value(js, node->parent);
+    return node == js->root ? JS_NewInt32(js->context, -1) : JS_NULL;
+}
+
+/* D14: document.getElementById; the walk lives in dom.c. */
+static JSValue op_get_element_by_id(TaiJsContext *js, int argc,
+                                    JSValueConst *argv) {
+    (void)argc;
+    JSContext *context = js->context;
+    const char *id = JS_ToCString(context, argv[0]);
+    if (!id) return JS_EXCEPTION;
+    TaiNode *found = NULL;
+    TaiDomStatus status = tai_node_find_by_id(js->root, id, &found);
+    JS_FreeCString(context, id);
+    if (status != TAI_DOM_OK) return throw_dom_status(context, status);
+    return found ? handle_value(js, found) : JS_NULL;
+}
+
+/* D14: the stored (lower-case) tag, or null for a text node; js_prelude.js
+ * upper-cases it like real browsers. */
+static JSValue op_tag_name(TaiJsContext *js, int argc, JSValueConst *argv) {
+    (void)argc;
+    TaiNode *node;
+    if (!node_arg(js, argv[0], &node)) return JS_EXCEPTION;
+    return node->kind == TAI_ELEMENT ? JS_NewString(js->context, node->tag)
+                                     : JS_NULL;
+}
+
+/* D14: textContent of any node. */
+static JSValue op_text_content_get(TaiJsContext *js, int argc,
+                                   JSValueConst *argv) {
+    (void)argc;
+    TaiNode *node;
+    if (!node_arg(js, argv[0], &node)) return JS_EXCEPTION;
+    char *text = tai_node_text_content(node);
+    if (!text) return JS_ThrowOutOfMemory(js->context);
+    JSValue result = JS_NewString(js->context, text);
+    free(text);
+    return result;
+}
+
+/* D14: js_prelude.js has already turned the value into a string ("" for
+ * null and undefined). */
+static JSValue op_text_content_set(TaiJsContext *js, int argc,
+                                   JSValueConst *argv) {
+    (void)argc;
+    JSContext *context = js->context;
+    TaiNode *node;
+    if (!node_arg(js, argv[0], &node)) return JS_EXCEPTION;
+    const char *text = JS_ToCString(context, argv[1]);
+    if (!text) return JS_EXCEPTION;
+    TaiNode **removed = NULL;
+    size_t removed_count = 0;
+    TaiDomStatus status =
+        tai_node_set_text_content(node, text, &removed, &removed_count);
+    JS_FreeCString(context, text);
+    if (status != TAI_DOM_OK) return throw_dom_status(context, status);
+    for (size_t index = 0; index < removed_count; index++)
+        node_removed(js, removed[index]);
+    free(removed);
+    return after_mutation(js, removed_count > 0);
+}
+
 static JSValue host_failure(JSContext *context, TaiJsHostStatus status,
                             char *message, const char *fallback) {
     JSValue thrown = status == TAI_JS_HOST_NO_MEMORY
@@ -1040,6 +1109,11 @@ static const struct {
     {"innerHTML_get", 1, op_inner_html_get},
     {"innerHTML_set", 2, op_inner_html_set},
     {"outerHTML_get", 1, op_outer_html_get},
+    {"parentNode", 1, op_parent_node},
+    {"getElementById", 1, op_get_element_by_id},
+    {"tagName", 1, op_tag_name},
+    {"textContent_get", 1, op_text_content_get},
+    {"textContent_set", 2, op_text_content_set},
     {"document_cookie_get", 0, op_cookie_get},
     {"document_cookie_set", 1, op_cookie_set},
     {"XMLHttpRequest_send", 5, op_xhr_send},

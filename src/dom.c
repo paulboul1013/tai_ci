@@ -887,6 +887,103 @@ bad:
   tai_document_destroy(fragment);
   return status;
 }
+/* D14: see dom.h. Every fallible step runs before the first change. */
+TaiDomStatus tai_node_set_text_content(TaiNode *node, const char *text,
+                                       TaiNode ***removed,
+                                       size_t *removed_count) {
+  if (removed)
+    *removed = NULL;
+  if (removed_count)
+    *removed_count = 0;
+  if (!node || !text || !node->document)
+    return TAI_DOM_WRONG_DOCUMENT;
+  if (node->kind == TAI_TEXT) {
+    char *copy = tai_strdup(text);
+    if (!copy)
+      return TAI_DOM_NO_MEMORY;
+    free(node->text);
+    node->text = copy;
+    return TAI_DOM_OK;
+  }
+  TaiNode **children = NULL;
+  if (*text) {
+    TaiDocument *d = node->document;
+    if (d->count >= TAI_DOCUMENT_SCRIPT_NODE_LIMIT)
+      return TAI_DOM_NODE_LIMIT;
+    if (ancestors(node) >= TAI_DOM_MAX_DEPTH)
+      return TAI_DOM_DEPTH_LIMIT;
+    if (!(children = malloc(sizeof(*children))))
+      return TAI_DOM_NO_MEMORY;
+    if (!(children[0] = node_new(d, TAI_TEXT, text))) {
+      free(children);
+      return TAI_DOM_NO_MEMORY;
+    }
+  }
+  /* Nothing below can fail. */
+  for (size_t i = 0; i < node->child_count; i++)
+    node->children[i]->parent = NULL;
+  if (removed && node->child_count) {
+    *removed = node->children;
+    if (removed_count)
+      *removed_count = node->child_count;
+  } else
+    free(node->children);
+  node->children = children;
+  node->child_count = node->child_capacity = children ? 1 : 0;
+  if (children)
+    children[0]->parent = node;
+  return TAI_DOM_OK;
+}
+/* D14: iterative pre-order walks, so deep trees cannot exhaust the C stack. */
+char *tai_node_text_content(const TaiNode *node) {
+  Buffer b = {0};
+  const TaiNode **stack = NULL;
+  size_t n = 0, cap = 0;
+  bool ok = node && put(&b, "", 0) &&
+            grow((void **)&stack, &cap, 1, sizeof(*stack));
+  if (ok)
+    stack[n++] = node;
+  while (ok && n) {
+    const TaiNode *x = stack[--n];
+    if (x->kind == TAI_TEXT)
+      ok = str(&b, x->text);
+    else if ((ok = grow((void **)&stack, &cap, n + x->child_count,
+                        sizeof(*stack))))
+      for (size_t i = x->child_count; i > 0; i--)
+        stack[n++] = x->children[i - 1];
+  }
+  free(stack);
+  if (!ok) {
+    free(b.s);
+    return NULL;
+  }
+  return b.s;
+}
+TaiDomStatus tai_node_find_by_id(TaiNode *root, const char *id,
+                                 TaiNode **found) {
+  *found = NULL;
+  if (!root || !id)
+    return TAI_DOM_WRONG_DOCUMENT;
+  if (!*id)
+    return TAI_DOM_OK;
+  TaiNode **stack = NULL;
+  size_t n = 0, cap = 0;
+  if (!push(&stack, &n, &cap, root))
+    return TAI_DOM_NO_MEMORY;
+  bool ok = true;
+  while (ok && n && !*found) {
+    TaiNode *x = stack[--n];
+    if (x->kind != TAI_ELEMENT)
+      continue;
+    const char *value = tai_map_get(&x->attributes, "id");
+    if (value && !strcmp(value, id))
+      *found = x;
+    for (size_t i = x->child_count; ok && !*found && i > 0; i--)
+      ok = push(&stack, &n, &cap, x->children[i - 1]);
+  }
+  free(stack);
+  return ok ? TAI_DOM_OK : TAI_DOM_NO_MEMORY;
+}
 /* Python JSContext.serialize_node, iteratively so deep trees cannot exhaust
  * the C stack. html.escape: text escapes & < >, attribute values also " and
  * ' (as &#x27;). Script contents are escaped like any text. */

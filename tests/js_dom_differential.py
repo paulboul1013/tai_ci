@@ -11,9 +11,9 @@ Comparison rules:
     must be a native Error. JS errors must match by name, and by message when
     the oracle kept one (a plain Error thrown by runtime.js or the page).
   * Intentional differences D7 (a throwing listener is isolated), D10 (a
-    throwing animation frame callback is isolated) and D5 (timers and
-    asynchronous XHR exist): the steps in INTENTIONAL replace the oracle's
-    answer; see PORTING_PLAN.md.
+    throwing animation frame callback is isolated), D5 (timers and
+    asynchronous XHR exist) and D14 (common DOM properties exist): the steps
+    in INTENTIONAL replace the oracle's answer; see PORTING_PLAN.md.
   * The SCHEDULING_CASES compare with the fixture's "scheduling" section,
     frozen from the auxiliary oracle (the 7d536e0^ scheduling runtime).
   * PENDING cases need bridge operations of a later slice and are skipped.
@@ -90,7 +90,15 @@ D5_EXPECTED = {
     },
 }
 
-INTENTIONAL = {**D7_EXPECTED, **D10_EXPECTED, **D5_EXPECTED}
+# D14: native adds common DOM properties (parentNode, tagName, ...) that the
+# frozen runtime lacks; nodeType and document.body stay absent.
+D14_EXPECTED = {
+    "children_and_handles": {
+        3: {"value": ["object", "string", "undefined", "undefined"]},
+    },
+}
+
+INTENTIONAL = {**D7_EXPECTED, **D10_EXPECTED, **D5_EXPECTED, **D14_EXPECTED}
 
 
 def native_error(raw):
