@@ -67,7 +67,7 @@ Fixture 是測試在暫存目錄寫的 `a`、`b`、`c`、`home` 四頁，由 127
 
 ## 剩餘缺口
 
-- `traced_run` 在 ASan 版與其他測試並行時的 `exit=143`：已查明並修正（2026-11-01）。`close` 後 browser 自己結束，`SDL_Quit` 已把 SIGTERM 還原為預設動作；ASan 結束時的 leak check 在高負載下要數秒，`stop` 看到 exe 仍是 tai-browser 就送 SIGTERM，browser 因此被殺（128+15）。修正：`window_session.sh close` 等視窗消失，`stop` 在 browser 已沒有視窗時等它的 rc（最多 30 秒）而不送訊號。CPU 滿載下 close→stop 修正前 4/4 為 143、修正後 8/8 為 0；ASan `trace_window_integration` 與整套 CTest 並行 3 次通過。另見一次無關的偶發：同樣高負載下 release 版 `traced_run` 點擊標題後 60 秒內沒有 `/sync.txt` 請求，單獨重跑整套 CTest 76/76 通過，未查明。
+- `traced_run` 在 ASan 版與其他測試並行時的 `exit=143`：已查明並修正（2026-11-01）。`close` 後 browser 自己結束，`SDL_Quit` 已把 SIGTERM 還原為預設動作；ASan 結束時的 leak check 在高負載下要數秒，`stop` 看到 exe 仍是 tai-browser 就送 SIGTERM，browser 因此被殺（128+15）。修正：`window_session.sh close` 等視窗消失，`stop` 在 browser 已沒有視窗時等它的 rc（最多 30 秒）而不送訊號。CPU 滿載下 close→stop 修正前 4/4 為 143、修正後 8/8 為 0；ASan `trace_window_integration` 與整套 CTest 並行 3 次通過。另見一次無關的偶發：同樣高負載下 release 版 `traced_run` 點擊標題後 60 秒內沒有 `/sync.txt` 請求。已查明並修正（2026-11-01）：兩個並行測試同時選到 `:90`，第二個 Xvfb 啟動失敗，但它的 session 看到第一個的 socket，browser 開在別人的螢幕上，點擊落在另一個 browser 的視窗。現在只有 `tests/tools/xvfb.sh` 啟動 Xvfb，且 lock 檔持有自己的 pid 才採用該號碼；CTest `xvfb_owner` 禁止其他地方直接啟動 Xvfb，`xvfb_concurrency` 同時啟動 6 個 helper 檢查 display 不重複（舊演算法下變紅）。兩個 session 同時啟動：修正前 5/5 共用 `:90`、各有一個點擊遺失，修正後 5/5 display 不同且點擊都送達。
 - 視窗的第一組 `raster_and_draw`／`sdl_present` 早於它的 `tab_window`；讀 trace 要用 tab ID 對應，不能依時間順序。
 - `test_cli` 的 `--home` 錯誤用法斷言在修改前也會通過（未知選項本來就 exit 2）；`--home` 的正面
   行為只由 `multiwindow_run` 證明。

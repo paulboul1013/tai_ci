@@ -21,3 +21,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 啟動任何 `tai-browser --window`（手動測試、`window_session.sh`、整合測試）時，一律設定
   `BROWSER_TRACE_FILE=<該次工作目錄>/trace.json`。結束後讀 trace，向使用者說明發生了哪些事件；
   trace 不足以解釋行為時，提出改進 trace 記錄程式碼的建議。
+
+## Agent skills
+
+Plumb config: `docs/agents/plumb.md`.
