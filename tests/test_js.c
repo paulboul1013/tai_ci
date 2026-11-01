@@ -55,6 +55,12 @@ static double seconds_now(void) {
     return (double)now.tv_sec + (double)now.tv_nsec / 1e9;
 }
 
+static double thread_seconds_now(void) {
+    struct timespec now;
+    assert(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now) == 0);
+    return (double)now.tv_sec + (double)now.tv_nsec / 1e9;
+}
+
 /* D7: a throwing listener is reported and skipped; later listeners, bubbling
  * and an earlier preventDefault still apply. */
 static void test_listener_errors(void) {
@@ -363,7 +369,10 @@ static void test_nested_deadline(void) {
 
 /* ID globals resync after every mutation by walking the whole document, as in
  * Python. 10,000 appends must fit in half of the 2 s script budget in the
- * Debug build; sanitizer builds run fewer and only check correctness. */
+ * Debug build; sanitizer builds run fewer and only check correctness. The
+ * limit is on this thread's CPU time, so other processes on a busy machine do
+ * not count; CTest runs it alone (js_append_cost, RUN_SERIAL) because the
+ * script budget itself is wall-clock. */
 #if defined(__SANITIZE_ADDRESS__)
 #define APPEND_COUNT "2000"
 #define APPEND_TOTAL 2000
@@ -379,12 +388,12 @@ static void test_append_cost(void) {
     assert(doc && !error);
     TaiJsContext *js = tai_js_create(tai_document_root(doc), NULL, &error);
     assert(js && !error);
-    double started = seconds_now();
+    double started = thread_seconds_now();
     assert(tai_js_eval(js, "append.js",
         "for (var i = 0; i < " APPEND_COUNT "; i++)"
         " root.appendChild(document.createElement('span'));", &error));
-    double elapsed = seconds_now() - started;
-    fprintf(stderr, APPEND_COUNT " appends: %.3f s\n", elapsed);
+    double elapsed = thread_seconds_now() - started;
+    fprintf(stderr, APPEND_COUNT " appends: %.3f s CPU\n", elapsed);
     assert(elapsed < APPEND_LIMIT);
     assert(find_element(tai_document_root(doc), "div")->child_count ==
            APPEND_TOTAL);
@@ -727,13 +736,16 @@ static void test_tasks(void) {
     tai_document_destroy(doc);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "--append-cost") == 0) {
+        test_append_cost();
+        return 0;
+    }
     test_tasks();
     test_host_callbacks();
     test_mutation_callbacks();
     test_inner_html();
     test_nested_deadline();
-    test_append_cost();
     test_node_limit();
     test_depth_limit();
     test_many_ids();
