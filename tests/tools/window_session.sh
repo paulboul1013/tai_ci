@@ -187,6 +187,11 @@ if not x.XSendEvent(d, int(sys.argv[1]), 0, 0, ctypes.byref(event)):
 x.XFlush(d)
 x.XCloseDisplay(d)
 PY
+  # Wait for the window to go, so a following stop sees a browser that is
+  # exiting on its own and does not signal it.
+  local _; for _ in $(seq 100); do alive "$PID" || break
+    owned_windows | grep -qx "$WID" || break; sleep 0.1; done
+  owned_windows | grep -qx "$WID" && die "window $WID still open after close"
   settle; echo "close $WID requested"; }
 
 cmd_click() { (($# == 2 || $# == 3)) || die "click X Y [left|middle]"; check
@@ -264,10 +269,11 @@ stop_pid() { # stop_pid FILE WORD
 
 cmd_stop() {
   load; local rc=""
-  # A browser that closed its last window may still be exiting (slow under
-  # ASan): /proc/PID/exe is gone before the pid is reaped. Wait for its rc.
-  if alive "$PID" && [[ $(readlink "/proc/$PID/exe" 2>/dev/null) != *tai-browser ]]; then
-    for _ in $(seq 100); do [[ -f $DIR/rc ]] && break; sleep 0.1; done
+  # A browser with no windows left is exiting on its own (slow under ASan:
+  # leak check). SDL_Quit has restored the default SIGTERM action, so a
+  # signal now kills it (exit 143). Wait for its rc instead.
+  if alive "$PID" && [[ -z $(owned_windows) ]]; then
+    for _ in $(seq 300); do [[ -f $DIR/rc ]] && break; sleep 0.1; done
   fi
   if [[ ! -f $DIR/rc ]] && alive "$PID"; then
     [[ $(readlink "/proc/$PID/exe" 2>/dev/null) == *tai-browser ]] || die "pid $PID is not tai-browser"
