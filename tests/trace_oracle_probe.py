@@ -33,6 +33,7 @@ import json
 import os
 import pathlib
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -83,33 +84,27 @@ class PageServer:
         self.httpd.server_close()
 
 
-def display_ready(display):
-    return subprocess.run(["xset", "-display", display, "q"],
-                          stdout=subprocess.DEVNULL,
-                          stderr=subprocess.DEVNULL).returncode == 0
-
-
 @contextlib.contextmanager
 def xvfb():
-    """A private Xvfb. WSLg mounts /tmp/.X11-unix read-only, so Xvfb may
-    listen only on the abstract socket; readiness is probed with xset."""
-    for number in range(90, 200):
-        if not (os.path.exists("/tmp/.X11-unix/X{}".format(number)) or
-                os.path.exists("/tmp/.X{}-lock".format(number))):
-            break
-    else:
-        raise AssertionError("no free X display")
-    display = ":{}".format(number)
-    process = subprocess.Popen(
-        ["Xvfb", display, "-screen", "0", "1280x800x24", "-nolisten", "tcp"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    """A private Xvfb from tests/tools/xvfb.sh, which owns display choice."""
+    started = subprocess.run([str(ROOT / "tests" / "tools" / "xvfb.sh"), os.devnull],
+                             capture_output=True, text=True, timeout=60)
+    if started.returncode != 0:
+        raise AssertionError("xvfb.sh failed: " + started.stderr)
+    display, pid = started.stdout.split()
     try:
-        wait_for(lambda: process.poll() is None and display_ready(display),
-                 "Xvfb " + display, timeout=10)
         yield display
     finally:
-        process.terminate()
-        process.wait(timeout=10)
+        os.kill(int(pid), signal.SIGTERM)
+        wait_for(lambda: not process_alive(int(pid)), "Xvfb " + display, timeout=10)
+
+
+def process_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
 
 
 def import_reference(trace_path):

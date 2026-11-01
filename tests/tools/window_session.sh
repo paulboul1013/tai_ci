@@ -45,29 +45,6 @@ check() {
   [[ $owner == "$PID" ]] || die "window $WID owner '$owner' != browser pid $PID"
 }
 settle() { sleep "$SETTLE"; }
-
-# start_xvfb [:N] starts a private Xvfb and sets XVFB_DISPLAY and XVFB_PID.
-# Two sessions can both see a number free and start on it; only one X server
-# wins its lock file, so a number counts only once the lock holds our pid.
-start_xvfb() {
-  local n first=90 last=199 pid lock
-  [[ -n ${1:-} ]] && { first=${1#:}; last=${1#:}; }
-  for ((n = first; n <= last; n++)); do
-    [[ -e /tmp/.X$n-lock ]] && continue
-    setsid Xvfb ":$n" -screen 0 1280x800x24 -nolisten tcp </dev/null >"$DIR/xvfb.log" 2>&1 &
-    pid=$!
-    for _ in $(seq 100); do
-      alive "$pid" || break
-      lock=$(tr -d ' \n' <"/tmp/.X$n-lock" 2>/dev/null || true)
-      [[ -n $lock && $lock != "$pid" ]] && break
-      if [[ $lock == "$pid" ]] && xset -display ":$n" q >/dev/null 2>&1; then
-        XVFB_DISPLAY=:$n XVFB_PID=$pid; return 0; fi
-      sleep 0.1
-    done
-    kill "$pid" 2>/dev/null || true
-  done
-  die "no free X display in :$first-:$last"
-}
 free_port() {
   python3 -c 'import socket
 for p in range(8765, 8900):
@@ -93,7 +70,9 @@ cmd_start() {
   bin=$(readlink -f "$bin")
 
   if ((xvfb)); then
-    start_xvfb "$display"; display=$XVFB_DISPLAY; put xvfb_pid "$XVFB_PID"
+    local xvfb_out; xvfb_out=$("$REPO/tests/tools/xvfb.sh" "$DIR/xvfb.log" ${display:+"$display"}) \
+      || die "Xvfb did not start; see $DIR/xvfb.log"
+    display=${xvfb_out% *}; put xvfb_pid "${xvfb_out#* }"
     DISPLAY=$display xset r off 2>/dev/null || true   # no autorepeat while typing
   fi
   display=${display:-${DISPLAY:-}}; [[ -n $display ]] || die "no DISPLAY; pass --display or --xvfb"
