@@ -14,6 +14,7 @@
 
 #include "tai/presentation.h"
 #include "tai/tabset.h"
+#include "tai/trace.h"
 #include "presentation_geometry.h"
 #include <SDL3/SDL.h>
 #include <math.h>
@@ -171,6 +172,17 @@ bool tai_pres_handle_page_event(TaiPage *page, const SDL_Event *event,
 bool tai_pres_sync_text_input(SDL_Window *window, const TaiPage *page,
                               bool window_focused, bool address_focused,
                               bool *started, char **error);
+/* D-T12 trace records, on the SDL owner thread. tai_pres_trace_input writes
+ * one input instant for an event window handles; mouse motion and key-up are
+ * not recorded. tai_pres_trace_action writes an action instant with window,
+ * the action name and at most four borrowed details;
+ * tai_pres_trace_action_count lets a caller see whether it wrote any. */
+/* Returns whether the event's type is one that input records. */
+bool tai_pres_trace_input(SDL_WindowID window, const SDL_Event *event);
+void tai_pres_trace_action(SDL_WindowID window, const char *action,
+                           const TaiTraceArg *details, size_t count);
+uint64_t tai_pres_trace_action_count(void);
+size_t tai_pres_utf8_length(const char *text);
 
 /* presentation_scene.c: texture slots are owned by the caller's event loop;
  * a successful update destroys the previous texture and stores the new one. */

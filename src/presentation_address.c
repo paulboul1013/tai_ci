@@ -206,6 +206,11 @@ bool tai_pres_handle_chrome_click(TaiPage **page_slot, SDL_Event const *event,
   return true;
 }
 
+static void trace_chrome(SDL_WindowID window, const char *hit) {
+  TaiTraceArg detail = {"hit", TAI_TRACE_STRING, hit, 0};
+  tai_pres_trace_action(window, "chrome", &detail, 1);
+}
+
 bool tai_pres_handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
                                        SDL_WindowID window_id, int width,
                                        AddressEditor *editor,
@@ -225,8 +230,10 @@ bool tai_pres_handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
   if (event->button.y >= tabs_chrome_bottom(width, wraps)) return true;
   double x = event->button.x, y = event->button.y;
   if (view.tab_count >= TAI_MAX_TABS &&
-      x >= 0.0 && x < 30.0 && y >= 6.0 && y < 30.0)
+      x >= 0.0 && x < 30.0 && y >= 6.0 && y < 30.0) {
+    trace_chrome(window_id, "new_tab_full");
     return true;
+  }
   bool was_focused = editor->focused;
   bool was_dirty = editor->dirty;
   editor->focused = false;
@@ -238,6 +245,7 @@ bool tai_pres_handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
   *page_changed = blurred;
 
   if (x >= 0.0 && x < 30.0 && y >= 6.0 && y < 30.0) {
+    trace_chrome(window_id, "new_tab");
     if (!tai_tabset_new_tab(tabs, error)) return false;
     tai_pres_editor_discard(editor);
     *page_changed = true;
@@ -246,6 +254,9 @@ bool tai_pres_handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
   }
   size_t selected = 0;
   if (tai_pres_tabs_tab_link_hit(&view, width, x, y, &selected)) {
+    TaiTraceArg details[] = {{"hit", TAI_TRACE_STRING, "select_tab", 0},
+                             {"index", TAI_TRACE_UINT, NULL, selected}};
+    tai_pres_trace_action(window_id, "chrome", details, 2);
     if (!tai_tabset_select(tabs, selected)) return true;
     tai_pres_editor_discard(editor);
     *page_changed = true;
@@ -262,6 +273,7 @@ bool tai_pres_handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
   double bookmarks_y = bookmarks_button_y(width, wraps);
   if (x >= bookmarks_x && x < bookmarks_x + 26.0 &&
       y >= bookmarks_y && y < bookmarks_y + 24.0) {
+    trace_chrome(window_id, "bookmarks");
     tai_pres_editor_discard(editor);
     char *navigation_error = NULL;
     if (!tai_tabset_open_bookmarks(tabs, &navigation_error))
@@ -275,6 +287,8 @@ bool tai_pres_handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
       x < field_x + field_width &&
       y >= field_y && y < field_y + TAI_ADDRESS_HEIGHT;
   if (star_hit) {
+    trace_chrome(window_id, view.bookmarkable ? "bookmark_toggle"
+                                              : "bookmark_unavailable");
     tai_pres_editor_discard(editor);
     if (view.bookmarkable) {
       bool bookmarked = false;
@@ -292,6 +306,7 @@ bool tai_pres_handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
   bool address_hit = x >= field_x && x < field_x + field_width &&
       y >= field_y && y < field_y + TAI_ADDRESS_HEIGHT;
   if (address_hit) {
+    trace_chrome(window_id, "address_focus");
     if (!was_focused && !editor->dirty &&
         !editor_set_text(editor, view.url ? view.url : "")) {
       set_error(error, "address field allocation failed");
@@ -313,7 +328,11 @@ bool tai_pres_handle_tabs_chrome_click(TaiTabSet *tabs, SDL_Event const *event,
   tai_pres_editor_discard(editor);
   *chrome_changed = was_focused || was_dirty || back_hit || forward_hit;
   int direction = back_hit ? -1 : forward_hit ? 1 : 0;
-  if (direction && tai_tabset_history_available(tabs, direction)) {
+  bool available = direction && tai_tabset_history_available(tabs, direction);
+  trace_chrome(window_id, !direction ? "blank"
+                          : !available ? "history_unavailable"
+                          : direction < 0 ? "back" : "forward");
+  if (available) {
     if (!tai_tabset_history(tabs, direction, error)) return false;
     *chrome_changed = true;
   }

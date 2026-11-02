@@ -294,7 +294,9 @@ static void xhr_done(void *opaque, TaiResponse *response) {
 
 static void async_finish(AsyncJob *job, TaiResponse *response,
                          const char *failure) {
-    tai_trace_fetch_end(&job->trace);
+    tai_trace_fetch_done(&job->trace, response ? response->status : 0,
+                         response ? response->length : 0,
+                         response ? response->error : failure);
     tai_page_fetch_finish(job->fetch, response, failure);
     free(job);
 }

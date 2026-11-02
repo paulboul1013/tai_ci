@@ -70,10 +70,17 @@ void tai_trace_end(TaiTraceSpan span);
  * event for this work; tests/trace_oracle_probe.py allows exactly these.
  * TAI_INSTANT_TAB_WINDOW (args tab, window) is the join table between page
  * events, which carry a tab arg, and raster_and_draw/sdl_present, which carry
- * the SDL window ID as a window arg: one per tab when it joins a window. */
+ * the SDL window ID as a window arg: one per tab when it joins a window.
+ * TAI_INSTANT_INPUT is one SDL event a window handles (D-T12): args window,
+ * kind and the fields of that kind. Typed text is never written: text gives
+ * only its length and a printable key without Ctrl/Alt is the key "char".
+ * TAI_INSTANT_ACTION is what an input did: args action plus window or tab
+ * and the details of that action; "none" when it did nothing. */
 typedef enum {
     TAI_INSTANT_STALE_COMPLETION_DROPPED,
     TAI_INSTANT_TAB_WINDOW,
+    TAI_INSTANT_INPUT,
+    TAI_INSTANT_ACTION,
     TAI_INSTANT_COUNT
 } TaiTraceInstant;
 void tai_trace_instant(TaiTraceInstant instant, const TaiTraceArg *args,
@@ -103,6 +110,11 @@ TaiTraceFetch tai_trace_fetch_begin(TaiTraceFetchKind kind, size_t index,
                                     const char *url);
 /* Emits the matching "e" and zeroes *fetch, so a second call emits nothing. */
 void tai_trace_fetch_end(TaiTraceFetch *fetch);
+/* tai_trace_fetch_end with the request's outcome on the "e" event (D-T12):
+ * HTTP status (0 when there was no response), body bytes, and error, a
+ * borrowed message or NULL. */
+void tai_trace_fetch_done(TaiTraceFetch *fetch, long status, size_t bytes,
+                          const char *error);
 
 /* The vocabulary, for tests: span names, fetch names where script/style
  * carry a "%zu" for the resource index, and instant names. */

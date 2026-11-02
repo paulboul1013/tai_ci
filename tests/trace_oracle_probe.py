@@ -247,8 +247,9 @@ def run_probe():
 
 
 # Native-only instants, with no oracle event (D-T9, D-T11, user decisions
-# 2026-10-30): the stale-load drop and the tab-to-window join table.
-NATIVE_ONLY = {"stale_completion_dropped", "tab_window"}
+# 2026-10-30, 2026-11-02): the stale-load drop, the tab-to-window join table,
+# and the user input record with what each input did (D-T12).
+NATIVE_ONLY = {"stale_completion_dropped", "tab_window", "input", "action"}
 
 
 def check_vocabulary(result, test_trace):

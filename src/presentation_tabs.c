@@ -220,7 +220,12 @@ static bool window_middle_click(PresWindow *w, const TaiTabSetView *view,
     return false;
   if (!url) return true;
   char *open_error = NULL;
-  if (!tai_tabset_open_link(w->tabs, url, &open_error))
+  bool opened = tai_tabset_open_link(w->tabs, url, &open_error);
+  TaiTraceArg details[] = {{"url", TAI_TRACE_STRING, url, 0},
+                           {"result", TAI_TRACE_STRING,
+                            opened ? "opened" : "failed", 0}};
+  tai_pres_trace_action(w->id, "open_link", details, 2);
+  if (!opened)
     fprintf(stderr, "link navigation failed: %s\n",
             open_error ? open_error : "navigation failed");
   free(open_error);
@@ -230,19 +235,37 @@ static bool window_middle_click(PresWindow *w, const TaiTabSetView *view,
   return true;
 }
 
-/* Applies one SDL event addressed to w. Returns false on a fatal error. */
+static bool window_event_body(PresWindow *w, SDL_Event *event,
+                              bool *page_click, char **error);
+
+/* Applies one SDL event addressed to w. Returns false on a fatal error.
+ * D-T12: every recorded input is followed by at least one action; the page
+ * writes its own for a click it handles. */
 static bool window_event(PresWindow *w, SDL_Event *event, char **error) {
+  tai_pres_pointer_event_to_pixels(w->window, w->id, event);
+  bool recorded = tai_pres_trace_input(w->id, event);
+  uint64_t actions = tai_pres_trace_action_count();
+  bool page_click = false;
+  bool ok = window_event_body(w, event, &page_click, error);
+  if (recorded && !page_click && actions == tai_pres_trace_action_count())
+    tai_pres_trace_action(w->id, "none", NULL, 0);
+  return ok;
+}
+
+static bool window_event_body(PresWindow *w, SDL_Event *event,
+                              bool *page_click, char **error) {
   TaiTabSet *tabs = w->tabs;
   SDL_WindowID window_id = w->id;
   TaiTabSetView view = {0};
-  tai_pres_pointer_event_to_pixels(w->window, window_id, event);
   if (event->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+    tai_pres_trace_action(window_id, "close_window", NULL, 0);
     w->close_requested = true;
     return true;
   }
   if (event->type == SDL_EVENT_WINDOW_FOCUS_LOST ||
       event->type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
     w->focused = event->type == SDL_EVENT_WINDOW_FOCUS_GAINED;
+    tai_pres_trace_action(window_id, w->focused ? "focus" : "blur", NULL, 0);
     return refresh_text_input(w, &view, error);
   }
   if (!tai_tabset_view(tabs, &view)) {
@@ -276,25 +299,43 @@ static bool window_event(PresWindow *w, SDL_Event *event, char **error) {
     }
     handled = true;
   } else if (content_click && w->editor.focused) {
+    tai_pres_trace_action(window_id, "address_blur", NULL, 0);
     w->editor.focused = false;
     w->chrome_changed = true;
   }
-  if (!handled && event->type == SDL_EVENT_TEXT_INPUT &&
-      !tai_pres_handle_address_text(event, window_id, w->focused, &w->editor,
-                                    &handled, &w->chrome_changed, error))
-    return false;
-  if (!handled && event->type == SDL_EVENT_KEY_DOWN &&
-      !tai_pres_handle_tabs_address_key(tabs, event, window_id, w->focused,
-                                        &w->editor, &handled,
-                                        &w->chrome_changed, error))
-    return false;
+  if (!handled && event->type == SDL_EVENT_TEXT_INPUT) {
+    if (!tai_pres_handle_address_text(event, window_id, w->focused, &w->editor,
+                                      &handled, &w->chrome_changed, error))
+      return false;
+    TaiTraceArg length = {"length", TAI_TRACE_UINT, NULL,
+                          tai_pres_utf8_length(event->text.text)};
+    if (handled) tai_pres_trace_action(window_id, "address_text", &length, 1);
+  }
+  if (!handled && event->type == SDL_EVENT_KEY_DOWN) {
+    /* Submitting navigates (and discards the editor) inside the handler, so
+     * the action is named before it runs. */
+    bool submit = w->focused && w->editor.focused &&
+                  event->key.windowID == window_id &&
+                  event->key.key == SDLK_RETURN;
+    if (submit) tai_pres_trace_action(window_id, "address_submit", NULL, 0);
+    if (!tai_pres_handle_tabs_address_key(tabs, event, window_id, w->focused,
+                                          &w->editor, &handled,
+                                          &w->chrome_changed, error))
+      return false;
+    if (handled && !submit)
+      tai_pres_trace_action(window_id, "address_key", NULL, 0);
+  }
   bool history_key = !handled && w->focused && !w->editor.focused &&
       event->type == SDL_EVENT_KEY_DOWN && event->key.windowID == window_id &&
       (event->key.mod & SDL_KMOD_ALT) &&
       (event->key.key == SDLK_LEFT || event->key.key == SDLK_RIGHT);
   if (history_key) {
     int direction = event->key.key == SDLK_LEFT ? -1 : 1;
-    if (tai_tabset_history_available(tabs, direction)) {
+    bool available = tai_tabset_history_available(tabs, direction);
+    TaiTraceArg detail = {"result", TAI_TRACE_STRING,
+        !available ? "unavailable" : direction < 0 ? "back" : "forward", 0};
+    tai_pres_trace_action(window_id, "history", &detail, 1);
+    if (available) {
       char *history_error = NULL;
       if (!tai_tabset_history(tabs, direction, &history_error)) {
         fprintf(stderr, "history navigation failed: %s\n",
@@ -308,6 +349,10 @@ static bool window_event(PresWindow *w, SDL_Event *event, char **error) {
 
   if (!handled && view.page) {
     bool changed = false;
+    *page_click = event->type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+        event->button.windowID == window_id &&
+        event->button.button == SDL_BUTTON_LEFT &&
+        isfinite(event->button.x) && isfinite(event->button.y);
     if (!tai_pres_handle_page_event(view.page, event, window_id, w->focused,
                                     chrome_bottom_y, &changed, error)) {
       if (!error || !*error) set_error(error, SDL_GetError());
@@ -321,6 +366,8 @@ static bool window_event(PresWindow *w, SDL_Event *event, char **error) {
       return false;
     }
     if (fragment_url) {
+      TaiTraceArg url = {"url", TAI_TRACE_STRING, fragment_url, 0};
+      tai_pres_trace_action(window_id, "fragment", &url, 1);
       char *fragment_error = NULL;
       bool recorded = tai_tabset_record_fragment(tabs, fragment_url,
                                                   &fragment_error);
@@ -342,7 +389,18 @@ static bool window_event(PresWindow *w, SDL_Event *event, char **error) {
     }
     if (intent) {
       char *navigation_error = NULL;
-      if (!tai_tabset_navigate(tabs, intent, &navigation_error)) {
+      bool navigated = tai_tabset_navigate(tabs, intent, &navigation_error);
+      /* A POST body may hold a password, so only its method is traced. */
+      TaiTraceArg details[] = {
+          {"url", TAI_TRACE_STRING, tai_navigation_intent_url(intent), 0},
+          {"method", TAI_TRACE_STRING,
+           tai_navigation_intent_is_post(intent) ? "POST" : "GET", 0},
+          {"external", TAI_TRACE_UINT, NULL,
+           tai_navigation_intent_is_external(intent)},
+          {"result", TAI_TRACE_STRING, navigated ? "started" : "failed", 0},
+      };
+      tai_pres_trace_action(window_id, "navigate", details, 4);
+      if (!navigated) {
         fprintf(stderr, "link navigation failed: %s\n",
                 navigation_error ? navigation_error : "navigation failed");
         free(navigation_error);
@@ -365,6 +423,10 @@ static bool window_event(PresWindow *w, SDL_Event *event, char **error) {
           set_error(error, "unsupported tab window pixel dimensions");
         return false;
       }
+      TaiTraceArg details[] = {
+          {"width", TAI_TRACE_UINT, NULL, (uint64_t)resized_width},
+          {"height", TAI_TRACE_UINT, NULL, (uint64_t)resized_height}};
+      tai_pres_trace_action(window_id, "resize", details, 2);
       w->pixel_width = resized_width;
       w->pixel_height = resized_height;
       w->row_wraps = resized_wraps;
@@ -561,6 +623,10 @@ static bool run_windows(PresBrowser *b, PresFrame frame, void *opaque,
       if (event.type == SDL_EVENT_QUIT) break;
       PresWindow *target = window_for_event(b, &event);
       new_window = target && b->app && is_new_window_key(&event);
+      if (new_window) {
+        tai_pres_trace_input(target->id, &event);
+        tai_pres_trace_action(target->id, "new_window", NULL, 0);
+      }
       if (target && !new_window && !window_event(target, &event, error)) {
         ok = false;
         break;

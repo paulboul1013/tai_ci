@@ -36,6 +36,8 @@ static const char *const fetch_formats[TAI_FETCH_COUNT] = {
 static const char *const instant_names[TAI_INSTANT_COUNT] = {
     [TAI_INSTANT_STALE_COMPLETION_DROPPED] = "stale_completion_dropped",
     [TAI_INSTANT_TAB_WINDOW] = "tab_window",
+    [TAI_INSTANT_INPUT] = "input",
+    [TAI_INSTANT_ACTION] = "action",
 };
 
 /* One output array is the shared invariant Perfetto needs, so writers are
@@ -201,10 +203,23 @@ TaiTraceFetch tai_trace_fetch_begin(TaiTraceFetchKind kind, size_t index,
     return fetch;
 }
 
-void tai_trace_fetch_end(TaiTraceFetch *fetch) {
+static void fetch_end(TaiTraceFetch *fetch, const TaiTraceArg *args,
+                      size_t count) {
     if (!fetch || !fetch->id) return;
     char name[64];
     fetch_name(fetch, name, sizeof name);
-    write_event("e", name, fetch->id, NULL, 0);
+    write_event("e", name, fetch->id, args, count);
     *fetch = (TaiTraceFetch){0};
+}
+void tai_trace_fetch_end(TaiTraceFetch *fetch) {
+    fetch_end(fetch, NULL, 0);
+}
+void tai_trace_fetch_done(TaiTraceFetch *fetch, long status, size_t bytes,
+                          const char *error) {
+    TaiTraceArg args[] = {
+        {"status", TAI_TRACE_UINT, NULL, status > 0 ? (uint64_t)status : 0},
+        {"bytes", TAI_TRACE_UINT, NULL, bytes},
+        {"error", TAI_TRACE_STRING, error, 0},
+    };
+    fetch_end(fetch, args, sizeof args / sizeof *args);
 }

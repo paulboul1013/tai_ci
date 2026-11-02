@@ -841,7 +841,7 @@ static bool page_load_submit_resource(TaiPageLoad *load, size_t index) {
         load->network, resource->url, load->url, NULL, NULL, NULL,
         page_load_request_done, request);
     if (!request->request) {
-        tai_trace_fetch_end(&request->trace);
+        tai_trace_fetch_done(&request->trace, 0, 0, "submit failed");
         free(request);
         return false;
     }
@@ -922,7 +922,9 @@ static void page_load_request_done(void *opaque, TaiResponse *response) {
     if (*slot) *slot = request->next;
     bool document = request->document;
     size_t resource_index = request->resource_index;
-    tai_trace_fetch_end(&request->trace);
+    tai_trace_fetch_done(&request->trace, response ? response->status : 0,
+                         response ? response->length : 0,
+                         response ? response->error : "no response");
     free(request);
 
     if (document) {
@@ -994,7 +996,7 @@ TaiPageLoad *tai_page_load_async(TaiNetwork *network, const TaiUrl *url,
         network, load->url, load->referrer, load->payload, NULL, NULL,
         page_load_request_done, request);
     if (!request->request) {
-        tai_trace_fetch_end(&request->trace);
+        tai_trace_fetch_done(&request->trace, 0, 0, "submit failed");
         free(request);
         page_load_destroy(load);
         diagnostic(error, "page request submission failed");
@@ -1099,7 +1101,7 @@ void tai_page_load_async_cancel(TaiPageLoad *load) {
     while (request) {
         TaiPageLoadRequest *next = request->next;
         tai_network_cancel(load->network, request->request);
-        tai_trace_fetch_end(&request->trace);
+        tai_trace_fetch_done(&request->trace, 0, 0, "cancelled");
         free(request);
         request = next;
     }
@@ -1219,6 +1221,10 @@ const TaiLayout *tai_page_layout(const TaiPage *page) { return page ? page->layo
 const TaiDisplayList *tai_page_display_list(const TaiPage *page) {
     return page ? page->display : NULL;
 }
+static bool resize_body(TaiPage *page, double viewport_width,
+                        double viewport_height, char **error);
+
+/* Python's resize sets needs_render, so the relayout is a render span. */
 bool tai_page_resize(TaiPage *page, double viewport_width,
                      double viewport_height, char **error) {
     if (error) { free(*error); *error = NULL; }
@@ -1230,6 +1236,14 @@ bool tai_page_resize(TaiPage *page, double viewport_width,
     if (page->viewport_width == viewport_width &&
         page->viewport_height == viewport_height)
         return true;
+    trace_render_begin(page);
+    bool ok = resize_body(page, viewport_width, viewport_height, error);
+    tai_trace_end(TAI_SPAN_RENDER);
+    return ok;
+}
+
+static bool resize_body(TaiPage *page, double viewport_width,
+                        double viewport_height, char **error) {
 
     ScrollSnapshot snapshot = {0};
     if (!node_count(tai_document_root(page->document), &snapshot.count) ||
@@ -1899,8 +1913,15 @@ bool tai_page_scroll_by(TaiPage *page, double delta, bool *changed,
     return true;
 }
 
+/* What a page click hit and did, for the trace's action instant (D-T12).
+ * Strings are borrowed from the document, which outlives the click. */
+typedef struct {
+    const char *target, *href, *result;
+} ClickTrace;
+
 static bool activate_viewport_body(TaiPage *page, double x, double y,
-                                   bool *changed, char **error) {
+                                   ClickTrace *click, bool *changed,
+                                   char **error) {
     if (error) { free(*error); *error = NULL; }
     if (changed) *changed = false;
     if (!page || !page->document || !page->javascript || !page->styles ||
@@ -1922,6 +1943,7 @@ static bool activate_viewport_body(TaiPage *page, double x, double y,
     TaiNode *hit = tai_page_viewport_hit_test(page, x, y, NULL);
     TaiNode *target = hit;
     while (target && target->kind != TAI_ELEMENT) target = target->parent;
+    if (target) click->target = target->tag;
     if (!target) {
         if (frame_changed && !rebuild_dirty_page(page, error)) return false;
         if (changed) *changed = frame_changed;
@@ -1930,7 +1952,9 @@ static bool activate_viewport_body(TaiPage *page, double x, double y,
     TaiNode *scroll_target = NULL;
     if (!scroll_candidate(page, hit, &scroll_target, error)) return false;
 
+    click->result = "prevented";
     if (!dispatch_page_event(page, "click", target)) {
+        click->result = "none";
         page->scroll_focus = scroll_target;
         TaiNode *button = NULL;
         for (TaiNode *node = target; node; node = node->parent)
@@ -1940,6 +1964,7 @@ static bool activate_viewport_body(TaiPage *page, double x, double y,
             }
         if (button) {
             TaiNode *form = action_form_ancestor(button);
+            click->result = form ? "submit" : "button";
             if (form && !submit_form(page, form, error)) return false;
         } else {
             bool handled_input = false;
@@ -1948,7 +1973,9 @@ static bool activate_viewport_body(TaiPage *page, double x, double y,
                     continue;
                 handled_input = true;
                 const char *type = tai_map_get(&node->attributes, "type");
+                click->result = "input_focus";
                 if (type && !strcmp(type, "checkbox")) {
+                    click->result = "checkbox";
                     node->checked = !node->checked;
                 } else if (node_connected(page, node)) {
                     /* A click listener may have changed the DOM: the caret
@@ -1976,8 +2003,12 @@ static bool activate_viewport_body(TaiPage *page, double x, double y,
                     if (node->kind != TAI_ELEMENT || strcmp(node->tag, "a"))
                         continue;
                     const char *href = tai_map_get(&node->attributes, "href");
+                    click->href = href;
                     if (href) {
                         TaiUrl *resolved = tai_url_resolve(page->url, href);
+                        if (resolved)
+                            click->result = href[0] == '#' ? "fragment"
+                                                           : "navigate";
                         if (resolved && href[0] == '#') {
                             if (!apply_fragment_url(page, resolved,
                                                     &frame_changed, error))
@@ -2006,9 +2037,18 @@ static bool activate_viewport_body(TaiPage *page, double x, double y,
 
 bool tai_page_activate_viewport(TaiPage *page, double x, double y,
                                 bool *changed, char **error) {
+    ClickTrace click = {.result = "none"};
     tai_trace_begin(TAI_SPAN_TASK_CLICK);
-    bool ok = activate_viewport_body(page, x, y, changed, error);
+    bool ok = activate_viewport_body(page, x, y, &click, changed, error);
     tai_trace_end(TAI_SPAN_TASK_CLICK);
+    TaiTraceArg args[] = {
+        {"action", TAI_TRACE_STRING, "page_click", 0},
+        {"tab", TAI_TRACE_UINT, NULL, page ? page->net.trace_tab : 0},
+        {"target", TAI_TRACE_STRING, click.target, 0},
+        {"href", TAI_TRACE_STRING, click.href, 0},
+        {"result", TAI_TRACE_STRING, ok ? click.result : "error", 0},
+    };
+    tai_trace_instant(TAI_INSTANT_ACTION, args, sizeof args / sizeof *args);
     return ok;
 }
 

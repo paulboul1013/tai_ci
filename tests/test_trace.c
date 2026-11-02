@@ -180,6 +180,28 @@ static void test_args(void) {
     free(path);
 }
 
+/* D-T12: a finished fetch carries its outcome on the "e" event; a status
+ * below 1 (no response) is written as 0, and the error may be null. */
+static void test_fetch_done(void) {
+    char *path = trace_path("done.json");
+    assert(tai_trace_open(path, NULL));
+    TaiTraceFetch ok = tai_trace_fetch_begin(TAI_FETCH_DOCUMENT, 0, "http://a/");
+    tai_trace_fetch_done(&ok, 404, 150, NULL);
+    assert(!ok.id);
+    tai_trace_fetch_done(&ok, 200, 1, NULL); /* already ended: nothing */
+    TaiTraceFetch failed = tai_trace_fetch_begin(TAI_FETCH_STYLE, 2, NULL);
+    tai_trace_fetch_done(&failed, -1, 0, "cancelled");
+    tai_trace_close();
+    char *text = read_trace(path);
+    assert(count(text, "\"ph\":\"e\"") == 2);
+    /* Fetch ids keep counting across opens, so match from the args on. */
+    assert(strstr(text, "\"args\":{\"status\":404,\"bytes\":150,\"error\":null}"));
+    assert(strstr(text, "\"args\":{\"status\":0,\"bytes\":0,"
+                        "\"error\":\"cancelled\"}"));
+    free(text);
+    free(path);
+}
+
 enum { STRESS_THREADS = 4, STRESS_PAIRS = 10000 };
 
 static void *stress_worker(void *unused) {
@@ -242,7 +264,9 @@ int main(int argc, char **argv) {
     test_threads_and_generations();
     test_fetches_and_escaping();
     test_args();
-    const char *names[] = {"shape.json", "threads.json", "fetch.json", "args.json"};
+    test_fetch_done();
+    const char *names[] = {"shape.json", "threads.json", "fetch.json", "args.json",
+                           "done.json"};
     for (size_t i = 0; i < sizeof names / sizeof *names; i++) {
         char *path = trace_path(names[i]);
         unlink(path);
