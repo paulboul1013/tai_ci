@@ -14,7 +14,8 @@
 其後的完整管線 E2E 與它找到的 `:visited` 標記已實作並驗收（2026-10-29），`VALIDATING`，見下方第 12、13 項。
 其後的慢速網路與 stale callback 驗證已實作並驗收（2026-10-30），`VALIDATING`，見下方第 14 項。
 其後的常用 DOM API（D14）已實作並驗收（2026-11-01），`VALIDATING`，見下方第 15 項。
-其後的字型 fallback 與中文斷行已實作並驗收（2026-11-02），`VALIDATING`，見下方第 16 項。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+其後的字型 fallback 與中文斷行已實作並驗收（2026-11-02），`VALIDATING`，見下方第 16 項。
+其後的 trace 動作紀錄已實作並驗收（2026-11-02），`VALIDATING`，見下方第 17 項。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 下一個垂直切片
 
@@ -97,6 +98,11 @@
    `tests/font_fallback_oracle_probe.py` 凍結 oracle 不做 fallback、整段中文是一個 word；
    `tests/font_fallback_integration.py` 不寫死字型名稱，以 fontconfig 確認選到的字型真的有該字元。
    證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+17. **Trace 動作紀錄：已實作，`VALIDATING`（2026-11-02）。** 使用者手動操作後，trace 看不出 5 次點擊點到什麼、
+   DuckDuckGo 回了 400。每個視窗處理的 SDL 事件記一個 `input`，它的結果記一個以上的 `action`（chrome 命中、頁面點擊的
+   target／href／result、導覽、捲動、地址列、resize，沒有結果時為 `none`）；文件、資源與 XHR 請求的 `e` 事件帶
+   `status`、`bytes`、`error`；resize 重新 layout 包在 `render` span 內。打字內容不記（D-T12）。
+   `tests/trace_actions_window_integration.py` 在 Xvfb 真實視窗驗證。證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 已知差異與範圍
 
@@ -140,6 +146,7 @@
 | 提交與過期完成（D-T9） | Python 的 `commit` 是 tab `Main thread` 上的 B/E，代表 Browser 接受一個 frame 的 CommitData，每個 animation frame 都發。Native 的 `commit` 也是 B/E，但在 `Browser thread` 上，只在 `tai_tabset_pump` 接受一次載入完成時發，帶 `tab`、`generation`、`url` args。Native 另發 oracle 沒有的 instant `stale_completion_dropped`（`s:"t"`，`Browser thread`）：pump 丟棄完成時發，帶 `tab`、`generation`、`current_generation`（tab 已關閉時為 null）、`url`、`reason`（`superseded`／`tab_gone`／`not_active`）。`tests/trace_oracle_probe.py` 的 native-only 名稱（`NATIVE_ONLY`）只有這個與 `tab_window`（D-T11）。`Task: Tab.load` 與 fetch async slice 另帶 `url` 等 args，名稱不變。`tests/tools/window_session.sh start` 在 `BROWSER_TRACE_FILE` 未設時寫 `$TAI_WS_DIR/trace.json`；這是測試工具的預設，browser 本身的開關（D-T1）不變（使用者 2026-10-30 決定）。 |
 | `about:bookmarks` 建構時間（D-T10） | Python 只把 `about:bookmarks` 當內部頁（`is_internal_page`），在 `Task: Tab.load` 內產生 HTML，並直接呼叫 `_finish_document_load`。Native 在 SDL thread 建立 navigation task 時產生 HTML（loader 不讀書籤集合），這段時間不在任何 span 內，trace 看不到。兩者都只發 `Task: Tab.load` 與 `commit`，沒有 `Network I/O: document`，也沒有 `Task: Tab._finish_document_load`。`about:blank` 在兩者都走 `Network I/O: document` 與 `Task: Tab._finish_document_load`（使用者 2026-10-30 決定）。 |
 | 分頁與視窗的對應（D-T11） | Python 每個 tab 有自己的 `Main thread`，`render` 所在的執行緒就指出 tab；Python 一次只追蹤一個視窗的 raster／present。Native 只有 `Browser thread` 與 `Loader thread`，所以比照 Firefox：頁面事件帶 tab，合成事件帶 window，用一張表連起來。`render` 帶 `tab`（`TaiPageNet.trace_tab`，0 表示省略）；`raster_and_draw` 與 `sdl_present` 帶 `window`（SDL window ID）。Native 另發 oracle 沒有的 instant `tab_window`（`s:"t"`，`Browser thread`，args `tab`、`window`），每個 tab 加入視窗時發一次：視窗的第一個 tab、New Tab、中鍵開新分頁、Ctrl+N 新視窗的 tab。頁面事件只能經由這張表對到視窗。`tests/trace_oracle_probe.py` 的 `NATIVE_ONLY` 只允許 `stale_completion_dropped` 與 `tab_window`（使用者 2026-10-30 決定）。 |
+| 輸入與動作紀錄（D-T12） | Python 不記錄使用者輸入，fetch 結束事件也沒有結果。native 在 `--window` 開啟 trace 時，每個視窗處理的 SDL 事件（點擊、滾輪、按鍵、文字、resize、關閉、焦點；不含滑鼠移動與放開按鍵）在 Browser thread 記一個 `input` instant，接著至少一個 `action` instant；頁面點擊的 `action` 由 `tai_page_activate_viewport` 帶 tab 寫出。使用者 2026-11-02 決定（T1）：打字內容不記，`text` 只記字數，會打出字元的鍵（含數字鍵盤與 AltGr 組合）記成 `char`，只有 Ctrl／左 Alt／GUI 快捷鍵保留鍵名；POST body 不記，只記 method。GET 表單的參數在網址中，和 `Tab.load` 原本的 url 一樣會被記下。fetch 的 `e` 事件帶 `status`（沒有回應時為 0）、`bytes`、`error`（含 `cancelled`、`submit failed`）。resize 的重新 layout 沿用 `render` 名稱（T3），與 Python resize 後的 render 同義。 |
 
 書籤、新視窗與外部網址啟動是不同邊界；書籤、history、新視窗、`mailto:` 外部開啟與中鍵開新分頁已實作。精確幾何與事件路由在 [presentation 契約](docs/reference-presentation.md)，page/session/SDL/loader 所有權在 [native runtime](docs/architecture/native-runtime.md)。
 
@@ -157,7 +164,7 @@
 | Paint / raster | display/raster → `src/render.c` | Cairo, layout | VALIDATING | render differential、display differential（含 li／nav／控制項／button 內容）、PNG/key-region tests | remote/general images、WebP；見 [raster 契約](docs/reference-display-raster.md) |
 | JavaScript / events | JS runtime → `src/js.c` | QuickJS-NG, DOM, network | VALIDATING | 凍結 `runtime.js` 原文嵌入；JS DOM oracle differential／integration、D14 `test_common_dom_api`、bridge 配置故障與 JS heap 掃描（`js_dom_oom`）、cancellation、Xvfb 真實視窗 | `fetch`、capture phase、`nodeType`／`nextSibling`／`document.body` 等仍沒有的 API（D14 已補 `parentNode` 等常用 API）；wrapper 不唯一（見 [綁定升級路線](docs/js-dom-plan.md)）；QuickJS OOM 修補待上游整合 |
 | Scheduling | tasks/clocks → `src/scheduler.c` | threads, network | VALIDATING | priority/FIFO/aging/generation tests；`scheduler`、`raf_window`、`timer_window` 各連跑 20 次通過；過期載入完成以 tab ID＋generation 丟棄：`stale_integration`（CSS／JS 晚到、亂序回應與 oracle 相符）、Xvfb `stale_window_integration`、M1／M2 突變變紅（[2026-10-30 驗收](docs/acceptance/2026-10-30-stale-callback.md)） | frame 迴圈與載入交錯（rAF、重新 style 的時機）未在視窗層驗證；亂序回應與已造訪快照只在 `TaiTabSet` 層驗證 |
-| Profiling / trace | `MeasureTime` → `src/trace.c`（`include/tai/trace.h`） | threads, core | VALIDATING | `trace`、`trace_format`（含多執行緒壓力）、`trace_oracle_probe`、Xvfb `trace_window_integration`（[2026-10-14 驗收](docs/acceptance/2026-10-14-trace.md)）；2026-10-30：`Task: Tab.load` 帶 `url`／`tab`／`generation`、fetch 帶 `url`，pump 接受時發 `commit`、丟棄時發 native-only `stale_completion_dropped`（D-T9），`stale_window_integration` 以 trace 斷言兩者，M1 突變只靠 trace 就變紅；`window_session.sh` 預設寫 `$TAI_WS_DIR/trace.json`；`trace_window_integration` 的 `about_run` 在 Xvfb 驗證 `about:bookmarks` 只有 `Task: Tab.load` 與 `commit`、清單連結會導回原頁、`about:blank` 走 document 路徑（D-T10），只對 `about:bookmarks` 省略 commit 的突變使 B1 變紅；`render` 帶 `tab`、`raster_and_draw`／`sdl_present` 帶 `window`，native-only `tab_window` 連起兩者（D-T11），`multiwindow_run` 在 Xvfb 以兩個視窗驗證 M1–M4，兩個突變都變紅（[2026-10-30 驗收](docs/acceptance/2026-10-30-trace-multiwindow.md)） | `tab_gone`、`not_active` 丟棄原因未測；URL 的非 ASCII 位元組未轉義；fetch 結束事件不分完成或取消 |
+| Profiling / trace | `MeasureTime` → `src/trace.c`（`include/tai/trace.h`） | threads, core | VALIDATING | `trace`、`trace_format`（含多執行緒壓力）、`trace_oracle_probe`、Xvfb `trace_window_integration`（[2026-10-14 驗收](docs/acceptance/2026-10-14-trace.md)）；2026-10-30：`Task: Tab.load` 帶 `url`／`tab`／`generation`、fetch 帶 `url`，pump 接受時發 `commit`、丟棄時發 native-only `stale_completion_dropped`（D-T9），`stale_window_integration` 以 trace 斷言兩者，M1 突變只靠 trace 就變紅；`window_session.sh` 預設寫 `$TAI_WS_DIR/trace.json`；`trace_window_integration` 的 `about_run` 在 Xvfb 驗證 `about:bookmarks` 只有 `Task: Tab.load` 與 `commit`、清單連結會導回原頁、`about:blank` 走 document 路徑（D-T10），只對 `about:bookmarks` 省略 commit 的突變使 B1 變紅；`render` 帶 `tab`、`raster_and_draw`／`sdl_present` 帶 `window`，native-only `tab_window` 連起兩者（D-T11），`multiwindow_run` 在 Xvfb 以兩個視窗驗證 M1–M4，兩個突變都變紅（[2026-10-30 驗收](docs/acceptance/2026-10-30-trace-multiwindow.md)） | `tab_gone`、`not_active` 丟棄原因未測；URL 的非 ASCII 位元組未轉義；同步 XHR span 沒有 status |
 | Browser / window | app/tab/chrome → `src/browser.c`, `src/session.c`, `src/tabset.c`, `src/presentation*.c`, `src/main.c` | page, threads, network, Cairo, SDL3 | VALIDATING | [acceptance](ACCEPTANCE.md)、[tabs oracle](tests/tabs_oracle_probe.py)、[new-window oracle](tests/new_window_oracle_probe.py)、[title oracle](tests/title_oracle_probe.py)、[mailto oracle](tests/mailto_oracle_probe.py)、[middle-click oracle](tests/middle_click_oracle_probe.py)、[overflow-scroll oracle](tests/overflow_scroll_oracle_probe.py)、native tab/window tests | 整體 browser 驗收 |
 
 ## 依工作分支讀取

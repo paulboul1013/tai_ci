@@ -28,6 +28,7 @@ Pixel-perfect 只在字型、版本、backend 與環境固定時使用；優先�
 
 | Slice | Date | State | Summary (proven / main gap) | Detail |
 | --- | --- | --- | --- | --- |
+| Trace 動作紀錄 | 2026-11-02 | VALIDATING | 每個視窗輸入記 `input` 與至少一個 `action`、fetch 結束帶 status／bytes／error、resize 包在 render；不記打字內容；Xvfb 視窗測試、5 個突變變紅、CTest 83/83、trace 相關 ASan 通過；同步 XHR 無 status | [detail](docs/acceptance/2026-11-02-trace-actions.md) |
 | 字型 fallback 與中文斷行 | 2026-11-02 | VALIDATING | 缺字元依 fontconfig 換字型、中日文字間換行與禁則；oracle probe、integration（4 個突變變紅）、Xvfb 視窗與 trace、CTest 82/82、相關 ASan 5/5；chrome／input／abbr 無 fallback、非完整 UAX #14 | [detail](docs/acceptance/2026-11-02-font-fallback.md) |
 | 常用 DOM API（D14） | 2026-11-01 | VALIDATING | `parentNode`、`parentElement`、`tagName`、`textContent`、`className`、`classList`、`getElementById`、`querySelector` 依真實瀏覽器提供（`<html>.parentNode` 是 `document`、`tagName` 大寫、`textContent` 含 script）；`test_common_dom_api` 逐項斷言、三個突變都變紅；Xvfb 點擊後卡片變色與計數更新；CTest 80/80、ASan JS／DOM 10/10／wrapper 不唯一，`nodeType`、`nextSibling` 等仍沒有 | [detail](docs/acceptance/2026-11-01-dom-api.md) |
 | Trace 多視窗（D-T11） | 2026-10-30 | VALIDATING | `render` 帶 `tab`、`raster_and_draw`／`sdl_present` 帶 `window`，native-only `tab_window` 是對應表；`--window --home URL` 設定 New Tab／Ctrl+N 頁；Xvfb 兩個視窗：commit 落在正確視窗的 tab、window 2 關閉後不再繪製、每個 render 都對到視窗、請求不離開 127.0.0.1；兩個突變都變紅；CTest 76/76；ASan 版停止時的結束競態已在 `window_session.sh` 修正，之後連跑 3 次通過，log 沒有 sanitizer 報告；`traced_run` 並行時偶發 `exit=143` 已查明為 `window_session.sh stop` 對正在結束的 browser 送 SIGTERM，已修正（2026-11-01） | [detail](docs/acceptance/2026-10-30-trace-multiwindow.md) |
