@@ -4,9 +4,9 @@
  * and style are built unarmed; then allocation N fails (once, or from N on)
  * while a page that reaches every oracle layout rule is laid out and
  * painted: abbr pieces, nested button contents, h6+p groups, nav#toc
- * caption, sup, li and controls. N counts up until a run injects nothing.
- * The process must not crash, a failed layout must report an error, and
- * under ASan/LSan nothing may leak. */
+ * caption, sup, li, controls, and font fallback pieces with CJK breaks.
+ * N counts up until a run injects nothing. The process must not crash, a
+ * failed layout must report an error, and under ASan/LSan nothing may leak. */
 #include "tai/core.h"
 #include "tai/css.h"
 #include "tai/dom.h"
@@ -55,7 +55,12 @@ static const char PAGE[] =
     "<button><b>Send</b> it <button>in<div>block</div></button></button>"
     "<button></button><button style='display:block'>blk</button></form>"
     "<div>x</div><h6>Head</h6> <p>merged <i>p</i></p><h6>Alone</h6>"
-    "<pre>pre <sup>s</sup></pre>";
+    "<pre>pre <sup>s</sup></pre>"
+    /* Font fallback and CJK breaks: pieces, clusters and a forced wrap. */
+    "<div style='width:40px'>Tai\xe4\xb8\xad\xe6\x96\x87! "
+    "\xe4\xb8\x80\xe4\xba\x8c\xe4\xb8\x89\xef\xbc\x8c\xe5\x9b\x9b"
+    "\xe3\x80\x8c\xe4\xba\x94\xe3\x80\x8d</div>"
+    "<pre>pre \xe4\xb8\xad\xe6\x96\x87</pre>";
 
 static TaiNode *root;
 

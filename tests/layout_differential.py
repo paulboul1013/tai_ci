@@ -9,8 +9,8 @@ CASES += [('', 800), ('<p></p>', 800), ('<p>\u2003Hello\u00a0world</p>', 800), (
 # or stale advance shows up as a width mismatch against the oracle.
 CASES += [('<p>office AV <b>office AV</b> <i>office AV</i> <b><i>office AV</i></b> office AV</p>'
            '<p style="font-size:24px">office <b>office</b></p><p style="font-size:12px">office <i>office</i></p>'
-           '<p style="font-family:sans-serif">office caf\u00e9 na\u00efve \u4e2d\u6587 <b>caf\u00e9</b></p>'
-           '<pre>office caf\u00e9</pre><p>office caf\u00e9 \u4e2d\u6587</p>', 800)]
+           '<p style="font-family:sans-serif">office caf\u00e9 na\u00efve \u03b1\u03b2 <b>caf\u00e9</b></p>'
+           '<pre>office caf\u00e9</pre><p>office caf\u00e9 \u03b1\u03b2</p>', 800)]
 # More than eight keys grow the font list; more than 32 distinct non-ASCII
 # codepoints rehash one font's advance table, and the last words reuse early
 # codepoints after the rehash; U+E000.. are unmapped (.notdef) codepoints.

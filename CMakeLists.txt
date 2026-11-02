@@ -206,6 +206,12 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/layout_differential.py" $<TARGET_FILE:test_layout>)
   add_test(NAME layout_rule_coverage COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/layout_rule_coverage.py")
+  add_test(NAME font_fallback_oracle_probe COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/font_fallback_oracle_probe.py" --check)
+  add_test(NAME font_fallback_integration COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/font_fallback_integration.py"
+    $<TARGET_FILE:tai-browser>)
+  set_tests_properties(font_fallback_integration PROPERTIES SKIP_RETURN_CODE 77)
   add_test(NAME resize_layout_differential COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/resize_layout_differential.py" $<TARGET_FILE:test_layout>)
   add_executable(test_network tests/test_network.c)

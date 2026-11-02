@@ -1,0 +1,49 @@
+{
+ "missing_glyph": {
+  "Times": {
+   "中文": [
+    true,
+    true
+   ],
+   "Tai中文!": [
+    false,
+    false,
+    false,
+    true,
+    true,
+    false
+   ],
+   "שלום": [
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "sans-serif": {
+   "中文": [
+    true,
+    true
+   ],
+   "Tai中文!": [
+    false,
+    false,
+    false,
+    true,
+    true,
+    false
+   ],
+   "שלום": [
+    false,
+    false,
+    false,
+    false
+   ]
+  }
+ },
+ "wrap_lines": [
+  [
+   "瀏覽器會把文字排成一行一行，遇到視窗邊緣就換行。"
+  ]
+ ]
+}

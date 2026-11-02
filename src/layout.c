@@ -41,11 +41,13 @@ struct Box {
  * once per key instead of once per word. Advances are memoized per codepoint
  * with the same FT_Load_Char(FT_LOAD_DEFAULT) result the uncached path used;
  * a failed load is not memoized, so it is retried like before. */
+typedef struct Font Font;
 typedef struct {
   utf8proc_int32_t codepoint; /* -1 marks an empty slot */
   double advance;
+  Font *owner; /* the font that draws codepoint (D-F1); NULL until asked */
 } Advance;
-typedef struct {
+struct Font {
   char *family;
   bool bold, italic;
   double size;
@@ -54,7 +56,11 @@ typedef struct {
   double ascii_advance[128];
   Advance *table; /* open addressing, capacity is a power of two */
   size_t table_count, table_capacity;
-} Font;
+  /* FcFontSort for this font's pattern, built on the first missing glyph;
+   * candidates_tried stops a failed sort from repeating. */
+  FcFontSet *candidates;
+  bool candidates_tried;
+};
 struct TaiLayout {
   Box *root;
   FT_Library ft;
@@ -152,9 +158,25 @@ static void font_destroy(Font *font) {
     return;
   if (font->face)
     FT_Done_Face(font->face);
+  if (font->candidates)
+    FcFontSetDestroy(font->candidates);
   free(font->table);
   free(font->family);
   free(font);
+}
+/* The substituted fontconfig pattern for font's family, weight and slant. */
+static FcPattern *font_pattern(TaiLayout *l, const Font *font) {
+  FcPattern *p = FcPatternCreate();
+  if (!p)
+    return NULL;
+  FcPatternAddString(p, FC_FAMILY, (const FcChar8 *)font->family);
+  FcPatternAddInteger(p, FC_WEIGHT,
+                      font->bold ? FC_WEIGHT_BOLD : FC_WEIGHT_REGULAR);
+  FcPatternAddInteger(p, FC_SLANT,
+                      font->italic ? FC_SLANT_ITALIC : FC_SLANT_ROMAN);
+  FcConfigSubstitute(l->fc, p, FcMatchPattern);
+  FcDefaultSubstitute(p);
+  return p;
 }
 /* Opens one sized face for a resolved key; NULL means the uncached path
  * would also have failed, so the caller marks the layout failed. */
@@ -167,16 +189,11 @@ static Font *font_open(TaiLayout *l, const char *family, bool bold,
   font->bold = bold;
   font->italic = italic;
   font->size = size;
-  FcPattern *p = font->family ? FcPatternCreate() : NULL;
+  FcPattern *p = font->family ? font_pattern(l, font) : NULL;
   if (!p) {
     font_destroy(font);
     return NULL;
   }
-  FcPatternAddString(p, FC_FAMILY, (const FcChar8 *)family);
-  FcPatternAddInteger(p, FC_WEIGHT, bold ? FC_WEIGHT_BOLD : FC_WEIGHT_REGULAR);
-  FcPatternAddInteger(p, FC_SLANT, italic ? FC_SLANT_ITALIC : FC_SLANT_ROMAN);
-  FcConfigSubstitute(l->fc, p, FcMatchPattern);
-  FcDefaultSubstitute(p);
   FcResult result;
   FcPattern *m = FcFontMatch(l->fc, p, &result);
   FcPatternDestroy(p);
@@ -196,9 +213,11 @@ static Font *font_open(TaiLayout *l, const char *family, bool bold,
   }
   return font;
 }
-/* Returns a font borrowed from l, valid until tai_layout_destroy. */
-static Font *font_get(TaiLayout *l, const char *family, bool bold, bool italic,
-                      double size) {
+/* Returns a font borrowed from l, valid until tai_layout_destroy. A required
+ * font that cannot open fails the layout; a fallback candidate that cannot
+ * open only returns NULL. Running out of memory fails the layout either way. */
+static Font *font_find(TaiLayout *l, const char *family, bool bold,
+                       bool italic, double size, bool required) {
   Font *font = NULL;
   for (size_t i = 0; i < l->font_count && !font; i++) {
     Font *candidate = l->fonts[i];
@@ -223,9 +242,13 @@ static Font *font_get(TaiLayout *l, const char *family, bool bold, bool italic,
     if (font)
       l->fonts[l->font_count++] = font;
   }
-  if (!font)
+  if (!font && required)
     l->failed = true;
   return font;
+}
+static Font *font_get(TaiLayout *l, const char *family, bool bold, bool italic,
+                      double size) {
+  return font_find(l, family, bold, italic, size, true);
 }
 static bool text_bold(TaiNode *node) {
   const char *weight = property(node, "font-weight", "normal");
@@ -334,11 +357,65 @@ static bool advance(Font *font, utf8proc_int32_t c, double *out) {
     font->ascii_known[c] = true;
   } else if (c >= 128 && advance_reserve(font)) {
     slot = advance_slot(font->table, font->table_capacity, c);
-    *slot = (Advance){.codepoint = c, .advance = value};
+    *slot = (Advance){.codepoint = c, .advance = value, .owner = NULL};
     font->table_count++;
   }
   *out = value;
   return true;
+}
+/* The first candidate in FcFontSort order for font's pattern whose face has
+ * c, or NULL. Sorting once per font keeps CSS family, weight and slant as
+ * the ranking, so the closest font that has c wins. */
+static Font *fallback_font(TaiLayout *l, Font *font, utf8proc_int32_t c) {
+  if (!font->candidates_tried) {
+    font->candidates_tried = true;
+    FcPattern *p = font_pattern(l, font);
+    FcResult result;
+    font->candidates = p ? FcFontSort(l->fc, p, FcTrue, NULL, &result) : NULL;
+    if (p)
+      FcPatternDestroy(p);
+  }
+  FcFontSet *set = font->candidates;
+  for (int i = 0; set && i < set->nfont; i++) {
+    FcCharSet *chars;
+    FcChar8 *family;
+    if (FcPatternGetCharSet(set->fonts[i], FC_CHARSET, 0, &chars) !=
+            FcResultMatch ||
+        !FcCharSetHasChar(chars, (FcChar32)c) ||
+        FcPatternGetString(set->fonts[i], FC_FAMILY, 0, &family) !=
+            FcResultMatch)
+      continue;
+    /* The family name must reopen a face with c: render.c draws by name. */
+    Font *found = font_find(l, (const char *)family, font->bold, font->italic,
+                            font->size, false);
+    if (found && found != font &&
+        FT_Get_Char_Index(found->face, (FT_ULong)c))
+      return found;
+  }
+  return NULL;
+}
+/* D-F1: the font that draws c. ASCII and codepoints font has stay with it;
+ * Python draws every glyph with one typeface, .notdef included, and so does
+ * font when no installed font has c. */
+static Font *glyph_font(TaiLayout *l, Font *font, utf8proc_int32_t c) {
+  if (c >= 0 && c < 128)
+    return font;
+  double ignored;
+  Advance *slot = advance(font, c, &ignored) && font->table_capacity
+                      ? advance_slot(font->table, font->table_capacity, c)
+                      : NULL;
+  if (slot && slot->codepoint == c && slot->owner)
+    return slot->owner;
+  Font *owner = font;
+  if (!FT_Get_Char_Index(font->face, (FT_ULong)c)) {
+    Font *found = fallback_font(l, font, c);
+    if (found)
+      owner = found;
+  }
+  /* fallback_font may open fonts but never touches font's table. */
+  if (slot && slot->codepoint == c)
+    slot->owner = owner;
+  return owner;
 }
 static double measure_n(Font *font, const char *text, size_t length) {
   double w = 0;
@@ -667,6 +744,135 @@ static void abbr_word(Inline *in, TaiNode *node, const char *s, size_t n) {
   free(pieces);
   in->cursor += total + space;
 }
+/* CJK ideographs, kana, bopomofo, CJK punctuation and fullwidth forms. */
+static bool cjk(utf8proc_int32_t c) {
+  return (c >= 0x2e80 && c <= 0x2fdf) || (c >= 0x3001 && c <= 0x312f) ||
+         (c >= 0x3190 && c <= 0x31ff) || (c >= 0x3400 && c <= 0x4dbf) ||
+         (c >= 0x4e00 && c <= 0x9fff) || (c >= 0xf900 && c <= 0xfaff) ||
+         (c >= 0xfe30 && c <= 0xfe4f) || (c >= 0xff00 && c <= 0xffef) ||
+         (c >= 0x20000 && c <= 0x3ffff);
+}
+/* Marks, ZWJ and variation selectors belong to the character before them:
+ * they never start a piece or a line. */
+static bool joins(utf8proc_int32_t c) {
+  utf8proc_category_t t = utf8proc_category(c);
+  return t == UTF8PROC_CATEGORY_MN || t == UTF8PROC_CATEGORY_ME ||
+         c == 0x200d || (c >= 0xfe00 && c <= 0xfe0f) ||
+         (c >= 0xe0100 && c <= 0xe01ef);
+}
+static bool listed(const char *set, utf8proc_int32_t c) {
+  const unsigned char *p = (const unsigned char *)set;
+  while (*p) {
+    utf8proc_int32_t member;
+    p += utf8proc_iterate(p, -1, &member);
+    if (member == c)
+      return true;
+  }
+  return false;
+}
+/* D-F2: a line may break before or after a CJK character, except before
+ * closing punctuation and after opening punctuation (kinsoku). Python splits
+ * only at whitespace, so its CJK runs never wrap. */
+static bool cjk_break(utf8proc_int32_t before, utf8proc_int32_t after) {
+  return (cjk(before) || cjk(after)) && !joins(after) && before != 0x200d &&
+         !listed("，。、！？）」』：；〉》】〕｝．・ー…”’!),.:;?]}", after) &&
+         !listed("「『（〈《【〔｛“‘([{", before);
+}
+typedef struct {
+  size_t start, length;
+  Font *font;
+  bool cluster; /* a line may break before this piece */
+} Piece;
+/* Splits s where its drawing font changes and, outside pre, at CJK breaks.
+ * Each piece becomes a TextLayout box; a cluster of pieces wraps as a whole
+ * (like abbr_word) and only the last piece carries the space. Returns false,
+ * having done nothing, when s is one piece in font. */
+static bool piece_word(Inline *in, TaiNode *node, Font *font, const char *s) {
+  TaiLayout *l = in->owner;
+  const unsigned char *u = (const unsigned char *)s;
+  size_t n = strlen(s);
+  bool split = false;
+  for (size_t i = 0; i < n && !split;) {
+    utf8proc_int32_t c;
+    utf8proc_ssize_t used = utf8proc_iterate(u + i, (utf8proc_ssize_t)(n - i), &c);
+    if (used < 1) {
+      used = 1;
+      c = 0xfffd;
+    }
+    split = (!in->pre && cjk(c)) || glyph_font(l, font, c) != font;
+    i += (size_t)used;
+  }
+  if (!split || l->failed)
+    return false;
+  Piece *pieces = NULL;
+  size_t count = 0;
+  utf8proc_int32_t previous = -1;
+  for (size_t i = 0; i < n;) {
+    utf8proc_int32_t c;
+    utf8proc_ssize_t used = utf8proc_iterate(u + i, (utf8proc_ssize_t)(n - i), &c);
+    if (used < 1) {
+      used = 1;
+      c = 0xfffd;
+    }
+    Font *owner = count && joins(c) ? pieces[count - 1].font
+                                    : glyph_font(l, font, c);
+    bool cluster = !in->pre && previous >= 0 && cjk_break(previous, c);
+    if (!count || cluster || owner != pieces[count - 1].font) {
+      Piece *grown = realloc(pieces, (count + 1) * sizeof(*grown));
+      if (!grown) {
+        free(pieces);
+        l->failed = true;
+        return true;
+      }
+      pieces = grown;
+      pieces[count++] = (Piece){i, 0, owner, cluster};
+    }
+    pieces[count - 1].length += (size_t)used;
+    previous = c;
+    i += (size_t)used;
+  }
+  Box **boxes = calloc(count, sizeof(*boxes));
+  for (size_t i = 0; boxes && i < count; i++) {
+    char *text = tai_strndup(s + pieces[i].start, pieces[i].length);
+    boxes[i] = text ? text_box(l, node, text, pieces[i].font, text_bold(node),
+                               in->sup)
+                    : NULL;
+    if (!boxes[i]) {
+      release_all(boxes, i);
+      boxes = NULL;
+    }
+  }
+  if (!boxes) {
+    free(pieces);
+    l->failed = true;
+    return true;
+  }
+  double space = in->pre ? 0 : measure(font, " ");
+  boxes[count - 1]->space = space;
+  /* placed counts boxes the lines own; the rest are released on failure. */
+  size_t placed = 0;
+  while (placed < count) {
+    size_t end = placed + 1;
+    double width = boxes[placed]->width;
+    for (; end < count && !pieces[end].cluster; end++)
+      width += boxes[end]->width;
+    if (!in->pre && in->cursor + width > in->block->width && in->line->count &&
+        !newline(in))
+      break;
+    while (placed < end && append(l, in->line, boxes[placed]))
+      placed++;
+    if (placed < end)
+      break;
+    in->cursor += width;
+  }
+  for (size_t i = placed; i < count; i++)
+    release(boxes[i]);
+  if (placed == count)
+    in->cursor += space;
+  free(boxes);
+  free(pieces);
+  return true;
+}
 static void word(Inline *in, TaiNode *node, const char *s, size_t n) {
   TaiLayout *l = in->owner;
   if (in->abbr && !in->pre) {
@@ -696,7 +902,7 @@ static void word(Inline *in, TaiNode *node, const char *s, size_t n) {
   }
   double size;
   Font *f = face(l, node, in->pre, in->sup, false, &size);
-  if (!f) {
+  if (!f || (!image && piece_word(in, node, f, b->word))) {
     release(b);
     return;
   }
