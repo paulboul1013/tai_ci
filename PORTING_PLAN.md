@@ -13,7 +13,8 @@
 其後的 layout／paint oracle 規則補齊已實作並驗收（2026-10-28），`VALIDATING`，見下方第 11 項。
 其後的完整管線 E2E 與它找到的 `:visited` 標記已實作並驗收（2026-10-29），`VALIDATING`，見下方第 12、13 項。
 其後的慢速網路與 stale callback 驗證已實作並驗收（2026-10-30），`VALIDATING`，見下方第 14 項。
-其後的常用 DOM API（D14）已實作並驗收（2026-11-01），`VALIDATING`，見下方第 15 項。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+其後的常用 DOM API（D14）已實作並驗收（2026-11-01），`VALIDATING`，見下方第 15 項。
+其後的字型 fallback 與中文斷行已實作並驗收（2026-11-02），`VALIDATING`，見下方第 16 項。** `--window` 已有 tabs、地址列、Back/Forward、每個 tab 的 URL history、fragment、表單導覽與非同步載入。下一個切片補齊 Python 可見的 chrome 狀態，並檢查 history 在切換 tab、分支導覽與載入期間的行為。以 [`tests/reference/browser.py`](tests/reference/browser.py) 的 `Chrome`、`Tab`、`BrowserWindow` 為 oracle；已驗證的結果見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 下一個垂直切片
 
@@ -90,6 +91,12 @@
    operation（`js.c`）與 `tai_node_set_text_content`／`tai_node_text_content`（`dom.c`）。`test_common_dom_api`
    逐項斷言，一次性突變（`<html>.parentNode` 改回 null）讓它變紅；Xvfb 真實視窗點擊後卡片變色、計數更新。
    刻意差異見下表「常用 DOM API（D14）」列。證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
+16. **字型 fallback 與中文斷行：已實作，`VALIDATING`（2026-11-02）。** 依 [計畫](docs/font-fallback-plan.md)：
+   主字型沒有某個字元時，`layout.c` 依 `FcFontSort` 順序找第一個有該字元的字型（D-F1）；中日文字前後
+   可以換行，並套用禁則標點（D-F2）。一個 word 依字型與換行點切成多個 TextLayout box，`render.c` 不改。
+   `tests/font_fallback_oracle_probe.py` 凍結 oracle 不做 fallback、整段中文是一個 word；
+   `tests/font_fallback_integration.py` 不寫死字型名稱，以 fontconfig 確認選到的字型真的有該字元。
+   證據見 [ACCEPTANCE.md](ACCEPTANCE.md)。
 
 ### 已知差異與範圍
 
@@ -123,6 +130,8 @@
 | DOM 深度上限（D13） | Python 以遞迴走訪 DOM，約 1000 層巢狀就 `RecursionError`；native 的 style／layout／paint 也遞迴，修正前純 HTML 50,000 層即堆疊溢位 segfault（任何網頁都能觸發）。使用者 2026-10-04 決定比照 Blink：任何節點最多 512 層祖先（`TAI_DOM_MAX_DEPTH`）。Parser 遇到第 512 層以下要開的元素時，先關閉最深的開啟元素，讓新元素成為它之後的兄弟（文字仍可放在第 512 層），多出的結束標籤只抵銷這些元素（被提前關閉的 `<b>`／`<i>` 等格式元素，其結束標籤只把它從格式清單移除，不再彈出上限以內的元素）；被提前關閉的 `<p>`／`<li>` 不再觸發 Python 的隱含關閉，所以上限以下的巢狀與 Python 不同；`appendChild`／`insertBefore` 會使深度超過上限（含移動的子樹高度、脫離文件的樹）時丟 `Error('Document depth limit reached')` 且樹不變；`innerHTML` 依目標元素的深度同樣攤平，元素已在上限而片段有子節點時丟同一錯誤。影響：512–約 1000 層的頁面兩者的樹不同（Python 保留巢狀），更深的頁面 Python 崩潰。證據：`tests/test_dom.c`（`depth_limit`：600 層 `<div>`／`<b>`／`<div><i>`、innerHTML、搬移子樹、脫離文件的樹）、`tests/test_js.c`（`test_depth_limit`）、ASan headless 600／50,000 層與腳本建樹、Xvfb 真實視窗 50,000 層頁面。 |
 | `innerHTML` 字串含 U+0000 | Python 把 NUL 當一般字元留在文字節點（`'a\u0000b<i>c</i>'` 解析成文字 `a\x00b` 與 `<i>`）；native HTML parser 以 NUL 結尾的 C 字串為輸入，`innerHTML` 設定值在第一個 NUL 處截斷（同例只剩文字 `a`）。影響：只有腳本刻意放入 NUL 的頁面可觀察；要消除須讓 parser 與 `TaiNode` 文字改為帶長度的字串。以臨時 oracle probe 實跑確認（切片 3 紀錄），未列入固定情境。 |
 | 缺字型的替代字型 | 頁面指定系統沒有安裝的字型（例如 Georgia）時，native 以 fontconfig 選相近字型（Georgia→DejaVu Serif），Python 的 Skia 改用自己的預設字型（DejaVu Sans），所以字寬不同（`Georgia` 65 對 63）。使用者 2026-10-28 決定保留 native 行為：替代字型較接近原意。`tests/layout_differential.py` 的 `FALLBACK_CASES` 把 oracle 的字型換成 `fc-match` 的結果再比對，行為改變時測試失敗。已安裝的字型兩邊相同。 |
+| 缺字元的 fallback（D-F1） | Python 每個字型 key 只用一個 Skia typeface，`drawString` 不做 fallback，字型沒有的字元畫 glyph 0（`tests/font_fallback_oracle_probe.py`）。native 在主字型沒有某個字元（非 ASCII）時，依 `FcFontSort`（同 family、粗細、斜體）順序選第一個有該字元的字型，該段以實際字型名稱畫出；行高取各段字型的 ascent／descent。都沒有時仍用主字型畫 notdef。使用者 2026-11-02 決定以系統字型為準，不附字型檔；這台機器的中文來自 Droid Sans Fallback。ASCII 字元一律用主字型，與 oracle 相同。 |
+| 中文斷行（D-F2） | Python 以 `str.split()` 切 word，整段中文是一個 word，不換行、超出視窗。native 在中日文字（漢字、假名、注音、全形標點）前後可以換行，`，。、！？）」』：；` 等不放行首、`「『（` 等不放行尾；同一 word 內的段之間沒有空白。只影響含中日文字的文字；`pre` 內不換行；`abbr` 與 input 值不在此範圍。不是完整的 UAX #14。 |
 | 已造訪連結（`:visited`） | Python 在 `Tab.load` 開始時就把請求 URL 加入 app 共用的集合，載入失敗也算。Native 在頁面**提交**時才記錄它的請求 URL（含 fragment、redirect 之前；Back/Forward 也算），顯示網路或憑證錯誤頁的載入不記錄，比照真實瀏覽器（使用者 2026-10-29 決定）。跳到 fragment 時兩者都記錄新 URL 並重新 style 該頁。集合由所有 tab 與視窗共用、只在記憶體、無上限，同 Python；其他 tab 在下次重新 style 時才更新，同 Python。影響：頁面第一次顯示時，指向它自己 URL 的連結在 Python 已是 visited，native 要等該頁下一次重新 style。證據：`tests/test_visited.c`、`tests/test_visited_window.c`、`tests/e2e_integration.py`。 |
 | 窄寬地址欄 | Tabbed Chrome 把地址欄寬度夾限為不超過視窗寬度，<100px 時仍看得到收藏星；Python 與單頁 Chrome 固定最小 100px，右端會超出視窗。安全頁面欄位右移 30px 後同樣夾限：Python 在 232–261px 與 <130px 時右端超出視窗，native 不超出。 |
 | 追蹤開關（D-T1） | Python 視窗模式一律寫 `BROWSER_TRACE_FILE`（預設 `./browser.trace`）；native 只在 `--window` 且 `BROWSER_TRACE_FILE` 非空時寫，未設或空字串不建立檔案，每個掛點只多一次原子讀取（使用者 2026-10-14 決定）。headless 不追蹤，與 Python 同。檔案無法建立時兩者都中止：native 印 `trace failed: …` 並 exit 1。 |
@@ -144,7 +153,7 @@
 | DOM / HTML | parser/nodes → `src/dom.c` | core, Unicode | VALIDATING | parser/mutation、DOM differential、JS DOM differential／integration、配置故障掃描（`js_dom_oom`） | detached 節點到文件銷毀才回收（D2）；深度上限 512（D13）；`innerHTML` 遇 U+0000 截斷 |
 | CSS / style | cascade → `src/css.c` | DOM, core | VALIDATING | parser/cascade 與 CSS differential | [compatibility semantics](docs/architecture/compatibility-semantics.md) 中的未支援規則 |
 | URL / HTTP | URL/cookie/referrer → `src/url.c`, `src/network.c` | core, libcurl multi | VALIDATING | URL differential、local HTTP integration、同步／非同步 XHR 的 CSP／CORS／Origin／cookie／referrer 整頁 oracle 比對（`tests/js_dom_integration.py`） | fetch、TLS/error limits、導覽與 subresource 未帶 Referrer-Policy（只有 XHR 帶） |
-| Fonts / layout | block/line/text → `src/layout.c` | DOM, CSS, fonts, utf8proc | VALIDATING | layout differential（含每條 oracle 規則，由 `layout_rule_coverage` 把關）、overflow tests、每個 layout 的字型／字寬快取（[2026-10-04 驗收](docs/acceptance/2026-10-04-layout-font-cache.md)、[2026-10-28 驗收](docs/acceptance/2026-10-28-layout-oracle-rules.md)） | HarfBuzz/FriBidi、完整 shaping/BiDi；字型快取尚未跨 layout 共用。2026-10-04 記錄的 4 個差異已在 2026-10-28 處理：`sup` 與 button 已修正（input／textarea 沒有問題，是同一行的 button 造成），缺字型為刻意差異（見上表「缺字型的替代字型」） |
+| Fonts / layout | block/line/text → `src/layout.c` | DOM, CSS, fonts, utf8proc | VALIDATING | layout differential（含每條 oracle 規則，由 `layout_rule_coverage` 把關）、overflow tests、每個 layout 的字型／字寬快取（[2026-10-04 驗收](docs/acceptance/2026-10-04-layout-font-cache.md)、[2026-10-28 驗收](docs/acceptance/2026-10-28-layout-oracle-rules.md)） | HarfBuzz/FriBidi、完整 shaping/BiDi；chrome 文字、input 值與 `abbr` 沒有字型 fallback；字型快取尚未跨 layout 共用。2026-10-04 記錄的 4 個差異已在 2026-10-28 處理：`sup` 與 button 已修正（input／textarea 沒有問題，是同一行的 button 造成），缺字型為刻意差異（見上表「缺字型的替代字型」） |
 | Paint / raster | display/raster → `src/render.c` | Cairo, layout | VALIDATING | render differential、display differential（含 li／nav／控制項／button 內容）、PNG/key-region tests | remote/general images、WebP；見 [raster 契約](docs/reference-display-raster.md) |
 | JavaScript / events | JS runtime → `src/js.c` | QuickJS-NG, DOM, network | VALIDATING | 凍結 `runtime.js` 原文嵌入；JS DOM oracle differential／integration、D14 `test_common_dom_api`、bridge 配置故障與 JS heap 掃描（`js_dom_oom`）、cancellation、Xvfb 真實視窗 | `fetch`、capture phase、`nodeType`／`nextSibling`／`document.body` 等仍沒有的 API（D14 已補 `parentNode` 等常用 API）；wrapper 不唯一（見 [綁定升級路線](docs/js-dom-plan.md)）；QuickJS OOM 修補待上游整合 |
 | Scheduling | tasks/clocks → `src/scheduler.c` | threads, network | VALIDATING | priority/FIFO/aging/generation tests；`scheduler`、`raf_window`、`timer_window` 各連跑 20 次通過；過期載入完成以 tab ID＋generation 丟棄：`stale_integration`（CSS／JS 晚到、亂序回應與 oracle 相符）、Xvfb `stale_window_integration`、M1／M2 突變變紅（[2026-10-30 驗收](docs/acceptance/2026-10-30-stale-callback.md)） | frame 迴圈與載入交錯（rAF、重新 style 的時機）未在視窗層驗證；亂序回應與已造訪快照只在 `TaiTabSet` 層驗證 |
